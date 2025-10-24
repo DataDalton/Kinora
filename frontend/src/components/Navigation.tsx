@@ -1,0 +1,239 @@
+'use client';
+
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { Moon, Sun, LogOut, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { api } from '@/lib/api';
+import { useTheme } from '@/contexts/ThemeContext';
+import { useSidebar } from '@/contexts/SidebarContext';
+
+export default function Navigation() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { theme, toggleTheme } = useTheme();
+  const { collapsed, toggleCollapsed } = useSidebar();
+  const [user, setUser] = useState<any>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+
+    const fetchUser = async () => {
+      try {
+        const response = await api.get('/auth/me');
+        setUser(response.data);
+      } catch (error) {
+        console.error('Failed to fetch user:', error);
+      }
+    };
+
+    const token = document.cookie.split('; ').find(row => row.startsWith('access_token='));
+    if (token) {
+      fetchUser();
+    }
+  }, []);
+
+  const handleLogout = () => {
+    document.cookie = 'access_token=; path=/; max-age=0';
+    document.cookie = 'refresh_token=; path=/; max-age=0';
+    router.push('/login');
+  };
+
+  const isActive = (path: string) => pathname === path;
+
+  const navLinks = [
+    { href: '/', label: 'Dashboard', icon: '📊' },
+    { href: '/movies', label: 'Movies', icon: '🎬' },
+    { href: '/shows', label: 'TV Shows', icon: '📺' },
+    { href: '/anime', label: 'Anime', icon: '🎌' },
+    { href: '/discover', label: 'Discover', icon: '🔍' },
+    { href: '/search', label: 'Search', icon: '➕' },
+    { href: '/activity', label: 'Activity', icon: '📥' },
+    { href: '/media-profiles', label: 'Profiles', icon: '📝' },
+    { href: '/settings', label: 'Settings', icon: '🔧' },
+  ];
+
+  if (!mounted) return null;
+
+  const token = document.cookie.split('; ').find(row => row.startsWith('access_token='));
+  const isAuthPage = pathname === '/login' || pathname === '/register';
+
+  if (!token || isAuthPage) return null;
+
+  return (
+    <>
+      {/* Desktop Sidebar */}
+      <aside className={`hidden md:flex flex-col fixed left-0 top-0 h-screen bg-background border-r-2 border-border transition-all duration-300 ${collapsed ? 'w-20' : 'w-64'}`}>
+        {/* Logo and Collapse Button */}
+        <div className="flex items-center justify-between p-4 border-b-2 border-border">
+          {!collapsed && (
+            <Link href="/" className="text-2xl font-bold logo-gradient">
+              Nexarr
+            </Link>
+          )}
+          <button
+            onClick={toggleCollapsed}
+            className="p-2 rounded-lg hover:bg-accent transition ml-auto"
+            aria-label="Toggle sidebar"
+          >
+            {collapsed ? (
+              <ChevronRight className="w-5 h-5" />
+            ) : (
+              <ChevronLeft className="w-5 h-5" />
+            )}
+          </button>
+        </div>
+
+        {/* Global Search */}
+        {!collapsed && (
+          <div className="px-3 py-2">
+            <Link
+              href="/search"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg bg-accent/50 border border-border hover:bg-accent hover:border-primary/30 transition-all group"
+            >
+              <Search className="w-5 h-5 text-muted-foreground group-hover:text-foreground" />
+              <span className="text-sm text-muted-foreground group-hover:text-foreground">Quick Search...</span>
+            </Link>
+          </div>
+        )}
+
+        {/* Navigation Links */}
+        <nav className="flex-1 overflow-y-auto py-4">
+          <div className="space-y-2 px-3">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                  isActive(link.href)
+                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/50'
+                    : 'text-foreground/70 hover:text-foreground hover:bg-accent/70'
+                }`}
+                title={collapsed ? link.label : undefined}
+              >
+                <span className="text-xl">{link.icon}</span>
+                {!collapsed && <span className="font-medium">{link.label}</span>}
+              </Link>
+            ))}
+          </div>
+        </nav>
+
+        {/* Bottom Section - User and Theme */}
+        <div className="border-t-2 border-border p-3 space-y-2">
+          <button
+            onClick={toggleTheme}
+            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition w-full"
+            aria-label="Toggle theme"
+            title={collapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
+          >
+            {theme === 'dark' ? (
+              <Sun className="w-5 h-5 text-yellow-400" />
+            ) : (
+              <Moon className="w-5 h-5 text-muted-foreground" />
+            )}
+            {!collapsed && (
+              <span className="text-sm font-medium">
+                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+              </span>
+            )}
+          </button>
+
+          {user && !collapsed && (
+            <div className="px-3 py-2 text-sm text-muted-foreground">
+              {user.username}
+            </div>
+          )}
+
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-destructive/10 text-destructive transition w-full"
+            title={collapsed ? 'Logout' : undefined}
+          >
+            <LogOut className="w-5 h-5" />
+            {!collapsed && <span className="text-sm font-medium">Logout</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile Top Nav */}
+      <nav className="md:hidden bg-background text-card-foreground shadow-lg border-b-2 border-border fixed top-0 left-0 right-0 z-50">
+        <div className="flex justify-between items-center h-16 px-4">
+          <Link href="/" className="text-xl font-bold logo-gradient">
+            Nexarr
+          </Link>
+
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-2 rounded-md hover:bg-accent"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {mobileMenuOpen ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              )}
+            </svg>
+          </button>
+        </div>
+
+        {/* Mobile Menu */}
+        {mobileMenuOpen && (
+          <div className="border-t-2 border-border bg-background">
+            <div className="px-2 pt-2 pb-3 space-y-1 max-h-[calc(100vh-4rem)] overflow-y-auto">
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center gap-3 px-3 py-3 rounded-lg transition ${
+                    isActive(link.href)
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                >
+                  <span className="text-xl">{link.icon}</span>
+                  <span className="font-medium">{link.label}</span>
+                </Link>
+              ))}
+              <div className="pt-4 border-t-2 border-border space-y-1">
+                {user && (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                    {user.username}
+                  </div>
+                )}
+                <button
+                  onClick={toggleTheme}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition"
+                >
+                  {theme === 'dark' ? (
+                    <>
+                      <Sun className="w-5 h-5 text-yellow-400" />
+                      <span className="font-medium">Light Mode</span>
+                    </>
+                  ) : (
+                    <>
+                      <Moon className="w-5 h-5" />
+                      <span className="font-medium">Dark Mode</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    handleLogout();
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-destructive/10 text-destructive"
+                >
+                  <LogOut className="w-5 h-5" />
+                  <span className="font-medium">Logout</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </nav>
+    </>
+  );
+}

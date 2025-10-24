@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #1c1f2e;
+  --color-foreground: #f5f5f5;
+  --color-card: #282d3e;
+  --color-card-foreground: #f5f5f5;
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #2d3142;
+  --color-secondary-foreground: #f5f5f5;
+  --color-muted: #2d3142;
+  --color-muted-foreground: #9ca3af;
+  --color-accent: #323849;
+  --color-accent-foreground: #f5f5f5;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #3a3f54;
+  --color-input: #2d3142;
+  --color-ring: #3b82f6;
+  --color-warning: #eab308;
+  --color-warning-foreground: #000000;
+  --color-purple-500: #a855f7;
+  --color-pink-500: #ec4899;
+  --color-yellow-500: #eab308;
+  --color-yellow-600: #ca8a04;
+  --color-red-500: #ef4444;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* Dark theme scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3f54 #1c1f2e;
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #1c1f2e;
+  border-radius: 6px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #3a3f54;
+  border-radius: 6px;
+  border: 2px solid #1c1f2e;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #4a5066;
+}
+
+*::-webkit-scrollbar-corner {
+  background: #1c1f2e;
+}
+
+/* Custom gradient for Nexarr logo with srgb color space */
+.logo-gradient {
+  background: linear-gradient(to right in srgb, #3b82f6, #a855f7, #ec4899);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Animations */
+@keyframes blob {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+}
+
+.animate-blob {
+  animation: blob 7s infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-4px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+

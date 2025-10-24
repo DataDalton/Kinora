@@ -1,0 +1,60 @@
+# Web Framework
+fastapi==0.119.1
+granian[reload]==2.5.5
+
+# Database (raw AsyncPG for maximum performance)
+asyncpg==0.30.0
+
+# Redis & Caching
+redis==6.4.0
+hiredis==3.3.0
+
+# Celery
+celery==5.5.3
+flower==2.0.1
+
+# Authentication & Security
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.20
+bcrypt==5.0.0
+
+# Validation
+pydantic==2.12.3
+pydantic-settings==2.11.0
+email-validator==2.3.0
+
+# HTTP Client
+httpx==0.28.1
+aiohttp==3.13.1
+
+# HTML Parsing
+beautifulsoup4==4.14.2
+lxml==6.0.2
+
+# Subtitles
+subliminal==2.4.0
+babelfish==0.6.1
+
+# Language Codes
+python-iso639==2025.2.18
+
+# Torrent Client
+qbittorrent-api==2025.7.0
+
+# External APIs
+tmdbv3api==1.9.0
+
+# Utilities
+python-dotenv==1.1.1
+python-dateutil==2.9.0.post0
+pytz==2025.2
+
+# Development
+pytest==8.4.2
+pytest-asyncio==1.2.0
+pytest-cov==7.0.0
+black==25.9.0
+isort==7.0.0
+flake8==7.3.0
+mypy==1.18.2
