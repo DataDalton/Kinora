@@ -218,6 +218,7 @@ async def init_db():
                 hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[],
                 editions TEXT[] DEFAULT ARRAY[]::TEXT[],
                 languages TEXT[] DEFAULT ARRAY[]::TEXT[],
+                subtitle_languages TEXT[] DEFAULT ARRAY[]::TEXT[],
                 upgrade_allowed BOOLEAN DEFAULT TRUE,
                 indexers TEXT[] DEFAULT ARRAY[]::TEXT[],
                 uploaders TEXT[] DEFAULT ARRAY[]::TEXT[],

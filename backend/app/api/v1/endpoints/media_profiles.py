@@ -46,6 +46,7 @@ class MediaProfileCreate(BaseModel):
     hdr_formats: Optional[List[str]] = []
     editions: Optional[List[str]] = []
     languages: Optional[List[str]] = []
+    subtitle_languages: Optional[List[str]] = []
     upgrade_allowed: Optional[bool] = True
     upgradeuntil_quality: Optional[str] = None
     indexers: Optional[List[str]] = []
@@ -79,7 +80,7 @@ class MediaProfileCreate(BaseModel):
     illegal_char_replacement: Optional[str] = "_"
     colon_replacement: Optional[str] = " -"
 
-    @field_validator('languages')
+    @field_validator('languages', 'subtitle_languages')
     @classmethod
     def validate_languages(cls, v):
         """Validate all language codes in languages list"""
@@ -111,6 +112,7 @@ class MediaProfileUpdate(BaseModel):
     hdr_formats: Optional[List[str]] = None
     editions: Optional[List[str]] = None
     languages: Optional[List[str]] = None
+    subtitle_languages: Optional[List[str]] = None
     upgrade_allowed: Optional[bool] = None
     upgradeuntil_quality: Optional[str] = None
     indexers: Optional[List[str]] = None
@@ -144,7 +146,7 @@ class MediaProfileUpdate(BaseModel):
     illegal_char_replacement: Optional[str] = None
     colon_replacement: Optional[str] = None
 
-    @field_validator('languages')
+    @field_validator('languages', 'subtitle_languages')
     @classmethod
     def validate_languages(cls, v):
         """Validate all language codes in languages list"""
@@ -177,6 +179,7 @@ class MediaProfileResponse(BaseModel):
     hdr_formats: Optional[List[str]]
     editions: Optional[List[str]]
     languages: Optional[List[str]]
+    subtitle_languages: Optional[List[str]]
     upgrade_allowed: bool
     indexers: Optional[List[str]]
     uploaders: Optional[List[str]]

@@ -185,13 +185,6 @@ async def initialize_default_settings(
             "description": "TMDB API v3 Key for movie/show metadata. Leave empty to use embedded default.",
             "is_sensitive": True,
         },
-        {
-            "key": "subtitle_languages",
-            "value": "en",
-            "category": "subtitles",
-            "description": "Comma-separated language codes for subtitle downloads (e.g., 'en,es,fr'). Uses Podnapisi provider for movies and TV shows. Anime uses embedded subtitles from torrents.",
-            "is_sensitive": False,
-        },
     ]
 
     for setting in default_settings:

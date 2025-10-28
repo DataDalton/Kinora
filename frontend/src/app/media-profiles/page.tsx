@@ -28,6 +28,7 @@ interface QualityProfile {
   preferred_editions: string[];
   upgrade_allowed: boolean;
   languages?: string[];
+  subtitle_languages?: string[];
 }
 
 // Quality hierarchies ordered from highest to lowest quality (best first)
@@ -165,6 +166,7 @@ export default function QualityProfilesPage() {
     hdr: [] as string[],
     editions: [] as string[],
     languages: [getDefaultLanguage()] as string[],
+    subtitle_languages: [] as string[],
     upgrade_allowed: true,
     // Indexer settings by media type
     movie_indexers: [] as string[],
@@ -203,6 +205,7 @@ export default function QualityProfilesPage() {
 
   const [resolutionSizes, setResolutionSizes] = useState<Record<string, ResolutionSize>>({});
   const [languageSearch, setLanguageSearch] = useState('');
+  const [subtitleLanguageSearch, setSubtitleLanguageSearch] = useState('');
   const [animeAudioLanguageSearch, setAnimeAudioLanguageSearch] = useState('');
   const [animeSubtitleLanguageSearch, setAnimeSubtitleLanguageSearch] = useState('');
   const [showNamingBuilder, setShowNamingBuilder] = useState(false);
@@ -386,6 +389,7 @@ export default function QualityProfilesPage() {
       hdr: [],
       editions: [],
       languages: [getDefaultLanguage()],
+      subtitle_languages: [],
       upgrade_allowed: true,
       movie_indexers: [],
       show_indexers: [],
@@ -441,6 +445,7 @@ export default function QualityProfilesPage() {
       hdr: profile.preferred_hdr || profile.allowed_hdr || [],
       editions: profile.preferred_editions || [],
       languages: profile.languages || ['en'],
+      subtitle_languages: profile.subtitle_languages || [],
       upgrade_allowed: profile.upgrade_allowed,
       movie_indexers: [],
       show_indexers: [],
@@ -791,6 +796,84 @@ export default function QualityProfilesPage() {
                                 setFormData({
                                   ...formData,
                                   languages: formData.languages.filter(l => l !== langCode)
+                                });
+                              }}
+                              className="ml-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Subtitle Languages */}
+              <div className="space-y-3 p-4 rounded-lg border-2 border-transparent">
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Subtitle Languages</label>
+                  <p className="text-xs text-muted-foreground mb-2">Optional: Add subtitle languages to download. Leave empty to skip subtitle downloads. Uses Podnapisi for movies/shows.</p>
+
+                  <div className="relative mb-3">
+                    <input
+                      type="text"
+                      value={subtitleLanguageSearch}
+                      onChange={(e) => setSubtitleLanguageSearch(e.target.value)}
+                      onFocus={() => setSubtitleLanguageSearch(subtitleLanguageSearch || ' ')}
+                      onBlur={() => setTimeout(() => setSubtitleLanguageSearch(''), 200)}
+                      className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
+                      placeholder="Search subtitle languages..."
+                    />
+                    {subtitleLanguageSearch && (
+                      <div className="absolute z-10 w-full mt-1 bg-background border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        {LANGUAGES.filter(lang =>
+                          !formData.subtitle_languages.includes(lang.code) &&
+                          (lang.name.toLowerCase().includes(subtitleLanguageSearch.trim().toLowerCase()) ||
+                           lang.code.toLowerCase().includes(subtitleLanguageSearch.trim().toLowerCase()) ||
+                           (lang.nativeName && lang.nativeName.toLowerCase().includes(subtitleLanguageSearch.trim().toLowerCase())))
+                        ).map(lang => (
+                          <button
+                            key={lang.code}
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                subtitle_languages: [...formData.subtitle_languages, lang.code]
+                              });
+                              setSubtitleLanguageSearch('');
+                            }}
+                            className="w-full px-4 py-2 text-left hover:bg-muted transition-colors cursor-pointer text-sm"
+                          >
+                            <span className="font-medium">{lang.name}</span>
+                            {lang.nativeName && lang.nativeName !== lang.name && (
+                              <span className="text-xs text-muted-foreground ml-2">({lang.nativeName})</span>
+                            )}
+                            <span className="text-xs text-muted-foreground ml-2">{lang.code}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {formData.subtitle_languages.length > 0 && (
+                    <div className="flex flex-wrap gap-2 p-3 bg-muted rounded-lg border border-border">
+                      {formData.subtitle_languages.map((langCode, index) => {
+                        const lang = LANGUAGES.find(l => l.code === langCode);
+                        return (
+                          <div
+                            key={langCode}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-primary/20 border-2 border-primary rounded-lg text-sm font-medium"
+                          >
+                            <span className="text-xs text-muted-foreground">#{index + 1}</span>
+                            <span>{lang?.name || langCode}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData({
+                                  ...formData,
+                                  subtitle_languages: formData.subtitle_languages.filter(l => l !== langCode)
                                 });
                               }}
                               className="ml-1 text-muted-foreground hover:text-foreground cursor-pointer"

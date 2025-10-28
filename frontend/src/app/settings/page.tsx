@@ -84,7 +84,6 @@ export default function SettingsPage() {
 
   const categoryTitles: Record<string, string> = {
     api_keys: 'API Keys',
-    subtitles: 'Subtitle Settings',
     general: 'General',
   };
 
