@@ -14,6 +14,7 @@ celery_app = Celery(
         "app.tasks.download_monitor",
         "app.tasks.subtitle_search",
         "app.tasks.metadata_refresh",
+        "app.tasks.transcoding",
     ],
 )
 
@@ -25,10 +26,16 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=30 * 60,  # 30 minutes
-    task_soft_time_limit=25 * 60,  # 25 minutes
+    task_time_limit=30 * 60,  # 30 minutes default
+    task_soft_time_limit=25 * 60,  # 25 minutes default
     worker_prefetch_multiplier=4,
     worker_max_tasks_per_child=1000,
+    task_routes={
+        "app.tasks.transcoding.*": {
+            "time_limit": 12 * 60 * 60,  # 12 hours for transcoding tasks
+            "soft_time_limit": 11 * 60 * 60,  # 11 hours soft limit
+        }
+    },
 )
 
 # Celery Beat schedule

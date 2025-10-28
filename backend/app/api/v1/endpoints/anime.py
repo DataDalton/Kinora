@@ -24,7 +24,7 @@ async def get_anime(
     status: Optional[str] = None,
     monitored: Optional[bool] = None,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Get all anime from library with pagination and filtering
@@ -61,7 +61,7 @@ async def get_anime(
 async def get_anime_by_id(
     anime_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Get a specific anime by ID
@@ -81,7 +81,7 @@ async def get_anime_by_id(
 async def add_anime(
     anime_data: AnimeCreate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Add an anime to library
@@ -152,7 +152,7 @@ async def update_anime(
     anime_id: int,
     updates: dict,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Update anime in library
@@ -192,7 +192,7 @@ async def update_anime(
 async def delete_anime(
     anime_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Remove anime from library

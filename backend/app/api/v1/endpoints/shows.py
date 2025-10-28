@@ -24,7 +24,7 @@ async def get_shows(
     status: Optional[str] = None,
     monitored: Optional[bool] = None,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Get all TV shows from library with pagination and filtering
@@ -61,7 +61,7 @@ async def get_shows(
 async def get_show(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Get a specific TV show by ID
@@ -81,7 +81,7 @@ async def get_show(
 async def add_show(
     show_data: ShowCreate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Add a TV show to library
@@ -152,7 +152,7 @@ async def update_show(
     show_id: int,
     updates: dict,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Update TV show in library
@@ -192,7 +192,7 @@ async def update_show(
 async def delete_show(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     """
     Remove TV show from library

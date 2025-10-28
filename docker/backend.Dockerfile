@@ -6,10 +6,14 @@ ENV TMDB_API_KEY=${TMDB_API_KEY}
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including FFmpeg with GPU support
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    ffmpeg \
+    wget \
+    nvidia-cuda-toolkit \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements

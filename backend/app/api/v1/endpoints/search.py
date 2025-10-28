@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from typing import List, Dict, Any
 from app.schemas.movie import MovieSearch
 from app.api.v1.endpoints.auth import get_current_user
@@ -115,8 +115,7 @@ async def get_media_details(
                 "vote_count": details.get("vote_count", 0),
                 "cast": details.get("credits", {}).get("cast", [])[:10],
                 "crew": details.get("credits", {}).get("crew", [])[:5],
-                "videos": details.get("videos", {}).get("results", []),
-                "similar": details.get("similar", {}).get("results", [])[:6],
+                "recommendations": details.get("recommendations", {}).get("results", [])[:6],
                 "media_type": "movie"
             }
 
@@ -134,8 +133,7 @@ async def get_media_details(
                 "vote_count": details.get("vote_count", 0),
                 "cast": details.get("credits", {}).get("cast", [])[:10],
                 "crew": details.get("credits", {}).get("crew", [])[:5],
-                "videos": details.get("videos", {}).get("results", []),
-                "similar": details.get("similar", {}).get("results", [])[:6],
+                "recommendations": details.get("recommendations", {}).get("results", [])[:6],
                 "created_by": details.get("created_by", []),
                 "media_type": "show"
             }
@@ -147,6 +145,20 @@ async def get_media_details(
             title = details.get("title", {})
             anime_title = title.get("english") or title.get("romaji")
 
+            # Extract recommendations from Anilist format
+            recommendations = []
+            for rec_node in details.get("recommendations", {}).get("nodes", [])[:6]:
+                media_rec = rec_node.get("mediaRecommendation")
+                if media_rec:
+                    rec_title = media_rec.get("title", {})
+                    recommendations.append({
+                        "id": media_rec.get("id"),
+                        "title": rec_title.get("english") or rec_title.get("romaji"),
+                        "name": rec_title.get("english") or rec_title.get("romaji"),
+                        "poster_path": media_rec.get("coverImage", {}).get("large"),
+                        "backdrop_path": media_rec.get("bannerImage"),
+                    })
+
             return {
                 **parsed,
                 "id": media_id,
@@ -157,6 +169,7 @@ async def get_media_details(
                 "characters": details.get("characters", {}).get("nodes", [])[:10],
                 "staff": details.get("staff", {}).get("nodes", [])[:5],
                 "relations": details.get("relations", {}).get("nodes", [])[:6],
+                "recommendations": recommendations,
                 "media_type": "anime"
             }
 

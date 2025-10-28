@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, movies, shows, anime, search, discover, webtransport, settings, media_profiles
+from app.api.v1.endpoints import auth, movies, shows, anime, search, discover, webtransport, settings, media_profiles, transcoding
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(discover.router, prefix="/discover", tags=["discover"]
 api_router.include_router(webtransport.router, prefix="/ws", tags=["real-time"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(media_profiles.router, prefix="/media-profiles", tags=["media-profiles"])
+api_router.include_router(transcoding.router, prefix="/transcoding", tags=["transcoding"])

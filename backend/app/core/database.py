@@ -337,3 +337,129 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
             CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
         """)
+
+        # Transcoding profiles table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS transcoding_profiles (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) UNIQUE NOT NULL,
+                description TEXT,
+                container VARCHAR(20),
+                video_codec VARCHAR(50),
+                video_quality_mode VARCHAR(20),
+                video_quality_value INTEGER,
+                video_preset VARCHAR(50),
+                audio_codec VARCHAR(50),
+                audio_bitrate INTEGER,
+                audio_channels VARCHAR(20),
+                resolution VARCHAR(20),
+                fps VARCHAR(20),
+                hardware_accel_type VARCHAR(20),
+                hardware_accel_device INTEGER,
+                tune VARCHAR(50),
+                custom_ffmpeg_args JSONB,
+                is_system BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_transcoding_profiles_name ON transcoding_profiles(name);
+        """)
+
+        # Transcoding rules table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS transcoding_rules (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) UNIQUE NOT NULL,
+                enabled BOOLEAN DEFAULT TRUE,
+                priority INTEGER DEFAULT 0,
+                trigger_type VARCHAR(50) NOT NULL,
+                conditions JSONB,
+                profile_id INTEGER REFERENCES transcoding_profiles(id) ON DELETE CASCADE,
+                output_action VARCHAR(50) DEFAULT 'replace',
+                use_media_profile_naming BOOLEAN DEFAULT TRUE,
+                media_types TEXT[] DEFAULT ARRAY['movie', 'show', 'anime']::TEXT[],
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_transcoding_rules_enabled ON transcoding_rules(enabled);
+            CREATE INDEX IF NOT EXISTS idx_transcoding_rules_priority ON transcoding_rules(priority);
+        """)
+
+        # Transcoding jobs table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS transcoding_jobs (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                media_id INTEGER,
+                media_type VARCHAR(20),
+                media_title VARCHAR(500),
+                input_path TEXT NOT NULL,
+                output_path TEXT,
+                output_action VARCHAR(50) DEFAULT 'replace',
+                use_media_profile_naming BOOLEAN DEFAULT TRUE,
+                profile_id INTEGER REFERENCES transcoding_profiles(id) ON DELETE SET NULL,
+                profile_snapshot JSONB NOT NULL,
+                hardware_accel_type VARCHAR(20),
+                hardware_accel_device INTEGER,
+                status VARCHAR(20) DEFAULT 'pending',
+                progress NUMERIC(5, 2) DEFAULT 0,
+                current_frame INTEGER,
+                total_frames INTEGER,
+                fps NUMERIC(10, 2),
+                speed VARCHAR(20),
+                bitrate VARCHAR(50),
+                file_size_input BIGINT,
+                file_size_output BIGINT,
+                eta_seconds INTEGER,
+                celery_task_id VARCHAR(255),
+                error_message TEXT,
+                log_file TEXT,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_status ON transcoding_jobs(status);
+            CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_user ON transcoding_jobs(user_id);
+            CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_media ON transcoding_jobs(media_id, media_type);
+            CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_created ON transcoding_jobs(created_at);
+        """)
+
+        # Transcoding progress table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS transcoding_progress (
+                job_id INTEGER PRIMARY KEY REFERENCES transcoding_jobs(id) ON DELETE CASCADE,
+                frame INTEGER,
+                fps NUMERIC(10, 2),
+                bitrate VARCHAR(50),
+                size BIGINT,
+                time VARCHAR(50),
+                speed VARCHAR(20),
+                progress NUMERIC(5, 2),
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+        """)
+
+        # Hardware acceleration devices table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hardware_accel_devices (
+                id SERIAL PRIMARY KEY,
+                device_type VARCHAR(20) NOT NULL,
+                device_index INTEGER NOT NULL,
+                device_name VARCHAR(255),
+                device_uuid VARCHAR(100),
+                pci_bus_id VARCHAR(50),
+                compute_capability VARCHAR(20),
+                memory_total BIGINT,
+                driver_version VARCHAR(50),
+                is_available BOOLEAN DEFAULT TRUE,
+                last_detected TIMESTAMP DEFAULT NOW() NOT NULL,
+                UNIQUE(device_type, device_index)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_hardware_accel_type ON hardware_accel_devices(device_type);
+            CREATE INDEX IF NOT EXISTS idx_hardware_accel_available ON hardware_accel_devices(is_available);
+        """)

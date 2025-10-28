@@ -176,6 +176,21 @@ class AnilistService:
                 }
               }
             }
+            recommendations(perPage: 6, sort: RATING_DESC) {
+              nodes {
+                mediaRecommendation {
+                  id
+                  title {
+                    romaji
+                    english
+                  }
+                  coverImage {
+                    large
+                  }
+                  bannerImage
+                }
+              }
+            }
             externalLinks {
               url
               site
@@ -200,15 +215,25 @@ class AnilistService:
               title {
                 romaji
                 english
+                native
               }
               coverImage {
                 large
+                extraLarge
               }
+              bannerImage
+              startDate {
+                year
+                month
+                day
+              }
+              description
               averageScore
               popularity
               episodes
               seasonYear
               season
+              genres
             }
           }
         }
@@ -230,15 +255,25 @@ class AnilistService:
               title {
                 romaji
                 english
+                native
               }
               coverImage {
                 large
+                extraLarge
               }
+              bannerImage
+              startDate {
+                year
+                month
+                day
+              }
+              description
               averageScore
               popularity
               episodes
               seasonYear
               season
+              genres
             }
           }
         }
@@ -275,6 +310,46 @@ class AnilistService:
         """
 
         data = await self._query(gql_query, {"page": page, "perPage": per_page})
+        return data.get("Page", {}).get("media", [])
+
+    async def get_by_genre(self, genre: str, page: int = 1, per_page: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get anime by genre
+        """
+        gql_query = """
+        query ($page: Int, $perPage: Int, $genre: String) {
+          Page(page: $page, perPage: $perPage) {
+            media(type: ANIME, genre: $genre, sort: POPULARITY_DESC) {
+              id
+              idMal
+              title {
+                romaji
+                english
+                native
+              }
+              coverImage {
+                large
+                extraLarge
+              }
+              bannerImage
+              startDate {
+                year
+                month
+                day
+              }
+              description
+              averageScore
+              popularity
+              episodes
+              seasonYear
+              season
+              genres
+            }
+          }
+        }
+        """
+
+        data = await self._query(gql_query, {"page": page, "perPage": per_page, "genre": genre})
         return data.get("Page", {}).get("media", [])
 
     def parse_anime_data(self, anilist_data: Dict[str, Any]) -> Dict[str, Any]:

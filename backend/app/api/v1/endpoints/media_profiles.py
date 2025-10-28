@@ -212,7 +212,7 @@ class MediaProfileResponse(BaseModel):
 
 @router.get("/", response_model=List[MediaProfileResponse])
 async def get_all_media_profiles(
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -225,7 +225,7 @@ async def get_all_media_profiles(
 @router.get("/{profile_id}", response_model=MediaProfileResponse)
 async def get_media_profile(
     profile_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -245,7 +245,7 @@ async def get_media_profile(
 @router.post("/", response_model=MediaProfileResponse, status_code=status.HTTP_201_CREATED)
 async def create_media_profile(
     profile: MediaProfileCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -334,7 +334,7 @@ async def create_media_profile(
 async def update_media_profile(
     profile_id: int,
     profile: MediaProfileUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -381,7 +381,7 @@ async def update_media_profile(
 @router.delete("/{profile_id}")
 async def delete_media_profile(
     profile_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """

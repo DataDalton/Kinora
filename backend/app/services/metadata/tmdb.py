@@ -86,7 +86,7 @@ class TMDBService:
         Get detailed movie information
         """
         return await self._request(f"movie/{tmdb_id}", {
-            "append_to_response": "credits,videos,similar,recommendations,release_dates,external_ids"
+            "append_to_response": "credits,recommendations"
         })
 
     async def search_tv(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -105,7 +105,7 @@ class TMDBService:
         Get detailed TV show information
         """
         return await self._request(f"tv/{tmdb_id}", {
-            "append_to_response": "credits,videos,similar,recommendations,content_ratings,external_ids"
+            "append_to_response": "credits,recommendations"
         })
 
     async def get_tv_season(self, tmdb_id: int, season_number: int) -> Dict[str, Any]:

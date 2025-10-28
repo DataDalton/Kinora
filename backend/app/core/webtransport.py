@@ -139,6 +139,50 @@ class WebTransportManager:
             "timestamp": datetime.utcnow().isoformat(),
         })
 
+    async def send_transcoding_progress(
+        self,
+        user_id: int,
+        job_id: int,
+        progress: float,
+        fps: float,
+        speed: str,
+        frame: int,
+        bitrate: str,
+    ) -> None:
+        """
+        Send transcoding progress update to user
+        """
+        await self.send_to_user(user_id, {
+            "type": "transcoding_progress",
+            "job_id": job_id,
+            "progress": progress,
+            "fps": fps,
+            "speed": speed,
+            "frame": frame,
+            "bitrate": bitrate,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
+    async def send_transcoding_complete(
+        self,
+        user_id: int,
+        job_id: int,
+        media_title: str,
+        success: bool,
+        error_message: str = None,
+    ) -> None:
+        """
+        Notify user that transcoding completed
+        """
+        await self.send_to_user(user_id, {
+            "type": "transcoding_complete",
+            "job_id": job_id,
+            "media_title": media_title,
+            "success": success,
+            "error_message": error_message,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
     def get_active_users(self) -> Set[int]:
         """
         Get set of currently connected user IDs
