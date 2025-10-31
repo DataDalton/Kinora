@@ -111,7 +111,6 @@ class Settings(BaseSettings):
 
     # External APIs
     # TMDB API v3 Key (injected during Docker build from GitHub Secrets)
-    # Users can override with their own key via environment variable
     TMDB_API_KEY: str = ""
 
     # Anilist API is public and free - no authentication needed for read queries
@@ -124,16 +123,8 @@ class Settings(BaseSettings):
     BYPASSARR_URL: Optional[str] = None
     CLOUDFLARE_BYPASS_METHOD: str = "flaresolverr"
 
-    # Download Clients
-    QBITTORRENT_HOST: str = "localhost"
-    QBITTORRENT_PORT: int = 8080
-    QBITTORRENT_USERNAME: str = "admin"
-    QBITTORRENT_PASSWORD: str = "adminadmin"
-
-    # File Paths
-    MEDIA_ROOT: str = "/media"
-    DOWNLOADS_ROOT: str = "/downloads"
-    TORRENTS_ROOT: str = "/torrents"
+    # Download Clients (configured via database settings during setup)
+    # File Paths (configured via database settings during setup)
 
     # Indexers
     INDEXER_REQUEST_TIMEOUT: int = 30
@@ -146,13 +137,6 @@ class Settings(BaseSettings):
     # Search
     SEARCH_RESULTS_LIMIT: int = 100
     MIN_SEEDERS: int = 5
-
-    # Subtitles
-    SUBTITLE_LANGUAGES: str = "en,es,fr"
-
-    @property
-    def subtitle_languages_list(self) -> List[str]:
-        return [lang.strip() for lang in self.SUBTITLE_LANGUAGES.split(",")]
 
 
 settings = Settings()

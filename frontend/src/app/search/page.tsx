@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import MediaDetailModal from '@/components/MediaDetailModal';
+import PageHeader from '@/components/PageHeader';
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -151,12 +152,13 @@ export default function SearchPage() {
 
   return (
     <div className="min-h-screen">
-      <div className="bg-gradient-to-r from-emerald-600/10 via-green-600/10 to-teal-600/10 border-b-2 border-border">
-        <div className="container mx-auto px-6 py-8">
-          <h1 className="text-4xl font-bold">Search</h1>
-          <p className="text-muted-foreground mt-2">Search and add new media to your library</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Search"
+        description="Search and add new media to your library"
+        gradientFrom="emerald-600/10"
+        gradientVia="green-600/10"
+        gradientTo="teal-600/10"
+      />
 
       <div className="container mx-auto px-6 py-8">
         <form onSubmit={handleSearch} className="mb-8">

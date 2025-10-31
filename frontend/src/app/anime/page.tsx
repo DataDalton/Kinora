@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Search, Plus } from 'lucide-react';
+import { Search, Plus, Upload } from 'lucide-react';
 import Link from 'next/link';
+import LibraryImportModal from '@/components/LibraryImportModal';
+import PageHeader from '@/components/PageHeader';
 
 interface Anime {
   id: number;
@@ -25,6 +27,7 @@ export default function AnimePage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['anime', page, statusFilter],
@@ -63,13 +66,13 @@ export default function AnimePage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header Section */}
-      <div className="bg-gradient-to-r from-pink-600/10 via-purple-600/10 to-red-600/10 border-b-2 border-border">
-        <div className="container mx-auto px-6 py-8">
-          <h1 className="text-4xl font-bold mb-2">Anime</h1>
-          <p className="text-muted-foreground">Manage and track your anime collection</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Anime"
+        description="Manage and track your anime collection"
+        gradientFrom="pink-600/10"
+        gradientVia="purple-600/10"
+        gradientTo="red-600/10"
+      />
 
       {/* Content Section */}
       <div className="container mx-auto px-6 py-8">
@@ -85,6 +88,13 @@ export default function AnimePage() {
               className="w-full pl-12 pr-4 py-3 bg-card border-2 border-border rounded-lg focus:outline-none focus:border-primary transition-colors"
             />
           </div>
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-6 py-3 bg-card border-2 border-border text-foreground rounded-lg hover:bg-accent transition font-medium whitespace-nowrap"
+          >
+            <Upload className="w-5 h-5" />
+            Import Library
+          </button>
           <Link
             href="/search?type=anime"
             className="flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium whitespace-nowrap"
@@ -198,6 +208,13 @@ export default function AnimePage() {
           </>
         )}
       </div>
+
+      {/* Library Import Modal */}
+      <LibraryImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        mediaType="anime"
+      />
     </div>
   );
 }

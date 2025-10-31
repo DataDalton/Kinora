@@ -27,14 +27,16 @@ class QBittorrentClient(BaseDownloadClient):
         password: str = None,
         use_ssl: bool = False,
     ):
-        self.host = host or settings.QBITTORRENT_HOST
-        self.port = port or settings.QBITTORRENT_PORT
-        self.username = username or settings.QBITTORRENT_USERNAME
-        self.password = password or settings.QBITTORRENT_PASSWORD
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
         self.use_ssl = use_ssl
 
-        protocol = "https" if self.use_ssl else "http"
-        self.base_url = f"{protocol}://{self.host}:{self.port}/api/v2"
+        self.base_url = None
+        if self.host and self.port:
+            protocol = "https" if self.use_ssl else "http"
+            self.base_url = f"{protocol}://{self.host}:{self.port}/api/v2"
 
         self._cookie: Optional[str] = None
 
@@ -206,6 +208,13 @@ class QBittorrentClient(BaseDownloadClient):
         )
         return True
 
+    async def add_category(self, name: str, save_path: str) -> bool:
+        """Add or update a category"""
+        await self._request(
+            "POST", "torrents/createCategory", data={"category": name, "savePath": save_path}
+        )
+        return True
+
     async def get_torrent_files(self, hash: str) -> List[Dict[str, Any]]:
         """Get list of files in torrent"""
         files = await self._request("GET", "torrents/files", data={"hash": hash})
@@ -255,4 +264,48 @@ class QBittorrentClient(BaseDownloadClient):
         )
 
 
-qbittorrent_client = QBittorrentClient()
+# Global client instance - lazily initialized from database config
+qbittorrent_client = None
+
+
+async def get_qbittorrent_client():
+    """
+    Factory function to get qBittorrent client instance from database config.
+    Returns None if setup is not complete.
+    """
+    global qbittorrent_client
+
+    if qbittorrent_client is not None:
+        return qbittorrent_client
+
+    try:
+        from app.core.database import get_pool
+        from app.api.v1.endpoints.setup import decrypt_value
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Check if qBittorrent is configured
+            client_row = await conn.fetchrow(
+                "SELECT * FROM download_clients WHERE client_type = 'qbittorrent' AND is_enabled = TRUE LIMIT 1"
+            )
+
+            if not client_row:
+                return None
+
+            # Decrypt password
+            password = decrypt_value(client_row['encrypted_password'])
+
+            # Create client instance
+            qbittorrent_client = QBittorrentClient(
+                host=client_row['host'],
+                port=client_row['port'],
+                username=client_row['username'],
+                password=password,
+                use_ssl=client_row['use_ssl']
+            )
+
+            return qbittorrent_client
+
+    except Exception as e:
+        # Setup not complete or database not ready
+        return None

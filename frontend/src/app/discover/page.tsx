@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import Link from 'next/link';
 import MediaDetailModal from '@/components/MediaDetailModal';
+import PageHeader from '@/components/PageHeader';
 
 interface Media {
   id: number;
@@ -240,13 +241,13 @@ export default function DiscoverPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header Section */}
-      <div className="bg-gradient-to-r from-cyan-600/10 via-blue-600/10 to-indigo-600/10 border-b-2 border-border">
-        <div className="container mx-auto px-6 py-8">
-          <h1 className="text-4xl font-bold mb-2">Discover</h1>
-          <p className="text-muted-foreground">Explore trending and popular content across all categories</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Discover"
+        description="Explore trending and popular content across all categories"
+        gradientFrom="cyan-600/10"
+        gradientVia="blue-600/10"
+        gradientTo="indigo-600/10"
+      />
 
       {/* Content Section */}
       <div className="container mx-auto px-6 py-8">

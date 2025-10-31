@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import {
@@ -18,6 +18,7 @@ import {
   ChevronUp,
   Edit,
 } from 'lucide-react';
+import PageHeader from '@/components/PageHeader';
 
 interface HardwareDevice {
   id: number;
@@ -189,6 +190,11 @@ export default function TranscodingPage() {
     },
   });
 
+  // Auto-detect hardware on page load
+  useEffect(() => {
+    detectHardwareMutation.mutate();
+  }, []);
+
   const toggleJobExpansion = (jobId: number) => {
     setExpandedJobs((prev) => {
       const newSet = new Set(prev);
@@ -255,14 +261,13 @@ export default function TranscodingPage() {
 
   return (
     <div className="min-h-screen">
-      <div className="bg-gradient-to-r from-orange-600/10 via-amber-600/10 to-yellow-600/10 border-b-2 border-border">
-        <div className="container mx-auto px-6 py-8">
-          <h1 className="text-4xl font-bold">Media Transcoding</h1>
-          <p className="text-muted-foreground mt-2">
-            Manage video transcoding jobs, profiles, and automatic rules
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Media Transcoding"
+        description="Manage video transcoding jobs, profiles, and automatic rules"
+        gradientFrom="orange-600/10"
+        gradientVia="amber-600/10"
+        gradientTo="yellow-600/10"
+      />
 
       <div className="container mx-auto p-6 max-w-7xl">
 

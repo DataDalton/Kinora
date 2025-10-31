@@ -15,7 +15,7 @@ from app.services.indexers.leetx import leetx_indexer
 from app.services.indexers.yts import yts_indexer
 from app.services.indexers.nyaa import NyaaIndexer
 from app.services.media_profile import MediaProfile, media_profile_service
-from app.services.download_clients.qbittorrent import qbittorrent_client
+from app.services.download_clients.qbittorrent import get_qbittorrent_client
 
 
 class SearchEngine:
@@ -243,7 +243,12 @@ class SearchEngine:
             return None
 
         try:
-            torrent_hash = await qbittorrent_client.add_torrent(
+            client = await get_qbittorrent_client()
+            if not client:
+                print("qBittorrent client not configured")
+                return None
+
+            torrent_hash = await client.add_torrent(
                 torrent=torrent_source,
                 save_path=save_path,
                 category=category,
@@ -263,9 +268,16 @@ class SearchEngine:
         """
         tasks = []
 
-        for indexer in self.indexers:
-            task = indexer.get_rss()
-            tasks.append(task)
+        # Get RSS from both general and anime indexers
+        all_indexers = self.general_indexers + self.anime_indexers
+
+        for indexer in all_indexers:
+            if hasattr(indexer, 'get_rss'):
+                task = indexer.get_rss()
+                tasks.append(task)
+
+        if not tasks:
+            return []
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 

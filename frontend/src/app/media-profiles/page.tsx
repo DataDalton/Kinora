@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import ISO6391 from 'iso-639-1';
+import PageHeader from '@/components/PageHeader';
 
 interface ResolutionSize {
   minSize: number;
@@ -605,12 +606,13 @@ export default function QualityProfilesPage() {
 
   return (
     <div className="min-h-screen">
-      <div className="bg-gradient-to-r from-violet-600/10 via-purple-600/10 to-fuchsia-600/10 border-b-2 border-border">
-        <div className="container mx-auto px-6 py-8">
-          <h1 className="text-4xl font-bold">Media Profiles</h1>
-          <p className="text-muted-foreground mt-2">Configure quality, indexer, naming, and media server preferences</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Media Profiles"
+        description="Configure quality, indexer, naming, and media server preferences"
+        gradientFrom="violet-600/10"
+        gradientVia="purple-600/10"
+        gradientTo="fuchsia-600/10"
+      />
 
       <div className="container mx-auto px-6 py-8">
         {!showForm && profiles && profiles.length > 0 && (

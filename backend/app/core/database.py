@@ -60,12 +60,13 @@ async def init_db():
                 username VARCHAR(50) UNIQUE NOT NULL,
                 hashed_password VARCHAR(255) NOT NULL,
                 is_active BOOLEAN DEFAULT TRUE NOT NULL,
-                is_superuser BOOLEAN DEFAULT FALSE NOT NULL,
+                role VARCHAR(50) DEFAULT 'user' NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW() NOT NULL,
                 updated_at TIMESTAMP DEFAULT NOW() NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+            CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
         """)
 
         # Movies table
@@ -321,23 +322,7 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_collection_items_media ON collection_items(media_id, media_type);
         """)
 
-        # Settings table for user-configurable options
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                id SERIAL PRIMARY KEY,
-                key VARCHAR(100) UNIQUE NOT NULL,
-                value TEXT,
-                value_type VARCHAR(20) DEFAULT 'string',
-                category VARCHAR(50),
-                description TEXT,
-                is_sensitive BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
-                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
-            CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
-        """)
+        # Removed settings table - now using app_settings table for all configuration
 
         # Transcoding profiles table
         await conn.execute("""
@@ -463,4 +448,45 @@ async def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_hardware_accel_type ON hardware_accel_devices(device_type);
             CREATE INDEX IF NOT EXISTS idx_hardware_accel_available ON hardware_accel_devices(is_available);
+        """)
+
+        # Application settings table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                id SERIAL PRIMARY KEY,
+                key VARCHAR(100) UNIQUE NOT NULL,
+                value TEXT,
+                value_type VARCHAR(20) DEFAULT 'string' NOT NULL,
+                is_encrypted BOOLEAN DEFAULT FALSE NOT NULL,
+                category VARCHAR(50) NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_app_settings_key ON app_settings(key);
+            CREATE INDEX IF NOT EXISTS idx_app_settings_category ON app_settings(category);
+        """)
+
+        # Download clients table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS download_clients (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                client_type VARCHAR(50) NOT NULL,
+                host VARCHAR(255) NOT NULL,
+                port INTEGER NOT NULL,
+                username VARCHAR(100),
+                encrypted_password TEXT,
+                use_ssl BOOLEAN DEFAULT FALSE NOT NULL,
+                is_enabled BOOLEAN DEFAULT TRUE NOT NULL,
+                is_default BOOLEAN DEFAULT FALSE NOT NULL,
+                test_status VARCHAR(20) DEFAULT 'untested' NOT NULL,
+                last_tested TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_download_clients_enabled ON download_clients(is_enabled);
+            CREATE INDEX IF NOT EXISTS idx_download_clients_default ON download_clients(is_default);
         """)

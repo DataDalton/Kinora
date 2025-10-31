@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import PageHeader from '@/components/PageHeader';
 
 interface Download {
   id: number;
@@ -68,13 +69,13 @@ export default function ActivityPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header Section */}
-      <div className="bg-gradient-to-r from-orange-600/10 via-red-600/10 to-pink-600/10 border-b-2 border-border">
-        <div className="container mx-auto px-6 py-8">
-          <h1 className="text-4xl font-bold mb-2">Activity</h1>
-          <p className="text-muted-foreground">Monitor your download progress and history</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Activity"
+        description="Monitor your download progress and history"
+        gradientFrom="orange-600/10"
+        gradientVia="red-600/10"
+        gradientTo="pink-600/10"
+      />
 
       {/* Content Section */}
       <div className="container mx-auto px-6 py-8">

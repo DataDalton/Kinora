@@ -64,22 +64,23 @@ async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get
             detail="Username already registered",
         )
 
-    # Check if this is the first user (should be superuser)
+    # Check if this is the first user (should be administrator)
     user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
     is_first_user = user_count == 0
+    user_role = 'administrator' if is_first_user else 'user'
 
     # Hash password and create user
     hashed_password = get_password_hash(user_data.password)
 
     user_row = await conn.fetchrow(
         """
-        INSERT INTO users (username, hashed_password, is_superuser)
+        INSERT INTO users (username, hashed_password, role)
         VALUES ($1, $2, $3)
         RETURNING *
         """,
         user_data.username,
         hashed_password,
-        is_first_user,
+        user_role,
     )
 
     return User(**dict(user_row))

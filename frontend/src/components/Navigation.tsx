@@ -99,25 +99,46 @@ export default function Navigation() {
 
   const isActive = (path: string) => pathname === path;
 
-  const navLinks = [
-    { href: '/', label: 'Dashboard', icon: '📊' },
-    { href: '/movies', label: 'Movies', icon: '🎬' },
-    { href: '/shows', label: 'TV Shows', icon: '📺' },
-    { href: '/anime', label: 'Anime', icon: '🎌' },
-    { href: '/discover', label: 'Discover', icon: '🔍' },
-    { href: '/search', label: 'Search', icon: '➕' },
-    { href: '/activity', label: 'Activity', icon: '📥' },
-    { href: '/transcoding', label: 'Transcoding', icon: '⚙️' },
-    { href: '/media-profiles', label: 'Profiles', icon: '📝' },
-    { href: '/settings', label: 'Settings', icon: '🔧' },
+  const navSections = [
+    {
+      label: 'General',
+      links: [
+        { href: '/', label: 'Dashboard', icon: '📊' },
+        { href: '/activity', label: 'Activity', icon: '📥' },
+      ],
+    },
+    {
+      label: 'Media',
+      links: [
+        { href: '/movies', label: 'Movies', icon: '🎬' },
+        { href: '/shows', label: 'TV Shows', icon: '📺' },
+        { href: '/anime', label: 'Anime', icon: '🎌' },
+      ],
+    },
+    {
+      label: 'Discovery',
+      links: [
+        { href: '/discover', label: 'Discover', icon: '🔍' },
+        { href: '/search', label: 'Search', icon: '➕' },
+      ],
+    },
+    {
+      label: 'Management',
+      links: [
+        { href: '/transcoding', label: 'Transcoding', icon: '⚙️' },
+        { href: '/media-profiles', label: 'Media Profiles', icon: '📝' },
+        { href: '/settings', label: 'Settings', icon: '🔧' },
+      ],
+    },
   ];
 
   if (!mounted) return null;
 
   const token = document.cookie.split('; ').find(row => row.startsWith('access_token='));
   const isAuthPage = pathname === '/login' || pathname === '/register';
+  const isSetupPage = pathname === '/setup';
 
-  if (!token || isAuthPage) return null;
+  if (!token || isAuthPage || isSetupPage) return null;
 
   return (
     <>
@@ -226,21 +247,32 @@ export default function Navigation() {
 
         {/* Navigation Links */}
         <nav className="flex-1 overflow-y-auto py-4">
-          <div className="space-y-2 px-3">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                  isActive(link.href)
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/50'
-                    : 'text-foreground/70 hover:text-foreground hover:bg-accent/70'
-                }`}
-                title={collapsed ? link.label : undefined}
-              >
-                <span className="text-xl">{link.icon}</span>
-                {!collapsed && <span className="font-medium">{link.label}</span>}
-              </Link>
+          <div className="space-y-6 px-3">
+            {navSections.map((section) => (
+              <div key={section.label}>
+                {!collapsed && (
+                  <h3 className="px-4 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {section.label}
+                  </h3>
+                )}
+                <div className="space-y-1">
+                  {section.links.map((link) => (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                        isActive(link.href)
+                          ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/50'
+                          : 'text-foreground/70 hover:text-foreground hover:bg-accent/70'
+                      }`}
+                      title={collapsed ? link.label : undefined}
+                    >
+                      <span className="text-xl">{link.icon}</span>
+                      {!collapsed && <span className="font-medium">{link.label}</span>}
+                    </Link>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </nav>
@@ -306,21 +338,30 @@ export default function Navigation() {
         {/* Mobile Menu */}
         {mobileMenuOpen && (
           <div className="border-t-2 border-border bg-background">
-            <div className="px-2 pt-2 pb-3 space-y-1 max-h-[calc(100vh-4rem)] overflow-y-auto">
-              {navLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-3 rounded-lg transition ${
-                    isActive(link.href)
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                  }`}
-                >
-                  <span className="text-xl">{link.icon}</span>
-                  <span className="font-medium">{link.label}</span>
-                </Link>
+            <div className="px-2 pt-2 pb-3 space-y-4 max-h-[calc(100vh-4rem)] overflow-y-auto">
+              {navSections.map((section) => (
+                <div key={section.label}>
+                  <h3 className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {section.label}
+                  </h3>
+                  <div className="space-y-1">
+                    {section.links.map((link) => (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={`flex items-center gap-3 px-3 py-3 rounded-lg transition ${
+                          isActive(link.href)
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                        }`}
+                      >
+                        <span className="text-xl">{link.icon}</span>
+                        <span className="font-medium">{link.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
               ))}
               <div className="pt-4 border-t-2 border-border space-y-1">
                 {user && (

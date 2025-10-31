@@ -4,7 +4,7 @@ from app.tasks.celery_app import celery_app
 from app.core.database import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile, media_profile_service
-from app.services.download_clients.qbittorrent import qbittorrent_client
+from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.core.webtransport import webtransport_manager
 
 
@@ -114,7 +114,11 @@ async def check_and_grab_movie(conn, release, movie):
     # Add to download client
     try:
         if release.magnet:
-            torrent_hash = await qbittorrent_client.add_torrent(
+            client = await get_qbittorrent_client()
+            if not client:
+                return False
+
+            torrent_hash = await client.add_torrent(
                 torrent=release.magnet,
                 category="movies",
                 tags=["nexarr", f"movie-{movie['id']}"],
@@ -203,7 +207,11 @@ async def check_and_grab_show(conn, release, show):
     # Add to download client
     try:
         if release.magnet:
-            torrent_hash = await qbittorrent_client.add_torrent(
+            client = await get_qbittorrent_client()
+            if not client:
+                return False
+
+            torrent_hash = await client.add_torrent(
                 torrent=release.magnet,
                 category="tv",
                 tags=["nexarr", f"show-{show['id']}", f"s{matched_season:02d}e{matched_episode:02d}"],

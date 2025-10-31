@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import Link from 'next/link';
+import PageHeader from '@/components/PageHeader';
 
 export default function HomePage() {
   const { data: stats } = useQuery({
@@ -45,13 +46,13 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header Section */}
-      <div className="bg-gradient-to-r from-indigo-600/10 via-purple-600/10 to-pink-600/10 border-b-2 border-border">
-        <div className="container mx-auto px-6 py-8">
-          <h1 className="text-4xl font-bold mb-2">Dashboard</h1>
-          <p className="text-muted-foreground">Overview of your media library</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        description="Overview of your media library"
+        gradientFrom="indigo-600/10"
+        gradientVia="purple-600/10"
+        gradientTo="pink-600/10"
+      />
 
       {/* Content Section */}
       <div className="container mx-auto px-6 py-8">
