@@ -43,6 +43,7 @@ class SettingResponse(BaseModel):
     category: str
     description: Optional[str]
     is_sensitive: bool
+    value_type: str
 
 
 class SettingsGroupResponse(BaseModel):
@@ -60,6 +61,17 @@ class DownloadClientResponse(BaseModel):
     use_ssl: bool
     is_enabled: bool
     is_default: bool
+
+
+class DownloadClientUpdate(BaseModel):
+    name: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    use_ssl: Optional[bool] = None
+    is_enabled: Optional[bool] = None
+    is_default: Optional[bool] = None
 
 
 @router.get("/", response_model=List[SettingsGroupResponse])
@@ -98,6 +110,7 @@ async def get_all_settings(
             category=category,
             description=row["description"],
             is_sensitive=is_encrypted,
+            value_type=row["value_type"] or "string",
         )
 
         if category not in settings_by_category:
@@ -108,6 +121,163 @@ async def get_all_settings(
         SettingsGroupResponse(category=cat, settings=settings)
         for cat, settings in settings_by_category.items()
     ]
+
+
+@router.get("/download-clients", response_model=List[DownloadClientResponse])
+async def get_download_clients(
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """
+    Get all configured download clients
+    Only administrators can access download clients
+    """
+    if current_user.role != 'administrator':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can access download clients",
+        )
+
+    rows = await conn.fetch("""
+        SELECT id, name, client_type, host, port, username, use_ssl, is_enabled, is_default
+        FROM download_clients
+        ORDER BY is_default DESC, name
+    """)
+
+    return [
+        DownloadClientResponse(
+            id=row["id"],
+            name=row["name"],
+            client_type=row["client_type"],
+            host=row["host"],
+            port=row["port"],
+            username=row["username"],
+            use_ssl=row["use_ssl"],
+            is_enabled=row["is_enabled"],
+            is_default=row["is_default"],
+        )
+        for row in rows
+    ]
+
+
+@router.put("/download-clients/{client_id}", response_model=DownloadClientResponse)
+async def update_download_client(
+    client_id: int,
+    update_data: DownloadClientUpdate,
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """
+    Update a download client configuration
+    Only administrators can update download clients
+    """
+    if current_user.role != 'administrator':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can update download clients",
+        )
+
+    # Check if client exists
+    existing = await conn.fetchrow(
+        "SELECT * FROM download_clients WHERE id = $1",
+        client_id
+    )
+
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Download client with id {client_id} not found"
+        )
+
+    # Build update query dynamically based on provided fields
+    update_fields = []
+    update_values = []
+    param_count = 1
+
+    if update_data.name is not None:
+        update_fields.append(f"name = ${param_count}")
+        update_values.append(update_data.name)
+        param_count += 1
+
+    if update_data.host is not None:
+        update_fields.append(f"host = ${param_count}")
+        update_values.append(update_data.host)
+        param_count += 1
+
+    if update_data.port is not None:
+        update_fields.append(f"port = ${param_count}")
+        update_values.append(update_data.port)
+        param_count += 1
+
+    if update_data.username is not None:
+        update_fields.append(f"username = ${param_count}")
+        update_values.append(update_data.username)
+        param_count += 1
+
+    if update_data.password is not None:
+        encrypted_password = encrypt_value(update_data.password)
+        update_fields.append(f"encrypted_password = ${param_count}")
+        update_values.append(encrypted_password)
+        param_count += 1
+
+    if update_data.use_ssl is not None:
+        update_fields.append(f"use_ssl = ${param_count}")
+        update_values.append(update_data.use_ssl)
+        param_count += 1
+
+    if update_data.is_enabled is not None:
+        update_fields.append(f"is_enabled = ${param_count}")
+        update_values.append(update_data.is_enabled)
+        param_count += 1
+
+    if update_data.is_default is not None:
+        if update_data.is_default:
+            # Unset default for all other clients of same type
+            await conn.execute(
+                "UPDATE download_clients SET is_default = FALSE WHERE client_type = $1",
+                existing['client_type']
+            )
+        update_fields.append(f"is_default = ${param_count}")
+        update_values.append(update_data.is_default)
+        param_count += 1
+
+    if not update_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update"
+        )
+
+    # Add updated_at
+    update_fields.append(f"updated_at = NOW()")
+
+    # Build and execute query
+    update_query = f"""
+        UPDATE download_clients
+        SET {', '.join(update_fields)}
+        WHERE id = ${param_count}
+        RETURNING id, name, client_type, host, port, username, use_ssl, is_enabled, is_default
+    """
+    update_values.append(client_id)
+
+    updated = await conn.fetchrow(update_query, *update_values)
+
+    # Clear cached qBittorrent client instance so it reloads with new config
+    if existing['client_type'] == 'qbittorrent':
+        from app.services.download_clients.qbittorrent import qbittorrent_client
+        import app.services.download_clients.qbittorrent as qb_module
+        qb_module.qbittorrent_client = None
+
+    return DownloadClientResponse(
+        id=updated["id"],
+        name=updated["name"],
+        client_type=updated["client_type"],
+        host=updated["host"],
+        port=updated["port"],
+        username=updated["username"],
+        use_ssl=updated["use_ssl"],
+        is_enabled=updated["is_enabled"],
+        is_default=updated["is_default"],
+    )
 
 
 @router.get("/{key}", response_model=SettingResponse)
@@ -147,6 +317,7 @@ async def get_setting(
         category=row["category"] or "general",
         description=row["description"],
         is_sensitive=is_encrypted,
+        value_type=row["value_type"] or "string",
     )
 
 
@@ -272,40 +443,3 @@ async def initialize_default_settings(
             setting["is_encrypted"], setting["category"], setting["description"])
 
     return {"message": "Default settings initialized"}
-
-
-@router.get("/download-clients", response_model=List[DownloadClientResponse])
-async def get_download_clients(
-    conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
-):
-    """
-    Get all configured download clients
-    Only administrators can access download clients
-    """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can access download clients",
-        )
-
-    rows = await conn.fetch("""
-        SELECT id, name, client_type, host, port, username, use_ssl, is_enabled, is_default
-        FROM download_clients
-        ORDER BY is_default DESC, name
-    """)
-
-    return [
-        DownloadClientResponse(
-            id=row["id"],
-            name=row["name"],
-            client_type=row["client_type"],
-            host=row["host"],
-            port=row["port"],
-            username=row["username"],
-            use_ssl=row["use_ssl"],
-            is_enabled=row["is_enabled"],
-            is_default=row["is_default"],
-        )
-        for row in rows
-    ]

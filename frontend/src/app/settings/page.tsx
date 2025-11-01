@@ -11,6 +11,7 @@ interface Setting {
   category: string;
   description: string | null;
   is_sensitive: boolean;
+  value_type?: string;
 }
 
 interface SettingsGroup {
@@ -37,6 +38,8 @@ export default function SettingsPage() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [selectedSection, setSelectedSection] = useState<SettingsSection>('download-clients');
+  const [editingClientId, setEditingClientId] = useState<number | null>(null);
+  const [editingClient, setEditingClient] = useState<Partial<DownloadClient> & { password?: string }>({});
 
   const { data: settingsGroups, isLoading } = useQuery<SettingsGroup[]>({
     queryKey: ['settings'],
@@ -85,6 +88,40 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
     },
   });
+
+  const updateDownloadClientMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<DownloadClient> & { password?: string } }) => {
+      const response = await api.put(`/settings/download-clients/${id}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings-download-clients'] });
+      setEditingClientId(null);
+      setEditingClient({});
+    },
+  });
+
+  const handleEditClient = (client: DownloadClient) => {
+    setEditingClientId(client.id);
+    setEditingClient({
+      name: client.name,
+      host: client.host,
+      port: client.port,
+      username: client.username,
+      use_ssl: client.use_ssl,
+      is_enabled: client.is_enabled,
+      is_default: client.is_default,
+    });
+  };
+
+  const handleSaveClient = (id: number) => {
+    updateDownloadClientMutation.mutate({ id, data: editingClient });
+  };
+
+  const handleCancelClientEdit = () => {
+    setEditingClientId(null);
+    setEditingClient({});
+  };
 
   const handleEdit = (setting: Setting) => {
     setEditingKey(setting.key);
@@ -153,7 +190,7 @@ export default function SettingsPage() {
                 <button
                   key={section.id}
                   onClick={() => setSelectedSection(section.id)}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors ${
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors cursor-pointer ${
                     isActive
                       ? 'bg-primary text-primary-foreground'
                       : 'hover:bg-accent'
@@ -196,43 +233,154 @@ export default function SettingsPage() {
                   key={client.id}
                   className="bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm"
                 >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <h3 className="font-medium text-lg">{client.name}</h3>
-                        {client.is_default && (
-                          <span className="px-2 py-1 bg-primary text-primary-foreground text-xs rounded">
-                            Default
-                          </span>
-                        )}
-                        {client.is_enabled ? (
-                          <span className="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs rounded">
-                            Enabled
-                          </span>
-                        ) : (
-                          <span className="px-2 py-1 bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 text-xs rounded">
-                            Disabled
-                          </span>
-                        )}
+                  {editingClientId === client.id ? (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Name</label>
+                          <input
+                            type="text"
+                            value={editingClient.name || ''}
+                            onChange={(e) => setEditingClient({ ...editingClient, name: e.target.value })}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Host</label>
+                          <input
+                            type="text"
+                            value={editingClient.host || ''}
+                            onChange={(e) => setEditingClient({ ...editingClient, host: e.target.value })}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Port</label>
+                          <input
+                            type="number"
+                            value={editingClient.port || ''}
+                            onChange={(e) => setEditingClient({ ...editingClient, port: parseInt(e.target.value) })}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Username</label>
+                          <input
+                            type="text"
+                            value={editingClient.username || ''}
+                            onChange={(e) => setEditingClient({ ...editingClient, username: e.target.value })}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Password (leave blank to keep current)</label>
+                          <input
+                            type="password"
+                            value={editingClient.password || ''}
+                            onChange={(e) => setEditingClient({ ...editingClient, password: e.target.value })}
+                            placeholder="********"
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background"
+                          />
+                        </div>
+                        <div className="col-span-2 space-y-3">
+                          <label className="flex items-center justify-between p-3 bg-muted/50 rounded-md cursor-pointer">
+                            <span className="text-sm font-medium">Use SSL</span>
+                            <div className="relative inline-flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={editingClient.use_ssl || false}
+                                onChange={(e) => setEditingClient({ ...editingClient, use_ssl: e.target.checked })}
+                                className="sr-only peer"
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/40 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                            </div>
+                          </label>
+                          <label className="flex items-center justify-between p-3 bg-muted/50 rounded-md cursor-pointer">
+                            <span className="text-sm font-medium">Enabled</span>
+                            <div className="relative inline-flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={editingClient.is_enabled || false}
+                                onChange={(e) => setEditingClient({ ...editingClient, is_enabled: e.target.checked })}
+                                className="sr-only peer"
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/40 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                            </div>
+                          </label>
+                          <label className="flex items-center justify-between p-3 bg-muted/50 rounded-md cursor-pointer">
+                            <span className="text-sm font-medium">Set as Default</span>
+                            <div className="relative inline-flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={editingClient.is_default || false}
+                                onChange={(e) => setEditingClient({ ...editingClient, is_default: e.target.checked })}
+                                className="sr-only peer"
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/40 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                            </div>
+                          </label>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Type:</span>
-                          <span className="ml-2 font-medium">{client.client_type}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Host:</span>
-                          <span className="ml-2 font-mono text-sm">
-                            {client.use_ssl ? 'https://' : 'http://'}{client.host}:{client.port}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Username:</span>
-                          <span className="ml-2 font-medium">{client.username}</span>
-                        </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleSaveClient(client.id)}
+                          className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 cursor-pointer"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={handleCancelClientEdit}
+                          className="px-4 py-2 border border-border rounded-md hover:bg-accent cursor-pointer"
+                        >
+                          Cancel
+                        </button>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="font-medium text-lg">{client.name}</h3>
+                          {client.is_default && (
+                            <span className="px-2 py-1 bg-primary text-primary-foreground text-xs rounded">
+                              Default
+                            </span>
+                          )}
+                          {client.is_enabled ? (
+                            <span className="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs rounded">
+                              Enabled
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 text-xs rounded">
+                              Disabled
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Type:</span>
+                            <span className="ml-2 font-medium">{client.client_type}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Host:</span>
+                            <span className="ml-2 font-mono text-sm">
+                              {client.use_ssl ? 'https://' : 'http://'}{client.host}:{client.port}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Username:</span>
+                            <span className="ml-2 font-medium">{client.username}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleEditClient(client)}
+                        className="ml-4 px-3 py-1 text-sm border border-border rounded-md hover:bg-accent cursor-pointer"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -383,25 +531,46 @@ function SettingsGroupSection({
                 <p className="text-sm text-muted-foreground mb-3">{setting.description}</p>
               )}
 
-              {editingKey === setting.key ? (
+              {setting.value_type === 'boolean' && editingKey !== setting.key ? (
+                <div className="flex items-center gap-4">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={setting.value === 'true'}
+                      onChange={(e) => {
+                        updateMutation.mutate({
+                          key: setting.key,
+                          value: e.target.checked ? 'true' : 'false'
+                        });
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/40 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                    <span className="ml-3 text-sm font-medium">
+                      {setting.value === 'true' ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </label>
+                </div>
+              ) : editingKey === setting.key ? (
                 <div className="flex gap-2">
                   <input
-                    type={setting.is_sensitive ? 'password' : 'text'}
+                    type={setting.is_sensitive ? 'password' : setting.value_type === 'integer' ? 'number' : 'text'}
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
                     className="flex-1 px-3 py-2 border-input bg-background text-foreground border rounded focus:outline-none focus:ring-2 focus:ring-ring"
                     placeholder={`Enter ${setting.key}`}
+                    {...(setting.value_type === 'integer' ? { min: 1, step: 1 } : {})}
                   />
                   <button
                     onClick={() => onSave(setting.key)}
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90"
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
                     disabled={updateMutation.isPending}
                   >
                     Save
                   </button>
                   <button
                     onClick={onCancel}
-                    className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:opacity-90"
+                    className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:opacity-90 cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -413,14 +582,14 @@ function SettingsGroupSection({
                   </code>
                   <button
                     onClick={() => onEdit(setting)}
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90"
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
                   >
                     Edit
                   </button>
                   {setting.value && setting.value !== '***HIDDEN***' && (
                     <button
                       onClick={() => onReset(setting.key)}
-                      className="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:opacity-90"
+                      className="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:opacity-90 cursor-pointer"
                       disabled={deleteMutation.isPending}
                     >
                       Reset

@@ -151,11 +151,22 @@ async def setup_qbittorrent(
                 detail="Failed to connect to qBittorrent. Check host, port, and credentials."
             )
 
-        # Add default tags for media types
-        await client.add_category("movies", "/downloads/movies")
-        await client.add_category("shows", "/downloads/shows")
-        await client.add_category("anime", "/downloads/anime")
+        # Add default categories for media types (ignore if they already exist)
+        try:
+            await client.add_category("movies", "/downloads/movies")
+        except Exception:
+            pass
+        try:
+            await client.add_category("shows", "/downloads/shows")
+        except Exception:
+            pass
+        try:
+            await client.add_category("anime", "/downloads/anime")
+        except Exception:
+            pass
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -337,20 +348,23 @@ async def mark_setup_complete(
             detail=f"Setup incomplete. Missing: {', '.join(missing)}"
         )
 
-    # Mark setup as complete
-    await conn.execute(
-        """
-        INSERT INTO app_settings (key, value, value_type, is_encrypted, category, description)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
-        """,
-        "setup_complete",
-        "true",
-        "boolean",
-        False,
-        "system",
-        "Indicates if initial setup wizard has been completed"
-    )
+    # Mark setup as complete and initialize system settings
+    settings_to_create = [
+        ("setup_complete", "true", "boolean", False, "internal", "Indicates if initial setup wizard has been completed"),
+        ("allow_user_registration", "true", "boolean", False, "system", "Allow new users to register accounts"),
+        ("rss_sync_interval", "15", "integer", False, "system", "RSS feed sync interval in minutes"),
+        ("auto_search_interval", "60", "integer", False, "system", "Automatic search interval in minutes for monitored content"),
+    ]
+
+    for key, value, value_type, is_encrypted, category, description in settings_to_create:
+        await conn.execute(
+            """
+            INSERT INTO app_settings (key, value, value_type, is_encrypted, category, description)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+            """,
+            key, value, value_type, is_encrypted, category, description
+        )
 
     return {"status": "success", "message": "Setup completed successfully"}
 

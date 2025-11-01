@@ -85,7 +85,7 @@ export default function ShowsPage() {
           </div>
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 px-6 py-3 bg-card border-2 border-border text-foreground rounded-lg hover:bg-accent transition font-medium whitespace-nowrap"
+            className="flex items-center gap-2 px-6 py-3 bg-card border-2 border-border text-foreground rounded-lg hover:bg-accent transition font-medium whitespace-nowrap cursor-pointer"
           >
             <Upload className="w-5 h-5" />
             Import Library
@@ -103,7 +103,7 @@ export default function ShowsPage() {
         <div className="flex gap-2 flex-wrap mb-8">
           <button
             onClick={() => setStatusFilter('all')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition cursor-pointer ${
               statusFilter === 'all'
                 ? 'bg-primary text-primary-foreground shadow-lg'
                 : 'bg-card text-foreground hover:bg-accent'
@@ -114,7 +114,7 @@ export default function ShowsPage() {
           </button>
           <button
             onClick={() => setStatusFilter('wanted')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition cursor-pointer ${
               statusFilter === 'wanted'
                 ? 'bg-primary text-primary-foreground shadow-lg'
                 : 'bg-card text-foreground hover:bg-accent'
@@ -124,7 +124,7 @@ export default function ShowsPage() {
           </button>
           <button
             onClick={() => setStatusFilter('downloading')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition cursor-pointer ${
               statusFilter === 'downloading'
                 ? 'bg-primary text-primary-foreground shadow-lg'
                 : 'bg-card text-foreground hover:bg-accent'
@@ -187,7 +187,7 @@ export default function ShowsPage() {
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition"
+                className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition cursor-pointer"
               >
                 Previous
               </button>
@@ -195,7 +195,7 @@ export default function ShowsPage() {
               <button
                 onClick={() => setPage(p => p + 1)}
                 disabled={!data?.shows || data.shows.length < 20}
-                className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition"
+                className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition cursor-pointer"
               >
                 Next
               </button>

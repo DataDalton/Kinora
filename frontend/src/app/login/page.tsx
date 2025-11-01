@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { LogIn, Loader2, Moon, Sun, Film } from 'lucide-react';
@@ -16,6 +16,26 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorTrigger, setErrorTrigger] = useState(0);
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
+
+  useEffect(() => {
+    const checkRegistrationStatus = async () => {
+      try {
+        const response = await api.get('/auth/registration-status');
+        setRegistrationEnabled(response.data.enabled);
+      } catch (error) {
+        setRegistrationEnabled(true);
+      }
+    };
+    checkRegistrationStatus();
+
+    const params = new URLSearchParams(window.location.search);
+    const errorParam = params.get('error');
+    if (errorParam === 'registration_disabled') {
+      setError('New user registration is currently disabled. Please contact an administrator.');
+      setErrorTrigger(prev => prev + 1);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,17 +191,19 @@ export default function LoginPage() {
               )}
             </button>
 
-            <div className="text-center pt-4">
-              <p className="text-sm text-muted-foreground">
-                Don&apos;t have an account?{' '}
-                <Link
-                  href="/register"
-                  className="font-semibold text-primary hover:text-primary/80 transition-colors"
-                >
-                  Sign up
-                </Link>
-              </p>
-            </div>
+            {registrationEnabled && (
+              <div className="text-center pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Don&apos;t have an account?{' '}
+                  <Link
+                    href="/register"
+                    className="font-semibold text-primary hover:text-primary/80 transition-colors"
+                  >
+                    Sign up
+                  </Link>
+                </p>
+              </div>
+            )}
           </form>
         </div>
       </div>

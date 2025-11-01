@@ -18,6 +18,21 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
+@router.get("/registration-status")
+async def get_registration_status(conn: asyncpg.Connection = Depends(get_db)):
+    """
+    Check if user registration is enabled (public endpoint for login page)
+    """
+    try:
+        registration_enabled = await conn.fetchval(
+            "SELECT value FROM app_settings WHERE key = $1",
+            "allow_user_registration"
+        )
+        return {"enabled": registration_enabled == 'true'}
+    except Exception:
+        return {"enabled": True}
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     conn: asyncpg.Connection = Depends(get_db),
@@ -52,6 +67,22 @@ async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get
     """
     Register a new user
     """
+    # Check if this is the first user (should be administrator)
+    user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
+    is_first_user = user_count == 0
+
+    # Check if registration is disabled (unless this is the first user)
+    if not is_first_user:
+        registration_enabled = await conn.fetchval(
+            "SELECT value FROM app_settings WHERE key = $1",
+            "allow_user_registration"
+        )
+        if registration_enabled == 'false':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User registration is currently disabled",
+            )
+
     # Check if username exists
     existing_user = await conn.fetchrow(
         "SELECT id FROM users WHERE username = $1",
@@ -64,9 +95,6 @@ async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get
             detail="Username already registered",
         )
 
-    # Check if this is the first user (should be administrator)
-    user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
-    is_first_user = user_count == 0
     user_role = 'administrator' if is_first_user else 'user'
 
     # Hash password and create user
