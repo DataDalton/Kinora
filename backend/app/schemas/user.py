@@ -23,6 +23,29 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class UserAdminCreate(UserBase):
+    """Schema for creating a user by an administrator"""
+
+    password: str = Field(..., min_length=8, max_length=100)
+    role: str = Field(default='user')
+    is_active: bool = Field(default=True)
+
+
+class UserAdminUpdate(BaseModel):
+    """Schema for updating a user by an administrator"""
+
+    username: Optional[str] = Field(None, min_length=3, max_length=50)
+    password: Optional[str] = Field(None, min_length=8, max_length=100)
+    is_active: Optional[bool] = None
+    role: Optional[str] = None
+
+
+class UserPasswordReset(BaseModel):
+    """Schema for resetting a user's password"""
+
+    password: str = Field(..., min_length=8, max_length=100)
+
+
 class User(UserBase):
     """Schema for user response"""
 

@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
+import Toast from './Toast';
 
 interface Media {
   id: number;
@@ -29,9 +30,17 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
   const [addCollection, setAddCollection] = useState(false);
   const [navigationStack, setNavigationStack] = useState<Media[]>([]);
   const [currentMedia, setCurrentMedia] = useState<Media | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const displayMedia = currentMedia || media;
   const mediaType = displayMedia?.media_type || defaultMediaType;
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info') => {
+    setToast(null);
+    setTimeout(() => {
+      setToast({ message, type });
+    }, 0);
+  };
 
   useEffect(() => {
     if (isOpen && media) {
@@ -104,7 +113,7 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
         localStorage.setItem(`lastProfile_${mediaType}`, selectedProfileId.toString());
       }
       queryClient.invalidateQueries({ queryKey: [mediaType === 'movie' ? 'movies' : mediaType === 'show' ? 'shows' : 'anime'] });
-      alert('Added to library successfully!');
+      showToast('Added to library successfully!', 'success');
       onClose();
       setShowAddModal(false);
     },
@@ -478,7 +487,7 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                 <button
                   onClick={() => {
                     if (!selectedProfileId) {
-                      alert('Please select a media profile');
+                      showToast('Please select a media profile', 'info');
                       return;
                     }
                     addMediaMutation.mutate({
@@ -505,6 +514,17 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-[70]">
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToast(null)}
+          />
         </div>
       )}
     </>

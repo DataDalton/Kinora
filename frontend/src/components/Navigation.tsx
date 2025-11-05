@@ -298,8 +298,26 @@ export default function Navigation() {
           </button>
 
           {user && !collapsed && (
-            <div className="px-3 py-2 text-sm text-muted-foreground">
-              {user.username}
+            <div className="mx-2 p-3 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                  <span className="text-lg font-bold text-primary">
+                    {user.username?.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">
+                    {user.username}
+                  </p>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
+                    user.role === 'administrator'
+                      ? 'bg-primary/20 text-primary border border-primary/30'
+                      : 'bg-muted text-muted-foreground border border-border'
+                  }`}>
+                    {user.role === 'administrator' ? 'Admin' : 'User'}
+                  </span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -363,10 +381,28 @@ export default function Navigation() {
                   </div>
                 </div>
               ))}
-              <div className="pt-4 border-t-2 border-border space-y-1">
+              <div className="pt-4 border-t-2 border-border space-y-2">
                 {user && (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">
-                    {user.username}
+                  <div className="mx-2 p-3 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                        <span className="text-lg font-bold text-primary">
+                          {user.username?.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">
+                          {user.username}
+                        </p>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
+                          user.role === 'administrator'
+                            ? 'bg-primary/20 text-primary border border-primary/30'
+                            : 'bg-muted text-muted-foreground border border-border'
+                        }`}>
+                          {user.role === 'administrator' ? 'Admin' : 'User'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 )}
                 <button

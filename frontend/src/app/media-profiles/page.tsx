@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import ISO6391 from 'iso-639-1';
 import PageHeader from '@/components/PageHeader';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface ResolutionSize {
   minSize: number;
@@ -147,6 +148,12 @@ export default function QualityProfilesPage() {
   const [editingProfile, setEditingProfile] = useState<QualityProfile | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
   const [activeSection, setActiveSection] = useState<string>('profile');
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
   const getDefaultLanguage = () => {
     if (typeof window === 'undefined') return 'en';
@@ -591,9 +598,15 @@ export default function QualityProfilesPage() {
   };
 
   const handleDelete = (id: number) => {
-    if (confirm('Are you sure you want to delete this quality profile?')) {
-      deleteMutation.mutate(id);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Quality Profile',
+      message: 'Are you sure you want to delete this quality profile? This action cannot be undone.',
+      onConfirm: () => {
+        deleteMutation.mutate(id);
+        setConfirmDialog({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+      }
+    });
   };
 
   const groupedSections = navigationSections.reduce((acc, section) => {
@@ -2415,6 +2428,16 @@ export default function QualityProfilesPage() {
           </div>
         </div>
       )}
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        variant="danger"
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog({ isOpen: false, title: '', message: '', onConfirm: () => {} })}
+      />
     </div>
   );
 }
