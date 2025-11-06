@@ -2,9 +2,20 @@
 const nextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: require('path').join(__dirname, '../'),
+
+  // React Compiler for automatic component memoization
+  reactCompiler: true,
+
+  // Turbopack configuration (now top-level in Next.js 16)
   turbopack: {
     rules: {},
   },
+
+  experimental: {
+    // Enable Turbopack filesystem caching for faster compile times across restarts
+    turbopackFileSystemCacheForDev: true,
+  },
+
   images: {
     remotePatterns: [
       {
@@ -18,7 +29,11 @@ const nextConfig = {
         pathname: '/file/**',
       },
     ],
+    // Next.js 16 defaults: quality 75 for better performance
+    // minimumCacheTTL defaults to 4 hours (14400 seconds)
+    // dangerouslyAllowLocalIP defaults to false for security
   },
+
   async rewrites() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     return [
