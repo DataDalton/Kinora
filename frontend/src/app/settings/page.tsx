@@ -6,6 +6,10 @@ import { api } from '@/lib/api';
 import PageHeader from '@/components/PageHeader';
 import Toast from '@/components/Toast';
 import ConfirmModal from '@/components/ConfirmModal';
+import AuthProvidersSection from '@/components/AuthProvidersSection';
+import OIDCProvidersManagement from '@/components/OIDCProvidersManagement';
+import ForwardAuthSettings from '@/components/ForwardAuthSettings';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface Setting {
   key: string;
@@ -42,7 +46,7 @@ interface AppUser {
   updated_at: string;
 }
 
-type SettingsSection = 'users' | 'download-clients' | 'api-keys' | 'paths' | 'system';
+type SettingsSection = 'users' | 'authentication' | 'oidc-providers' | 'forward-auth' | 'download-clients' | 'api-keys' | 'paths' | 'system';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -51,6 +55,10 @@ export default function SettingsPage() {
   const [selectedSection, setSelectedSection] = useState<SettingsSection>('users');
   const [editingClientId, setEditingClientId] = useState<number | null>(null);
   const [editingClient, setEditingClient] = useState<Partial<DownloadClient> & { password?: string }>({});
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
+    'auth': true,
+    'general': true,
+  });
 
   // User management state
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
@@ -349,12 +357,34 @@ export default function SettingsPage() {
     setShowResetPasswordModal(true);
   };
 
-  const sections = [
-    { id: 'users' as SettingsSection, name: 'User Management', count: users?.length || 0 },
-    { id: 'download-clients' as SettingsSection, name: 'Download Clients', count: downloadClients?.length || 0 },
-    { id: 'api-keys' as SettingsSection, name: 'API Keys', count: settingsGroups?.find(g => g.category === 'api_keys')?.settings.length || 0 },
-    { id: 'paths' as SettingsSection, name: 'Root Folders', count: settingsGroups?.find(g => g.category === 'paths')?.settings.length || 0 },
-    { id: 'system' as SettingsSection, name: 'System', count: settingsGroups?.find(g => g.category === 'system')?.settings.length || 0 },
+  const toggleCategory = (categoryId: string) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }));
+  };
+
+  const categories = [
+    {
+      id: 'auth',
+      name: 'Authentication & Security',
+      sections: [
+        { id: 'users' as SettingsSection, name: 'User Management', count: users?.length || 0 },
+        { id: 'authentication' as SettingsSection, name: 'Linked Providers', count: 0 },
+        { id: 'oidc-providers' as SettingsSection, name: 'OIDC Providers', count: 0 },
+        { id: 'forward-auth' as SettingsSection, name: 'Forward Auth', count: 0 },
+      ]
+    },
+    {
+      id: 'general',
+      name: 'General Settings',
+      sections: [
+        { id: 'download-clients' as SettingsSection, name: 'Download Clients', count: downloadClients?.length || 0 },
+        { id: 'api-keys' as SettingsSection, name: 'API Keys', count: settingsGroups?.find(g => g.category === 'api_keys')?.settings.length || 0 },
+        { id: 'paths' as SettingsSection, name: 'Root Folders', count: settingsGroups?.find(g => g.category === 'paths')?.settings.length || 0 },
+        { id: 'system' as SettingsSection, name: 'System', count: settingsGroups?.find(g => g.category === 'system')?.settings.length || 0 },
+      ]
+    }
   ];
 
   return (
@@ -363,33 +393,52 @@ export default function SettingsPage() {
         {/* Left Navigation */}
         <div className="w-64 bg-card border-r border-border p-6 min-h-screen">
           <h2 className="text-xl font-bold mb-6">Settings</h2>
-          <nav className="space-y-2">
-            {sections.map((section) => {
-              const isActive = selectedSection === section.id;
-
-              return (
+          <nav className="space-y-4">
+            {categories.map((category) => (
+              <div key={category.id}>
                 <button
-                  key={section.id}
-                  onClick={() => setSelectedSection(section.id)}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors cursor-pointer ${
-                    isActive
-                      ? 'bg-primary text-primary-foreground'
-                      : 'hover:bg-accent'
-                  }`}
+                  onClick={() => toggleCategory(category.id)}
+                  className="w-full flex items-center justify-between px-2 py-2 text-sm font-semibold text-foreground hover:bg-accent rounded-lg transition-colors cursor-pointer"
                 >
-                  <span className="text-sm font-medium">{section.name}</span>
-                  {section.count > 0 && (
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      isActive
-                        ? 'bg-primary-foreground/20'
-                        : 'bg-muted'
-                    }`}>
-                      {section.count}
-                    </span>
+                  <span>{category.name}</span>
+                  {expandedCategories[category.id] ? (
+                    <ChevronDown className="w-4 h-4" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4" />
                   )}
                 </button>
-              );
-            })}
+                {expandedCategories[category.id] && (
+                  <div className="mt-2 space-y-1 ml-2">
+                    {category.sections.map((section) => {
+                      const isActive = selectedSection === section.id;
+
+                      return (
+                        <button
+                          key={section.id}
+                          onClick={() => setSelectedSection(section.id)}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors cursor-pointer ${
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : 'hover:bg-accent'
+                          }`}
+                        >
+                          <span className="text-sm font-medium">{section.name}</span>
+                          {section.count > 0 && (
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                              isActive
+                                ? 'bg-primary-foreground/20'
+                                : 'bg-muted'
+                            }`}>
+                              {section.count}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
           </nav>
         </div>
 
@@ -493,6 +542,60 @@ export default function SettingsPage() {
                       No users found
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Authentication Section */}
+          {selectedSection === 'authentication' && (
+            <div>
+              <PageHeader
+                title="Authentication"
+                description="Manage linked authentication providers"
+                gradientFrom="indigo-600/10"
+                gradientVia="blue-600/10"
+                gradientTo="cyan-600/10"
+              />
+              <div className="p-8">
+                <div className="max-w-6xl mx-auto">
+                  <AuthProvidersSection />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* OIDC Providers Section */}
+          {selectedSection === 'oidc-providers' && (
+            <div>
+              <PageHeader
+                title="OIDC Providers"
+                description="Configure OIDC/SSO providers for login (Admin Only)"
+                gradientFrom="violet-600/10"
+                gradientVia="purple-600/10"
+                gradientTo="fuchsia-600/10"
+              />
+              <div className="p-8">
+                <div className="max-w-6xl mx-auto">
+                  <OIDCProvidersManagement />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Forward Auth Section */}
+          {selectedSection === 'forward-auth' && (
+            <div>
+              <PageHeader
+                title="Forward Authentication"
+                description="Configure trusted proxy IPs for Authelia/Authentik forward authentication"
+                gradientFrom="emerald-600/10"
+                gradientVia="teal-600/10"
+                gradientTo="cyan-600/10"
+              />
+              <div className="p-8">
+                <div className="max-w-6xl mx-auto">
+                  <ForwardAuthSettings />
                 </div>
               </div>
             </div>

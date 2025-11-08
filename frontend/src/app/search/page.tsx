@@ -184,7 +184,7 @@ export default function SearchPage() {
 
           <button
             type="submit"
-            className="px-6 py-2 bg-primary text-primary-foreground rounded hover:opacity-90"
+            className="px-6 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
           >
             Search
           </button>

@@ -138,5 +138,13 @@ class Settings(BaseSettings):
     SEARCH_RESULTS_LIMIT: int = 100
     MIN_SEEDERS: int = 5
 
+    # Forward Auth - Default trusted private IP ranges for auto-detection
+    FORWARD_AUTH_DEFAULT_TRUSTED_RANGES: List[str] = [
+        "127.0.0.1/32",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+    ]
+
 
 settings = Settings()

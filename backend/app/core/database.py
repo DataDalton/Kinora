@@ -58,15 +58,68 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) UNIQUE NOT NULL,
-                hashed_password VARCHAR(255) NOT NULL,
+                hashed_password VARCHAR(255),
                 is_active BOOLEAN DEFAULT TRUE NOT NULL,
                 role VARCHAR(50) DEFAULT 'user' NOT NULL,
+                last_login_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT NOW() NOT NULL,
                 updated_at TIMESTAMP DEFAULT NOW() NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
             CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+        """)
+
+        # User auth providers table - tracks linked authentication methods
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_auth_providers (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+                provider_type VARCHAR(50) NOT NULL,
+                provider_name VARCHAR(100),
+                provider_subject VARCHAR(255) NOT NULL,
+                provider_username VARCHAR(255),
+                provider_metadata JSONB,
+                linked_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                last_used_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                UNIQUE(provider_type, provider_name, provider_subject)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_auth_providers_user ON user_auth_providers(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_auth_providers_subject ON user_auth_providers(provider_subject);
+            CREATE INDEX IF NOT EXISTS idx_user_auth_providers_type ON user_auth_providers(provider_type);
+        """)
+
+        # TOTP 2FA table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_totp (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+                secret VARCHAR(255) NOT NULL,
+                enabled BOOLEAN DEFAULT FALSE NOT NULL,
+                backup_codes JSONB,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                verified_at TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_totp_user ON user_totp(user_id);
+        """)
+
+        # WebAuthn credentials table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_webauthn_credentials (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+                credential_id TEXT NOT NULL UNIQUE,
+                public_key TEXT NOT NULL,
+                sign_count INTEGER DEFAULT 0 NOT NULL,
+                name VARCHAR(100),
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                last_used_at TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_webauthn_user ON user_webauthn_credentials(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_webauthn_credential ON user_webauthn_credentials(credential_id);
         """)
 
         # Movies table

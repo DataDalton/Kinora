@@ -154,7 +154,7 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
           <h2 className="text-2xl font-bold">Import {mediaTypeLabel} Library</h2>
           <button
             onClick={handleClose}
-            className="text-zinc-400 hover:text-white transition-colors"
+            className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
           >
             <X size={24} />
           </button>
@@ -175,7 +175,7 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
                     placeholder="/path/to/existing/media"
                     className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
                   />
-                  <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 transition-colors">
+                  <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 transition-colors cursor-pointer">
                     <Folder size={20} />
                   </button>
                 </div>
@@ -192,7 +192,7 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
                     placeholder="/media/movies"
                     className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
                   />
-                  <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 transition-colors">
+                  <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 transition-colors cursor-pointer">
                     <Folder size={20} />
                   </button>
                 </div>
@@ -273,7 +273,7 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
                 </div>
                 <button
                   onClick={toggleSelectAll}
-                  className="text-sm text-blue-400 hover:text-blue-300"
+                  className="text-sm text-blue-400 hover:text-blue-300 cursor-pointer"
                 >
                   {selectedFiles.size === matchedFiles.length ? 'Deselect All' : 'Select All'}
                 </button>
@@ -378,14 +378,14 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
             <>
               <button
                 onClick={handleClose}
-                className="px-4 py-2 text-zinc-400 hover:text-white transition-colors"
+                className="px-4 py-2 text-zinc-400 hover:text-white transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleScan}
                 disabled={!directoryPath || !rootFolderPath}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded transition-colors"
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded transition-colors cursor-pointer"
               >
                 Scan Directory
               </button>
@@ -396,14 +396,14 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
             <>
               <button
                 onClick={() => setStep('setup')}
-                className="px-4 py-2 text-zinc-400 hover:text-white transition-colors"
+                className="px-4 py-2 text-zinc-400 hover:text-white transition-colors cursor-pointer"
               >
                 Back
               </button>
               <button
                 onClick={handleImport}
                 disabled={selectedFiles.size === 0}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded transition-colors"
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded transition-colors cursor-pointer"
               >
                 Import {selectedFiles.size} Files
               </button>
@@ -413,7 +413,7 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
           {step === 'complete' && (
             <button
               onClick={handleClose}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded transition-colors"
+              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded transition-colors cursor-pointer"
             >
               Done
             </button>

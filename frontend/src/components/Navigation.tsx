@@ -153,7 +153,7 @@ export default function Navigation() {
           )}
           <button
             onClick={toggleCollapsed}
-            className="p-2 rounded-lg hover:bg-accent transition ml-auto"
+            className="p-2 rounded-lg hover:bg-accent transition ml-auto cursor-pointer"
             aria-label="Toggle sidebar"
           >
             {collapsed ? (
@@ -217,7 +217,7 @@ export default function Navigation() {
                           setShowDropdown(false);
                           setSearchQuery('');
                         }}
-                        className="w-full flex items-center justify-center gap-2 p-2 rounded-lg hover:bg-accent transition text-sm text-primary"
+                        className="w-full flex items-center justify-center gap-2 p-2 rounded-lg hover:bg-accent transition text-sm text-primary cursor-pointer"
                       >
                         <Plus className="w-4 h-4" />
                         <span>Add new media</span>
@@ -233,7 +233,7 @@ export default function Navigation() {
                         setShowDropdown(false);
                         setSearchQuery('');
                       }}
-                      className="w-full flex items-center justify-center gap-2 p-2 rounded-lg hover:bg-accent transition text-sm text-primary"
+                      className="w-full flex items-center justify-center gap-2 p-2 rounded-lg hover:bg-accent transition text-sm text-primary cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                       <span>Search for "{searchQuery}" to add</span>
@@ -281,7 +281,7 @@ export default function Navigation() {
         <div className="border-t-2 border-border p-3 space-y-2">
           <button
             onClick={toggleTheme}
-            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition w-full"
+            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition w-full cursor-pointer"
             aria-label="Toggle theme"
             title={collapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
           >
@@ -298,7 +298,10 @@ export default function Navigation() {
           </button>
 
           {user && !collapsed && (
-            <div className="mx-2 p-3 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 shadow-sm">
+            <Link
+              href="/profile"
+              className="block mx-2 p-3 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 shadow-sm hover:shadow-md hover:from-primary/15 hover:to-primary/10 transition-all cursor-pointer"
+            >
               <div className="flex items-center gap-3">
                 <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
                   <span className="text-lg font-bold text-primary">
@@ -318,12 +321,12 @@ export default function Navigation() {
                   </span>
                 </div>
               </div>
-            </div>
+            </Link>
           )}
 
           <button
             onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-destructive/10 text-destructive transition w-full"
+            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-destructive/10 text-destructive transition w-full cursor-pointer"
             title={collapsed ? 'Logout' : undefined}
           >
             <LogOut className="w-5 h-5" />
@@ -341,7 +344,7 @@ export default function Navigation() {
 
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 rounded-md hover:bg-accent"
+            className="p-2 rounded-md hover:bg-accent cursor-pointer"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {mobileMenuOpen ? (
@@ -383,7 +386,11 @@ export default function Navigation() {
               ))}
               <div className="pt-4 border-t-2 border-border space-y-2">
                 {user && (
-                  <div className="mx-2 p-3 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 shadow-sm">
+                  <Link
+                    href="/profile"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="block mx-2 p-3 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 shadow-sm hover:shadow-md hover:from-primary/15 hover:to-primary/10 transition-all"
+                  >
                     <div className="flex items-center gap-3">
                       <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
                         <span className="text-lg font-bold text-primary">
@@ -403,11 +410,11 @@ export default function Navigation() {
                         </span>
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 )}
                 <button
                   onClick={toggleTheme}
-                  className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition"
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition cursor-pointer"
                 >
                   {theme === 'dark' ? (
                     <>
@@ -426,7 +433,7 @@ export default function Navigation() {
                     setMobileMenuOpen(false);
                     handleLogout();
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-destructive/10 text-destructive"
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-destructive/10 text-destructive cursor-pointer"
                 >
                   <LogOut className="w-5 h-5" />
                   <span className="font-medium">Logout</span>

@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, movies, shows, anime, search, discover, webtransport, settings, media_profiles, transcoding, library_import, setup
+from app.api.v1.endpoints import auth, users, movies, shows, anime, search, discover, webtransport, settings, media_profiles, transcoding, library_import, setup, two_factor
 
 api_router = APIRouter()
 
 # Include all endpoint routers
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
+api_router.include_router(two_factor.router, prefix="/2fa", tags=["two-factor-auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(setup.router, prefix="/setup", tags=["setup"])
 api_router.include_router(movies.router, prefix="/movies", tags=["movies"])

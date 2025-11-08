@@ -3,14 +3,18 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { UserPlus, Loader2, Moon, Sun, Film } from 'lucide-react';
+import { UserPlus, Loader2, Moon, Sun, Film, ArrowRight, ArrowLeft, Shield } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
+import TwoFactorSettings from '@/components/TwoFactorSettings';
+
+type RegistrationStep = 'credentials' | '2fa';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const [currentStep, setCurrentStep] = useState<RegistrationStep>('credentials');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -71,10 +75,10 @@ export default function RegisterPage() {
       document.cookie = `access_token=${access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
       document.cookie = `refresh_token=${refresh_token}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
 
-      router.push('/');
+      setCurrentStep('2fa');
+      setLoading(false);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Registration failed. Please try again.');
-    } finally {
       setLoading(false);
     }
   };
@@ -102,7 +106,7 @@ export default function RegisterPage() {
       {/* Theme toggle button */}
       <button
         onClick={toggleTheme}
-        className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-gradient-to-br from-primary to-purple-600 hover:shadow-2xl hover:scale-110 transition-all duration-300 shadow-xl"
+        className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-gradient-to-br from-primary to-purple-600 hover:shadow-2xl hover:scale-110 transition-all duration-300 shadow-xl cursor-pointer"
         aria-label="Toggle theme"
       >
         {theme === 'dark' ? (
@@ -113,7 +117,10 @@ export default function RegisterPage() {
       </button>
 
       {/* Register card */}
-      <div className="relative w-full max-w-md z-10">
+      <div className={cn(
+        "relative w-full z-10 transition-all",
+        currentStep === 'credentials' ? "max-w-md" : "max-w-4xl"
+      )}>
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-purple-600 mb-6 shadow-2xl">
             <Film className="w-10 h-10 text-white" />
@@ -127,11 +134,32 @@ export default function RegisterPage() {
         </div>
 
         <div className="bg-card border border-border rounded-2xl shadow-2xl p-8 backdrop-blur-sm">
-          <h2 className="text-2xl font-bold text-foreground mb-6 text-center">
-            Create Your Account
-          </h2>
+          {/* Step indicators */}
+          <div className="flex items-center justify-center mb-8 gap-2">
+            <div className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg transition-all",
+              currentStep === 'credentials' ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+            )}>
+              <UserPlus className="w-4 h-4" />
+              <span className="text-sm font-medium">Account</span>
+            </div>
+            <ArrowRight className="w-4 h-4 text-muted-foreground" />
+            <div className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg transition-all",
+              currentStep === '2fa' ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+            )}>
+              <Shield className="w-4 h-4" />
+              <span className="text-sm font-medium">Security (Optional)</span>
+            </div>
+          </div>
 
-          <form className="space-y-6" onSubmit={handleSubmit}>
+          {currentStep === 'credentials' && (
+            <>
+              <h2 className="text-2xl font-bold text-foreground mb-6 text-center">
+                Create Your Account
+              </h2>
+
+              <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
               <div className="rounded-lg bg-destructive/10 border border-destructive/50 p-4">
                 <div className="text-sm text-destructive font-medium">{error}</div>
@@ -216,7 +244,7 @@ export default function RegisterPage() {
                 "hover:shadow-lg hover:scale-[1.02]",
                 "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
                 "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100",
-                "transition-all"
+                "transition-all cursor-pointer"
               )}
             >
               {loading ? (
@@ -232,18 +260,58 @@ export default function RegisterPage() {
               )}
             </button>
 
-            <div className="text-center pt-4">
-              <p className="text-sm text-muted-foreground">
-                Already have an account?{' '}
-                <Link
-                  href="/login"
-                  className="font-semibold text-primary hover:text-primary/80 transition-colors"
+                <div className="text-center pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    Already have an account?{' '}
+                    <Link
+                      href="/login"
+                      className="font-semibold text-primary hover:text-primary/80 transition-colors"
+                    >
+                      Sign in
+                    </Link>
+                  </p>
+                </div>
+              </form>
+            </>
+          )}
+
+          {currentStep === '2fa' && (
+            <div className="space-y-6">
+              <div className="text-center mb-6">
+                <h2 className="text-2xl font-bold text-foreground mb-2 flex items-center justify-center gap-2">
+                  Secure Your Account
+                  <span className="text-xs font-medium px-2 py-1 rounded-md bg-primary/10 text-primary border border-primary/20">
+                    Optional
+                  </span>
+                </h2>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Add an extra layer of security with two-factor authentication
+                </p>
+                <p className="text-xs text-muted-foreground/70">
+                  You can always set this up later from your profile settings
+                </p>
+              </div>
+
+              <TwoFactorSettings />
+
+              <div className="flex gap-3 pt-6 border-t border-border">
+                <button
+                  onClick={() => setCurrentStep('credentials')}
+                  className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
                 >
-                  Sign in
-                </Link>
-              </p>
+                  <ArrowLeft className="w-4 h-4" />
+                  Back
+                </button>
+                <button
+                  onClick={() => router.push('/')}
+                  className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center justify-center gap-2 font-medium cursor-pointer"
+                >
+                  Skip for now
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-          </form>
+          )}
         </div>
       </div>
     </div>

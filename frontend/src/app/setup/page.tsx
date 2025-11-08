@@ -190,7 +190,7 @@ export default function SetupPage() {
                 <button
                   key={step.id}
                   onClick={() => setCurrentStep(step.id as SetupStep)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors cursor-pointer ${
                     isActive
                       ? 'bg-primary text-primary-foreground'
                       : isCompleted
@@ -286,7 +286,7 @@ export default function SetupPage() {
                       type="button"
                       id="use_ssl"
                       onClick={() => setQBittorrentData({ ...qbittorrentData, use_ssl: !qbittorrentData.use_ssl })}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
                         qbittorrentData.use_ssl ? 'bg-primary' : 'bg-muted'
                       }`}
                     >
@@ -307,7 +307,7 @@ export default function SetupPage() {
                   <button
                     onClick={() => qbittorrentMutation.mutate()}
                     disabled={qbittorrentMutation.isPending || !qbittorrentData.password}
-                    className="w-full px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
+                    className="w-full px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
                   >
                     {qbittorrentMutation.isPending ? (
                       <>
@@ -362,14 +362,14 @@ export default function SetupPage() {
                   <div className="flex gap-3">
                     <button
                       onClick={() => setCurrentStep('qbittorrent')}
-                      className="px-6 py-3 bg-card border border-border rounded-lg hover:bg-accent font-medium"
+                      className="px-6 py-3 bg-card border border-border rounded-lg hover:bg-accent font-medium cursor-pointer"
                     >
                       Back
                     </button>
                     <button
                       onClick={() => tmdbMutation.mutate()}
                       disabled={tmdbMutation.isPending || tmdbData.api_key.length < 32}
-                      className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
+                      className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
                     >
                       {tmdbMutation.isPending ? (
                         <>
@@ -407,7 +407,7 @@ export default function SetupPage() {
                       <button
                         type="button"
                         onClick={() => openBrowser('movies_root')}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2"
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
                       >
                         <FolderOpen className="w-4 h-4" />
                         Browse
@@ -428,7 +428,7 @@ export default function SetupPage() {
                       <button
                         type="button"
                         onClick={() => openBrowser('shows_root')}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2"
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
                       >
                         <FolderOpen className="w-4 h-4" />
                         Browse
@@ -449,7 +449,7 @@ export default function SetupPage() {
                       <button
                         type="button"
                         onClick={() => openBrowser('anime_root')}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2"
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
                       >
                         <FolderOpen className="w-4 h-4" />
                         Browse
@@ -466,14 +466,14 @@ export default function SetupPage() {
                   <div className="flex gap-3">
                     <button
                       onClick={() => setCurrentStep('tmdb')}
-                      className="px-6 py-3 bg-card border border-border rounded-lg hover:bg-accent font-medium"
+                      className="px-6 py-3 bg-card border border-border rounded-lg hover:bg-accent font-medium cursor-pointer"
                     >
                       Back
                     </button>
                     <button
                       onClick={() => foldersMutation.mutate()}
                       disabled={foldersMutation.isPending}
-                      className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
+                      className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
                     >
                       {foldersMutation.isPending ? (
                         <>
@@ -503,7 +503,7 @@ export default function SetupPage() {
                 <button
                   onClick={() => completeMutation.mutate()}
                   disabled={completeMutation.isPending}
-                  className="px-8 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 font-medium flex items-center justify-center gap-2 mx-auto"
+                  className="px-8 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 font-medium flex items-center justify-center gap-2 mx-auto cursor-pointer"
                 >
                   {completeMutation.isPending ? (
                     <>
@@ -528,7 +528,7 @@ export default function SetupPage() {
               <h3 className="text-lg font-semibold">Select Folder</h3>
               <button
                 onClick={() => setShowBrowser(false)}
-                className="p-2 hover:bg-accent rounded-lg transition"
+                className="p-2 hover:bg-accent rounded-lg transition cursor-pointer"
               >
                 ✕
               </button>
@@ -546,13 +546,13 @@ export default function SetupPage() {
                 />
                 <button
                   onClick={navigateToManualPath}
-                  className="px-4 py-2 bg-accent text-foreground rounded-lg hover:bg-accent/80 transition whitespace-nowrap"
+                  className="px-4 py-2 bg-accent text-foreground rounded-lg hover:bg-accent/80 transition whitespace-nowrap cursor-pointer"
                 >
                   Go
                 </button>
                 <button
                   onClick={() => selectFolder(browserData?.current_path || currentBrowserPath)}
-                  className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition whitespace-nowrap"
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition whitespace-nowrap cursor-pointer"
                 >
                   Select Current
                 </button>
@@ -571,7 +571,7 @@ export default function SetupPage() {
                   </div>
                   <button
                     onClick={() => refetchBrowser()}
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm"
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm cursor-pointer"
                   >
                     Retry
                   </button>
@@ -582,7 +582,7 @@ export default function SetupPage() {
                   {browserData?.parent_path !== null && browserData?.parent_path !== undefined && (
                     <button
                       onClick={() => setCurrentBrowserPath(browserData.parent_path)}
-                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition text-left border-b border-border"
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition text-left border-b border-border cursor-pointer"
                     >
                       <Folder className="w-5 h-5 text-muted-foreground shrink-0" />
                       <span className="font-mono text-muted-foreground">..</span>
@@ -594,7 +594,7 @@ export default function SetupPage() {
                     <button
                       key={item.path}
                       onClick={() => setCurrentBrowserPath(item.path)}
-                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition text-left"
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition text-left cursor-pointer"
                     >
                       <Folder className="w-5 h-5 text-primary shrink-0" />
                       <span className="truncate">{item.name}</span>

@@ -15,9 +15,13 @@ flower==2.0.1
 
 # Authentication & Security
 python-jose[cryptography]==3.5.0
-passlib[bcrypt]==1.7.4
+passlib[argon2]==1.7.4
+argon2-cffi==23.1.0
 python-multipart==0.0.20
 bcrypt==5.0.0
+pyotp==2.9.0
+webauthn==2.7.0
+qrcode==8.2
 
 # Validation
 pydantic==2.12.3
