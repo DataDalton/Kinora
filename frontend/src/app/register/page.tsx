@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
 import TwoFactorSettings from '@/components/TwoFactorSettings';
+import HolographicGrid from '@/components/HolographicGrid';
 
 type RegistrationStep = 'credentials' | '2fa';
 
@@ -93,20 +94,13 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen relative flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 overflow-hidden bg-background">
-      {/* Animated background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-primary via-transparent to-purple-600 opacity-10 dark:opacity-20" />
-
-      {/* Animated floating shapes */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 animate-blob" />
-        <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 animate-blob animation-delay-2000" />
-        <div className="absolute bottom-1/4 left-1/3 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 animate-blob animation-delay-4000" />
-      </div>
+      {/* Holographic grid background */}
+      <HolographicGrid />
 
       {/* Theme toggle button */}
       <button
         onClick={toggleTheme}
-        className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-gradient-to-br from-primary to-purple-600 hover:shadow-2xl hover:scale-110 transition-all duration-300 shadow-xl cursor-pointer"
+        className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-gradient-to-br from-[#27272a] to-[#3b82f6] hover:shadow-2xl hover:scale-110 transition-all duration-300 shadow-xl cursor-pointer"
         aria-label="Toggle theme"
       >
         {theme === 'dark' ? (
@@ -122,10 +116,10 @@ export default function RegisterPage() {
         currentStep === 'credentials' ? "max-w-md" : "max-w-4xl"
       )}>
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-purple-600 mb-6 shadow-2xl">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-[#27272a] to-[#3b82f6] mb-6 shadow-2xl">
             <Film className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-6xl font-bold bg-gradient-to-r from-primary via-purple-500 to-pink-500 bg-clip-text text-transparent mb-3">
+          <h1 className="text-6xl font-bold logo-gradient mb-3">
             Nexarr
           </h1>
           <p className="text-lg text-muted-foreground font-medium">
@@ -239,7 +233,7 @@ export default function RegisterPage() {
               disabled={loading}
               className={cn(
                 "w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg",
-                "bg-gradient-to-r from-primary to-purple-600",
+                "bg-gradient-to-r from-[#27272a] to-[#3b82f6]",
                 "text-primary-foreground font-semibold text-base",
                 "hover:shadow-lg hover:scale-[1.02]",
                 "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",

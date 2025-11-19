@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #1c1f2e;
-  --color-foreground: #f5f5f5;
-  --color-card: #282d3e;
-  --color-card-foreground: #f5f5f5;
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-card: #171717;
+  --color-card-foreground: #fafafa;
   --color-primary: #3b82f6;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #2d3142;
-  --color-secondary-foreground: #f5f5f5;
-  --color-muted: #2d3142;
-  --color-muted-foreground: #9ca3af;
-  --color-accent: #323849;
-  --color-accent-foreground: #f5f5f5;
+  --color-secondary: #262626;
+  --color-secondary-foreground: #fafafa;
+  --color-muted: #262626;
+  --color-muted-foreground: #a3a3a3;
+  --color-accent: #2d2d2d;
+  --color-accent-foreground: #fafafa;
   --color-destructive: #ef4444;
   --color-destructive-foreground: #ffffff;
-  --color-border: #3a3f54;
-  --color-input: #2d3142;
+  --color-border: #404040;
+  --color-input: #1f1f1f;
   --color-ring: #3b82f6;
   --color-warning: #eab308;
   --color-warning-foreground: #000000;
@@ -35,7 +35,7 @@ body {
 /* Dark theme scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3a3f54 #1c1f2e;
+  scrollbar-color: #404040 #0a0a0a;
 }
 
 *::-webkit-scrollbar {
@@ -44,30 +44,31 @@ body {
 }
 
 *::-webkit-scrollbar-track {
-  background: #1c1f2e;
+  background: #0a0a0a;
   border-radius: 6px;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #3a3f54;
+  background: #404040;
   border-radius: 6px;
-  border: 2px solid #1c1f2e;
+  border: 2px solid #0a0a0a;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #4a5066;
+  background: #525252;
 }
 
 *::-webkit-scrollbar-corner {
-  background: #1c1f2e;
+  background: #0a0a0a;
 }
 
-/* Custom gradient for Nexarr logo with srgb color space */
+/* Custom gradient for Nexarr logo */
 .logo-gradient {
-  background: linear-gradient(to right in srgb, #3b82f6, #a855f7, #ec4899);
+  background: linear-gradient(to right in srgb, #171717, #3b82f6);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  letter-spacing: -0.02em;
 }
 
 /* Animations */

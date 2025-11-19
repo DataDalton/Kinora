@@ -3,7 +3,25 @@
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, LogOut, ChevronLeft, ChevronRight, Search, Plus } from 'lucide-react';
+import {
+  Moon,
+  Sun,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  Plus,
+  LayoutDashboard,
+  Activity,
+  Film,
+  Tv,
+  Sparkles,
+  Compass,
+  PlusCircle,
+  Settings,
+  FileVideo,
+  Wrench
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
@@ -103,31 +121,31 @@ export default function Navigation() {
     {
       label: 'General',
       links: [
-        { href: '/', label: 'Dashboard', icon: '📊' },
-        { href: '/activity', label: 'Activity', icon: '📥' },
+        { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/activity', label: 'Activity', icon: Activity },
       ],
     },
     {
       label: 'Media',
       links: [
-        { href: '/movies', label: 'Movies', icon: '🎬' },
-        { href: '/shows', label: 'TV Shows', icon: '📺' },
-        { href: '/anime', label: 'Anime', icon: '🎌' },
+        { href: '/movies', label: 'Movies', icon: Film },
+        { href: '/shows', label: 'TV Shows', icon: Tv },
+        { href: '/anime', label: 'Anime', icon: Sparkles },
       ],
     },
     {
       label: 'Discovery',
       links: [
-        { href: '/discover', label: 'Discover', icon: '🔍' },
-        { href: '/search', label: 'Search', icon: '➕' },
+        { href: '/discover', label: 'Discover', icon: Compass },
+        { href: '/search', label: 'Search', icon: PlusCircle },
       ],
     },
     {
       label: 'Management',
       links: [
-        { href: '/transcoding', label: 'Transcoding', icon: '⚙️' },
-        { href: '/media-profiles', label: 'Media Profiles', icon: '📝' },
-        { href: '/settings', label: 'Settings', icon: '🔧' },
+        { href: '/transcoding', label: 'Transcoding', icon: Settings },
+        { href: '/media-profiles', label: 'Media Profiles', icon: FileVideo },
+        { href: '/settings', label: 'Settings', icon: Wrench },
       ],
     },
   ];
@@ -267,7 +285,7 @@ export default function Navigation() {
                       }`}
                       title={collapsed ? link.label : undefined}
                     >
-                      <span className="text-xl">{link.icon}</span>
+                      <link.icon className="w-5 h-5" />
                       {!collapsed && <span className="font-medium">{link.label}</span>}
                     </Link>
                   ))}
@@ -377,7 +395,7 @@ export default function Navigation() {
                             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                         }`}
                       >
-                        <span className="text-xl">{link.icon}</span>
+                        <link.icon className="w-5 h-5" />
                         <span className="font-medium">{link.label}</span>
                       </Link>
                     ))}

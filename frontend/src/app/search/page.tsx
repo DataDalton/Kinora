@@ -166,7 +166,7 @@ export default function SearchPage() {
           <select
             value={mediaType}
             onChange={(e) => setMediaType(e.target.value)}
-            className="px-4 py-2 border-input bg-background text-foreground border rounded"
+            className="px-4 py-3 bg-card border-2 border-border rounded-lg focus:outline-none focus:border-primary transition-colors font-medium"
           >
             <option value="all">All</option>
             <option value="movie">Movies</option>
@@ -179,12 +179,12 @@ export default function SearchPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search for movies, shows, or anime..."
-            className="flex-1 px-4 py-2 border-input bg-background text-foreground border rounded"
+            className="flex-1 px-4 py-3 bg-card border-2 border-border rounded-lg focus:outline-none focus:border-primary transition-colors"
           />
 
           <button
             type="submit"
-            className="px-6 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
+            className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
           >
             Search
           </button>
@@ -205,7 +205,7 @@ export default function SearchPage() {
                 id="sortBy"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-1.5 border-input bg-background text-foreground border rounded text-sm"
+                className="px-3 py-2 bg-card border-2 border-border rounded-lg focus:outline-none focus:border-primary transition-colors text-sm font-medium"
               >
                 <option value="popularity">Popularity</option>
                 <option value="rating-desc">Rating (High to Low)</option>
@@ -224,7 +224,7 @@ export default function SearchPage() {
                 setSelectedMedia(result);
                 setShowModal(true);
               }}
-              className="bg-card text-card-foreground rounded-lg shadow overflow-hidden hover:shadow-lg transition cursor-pointer"
+              className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden hover:shadow-lg hover:border-primary/50 transition cursor-pointer"
             >
               <div className="relative aspect-[2/3]">
                 <img
