@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.tasks.subtitle_search",
         "app.tasks.metadata_refresh",
         "app.tasks.transcoding",
+        "app.tasks.music_monitor",
     ],
 )
 
@@ -91,6 +92,14 @@ celery_app.conf.beat_schedule = {
     "metadata-refresh-daily": {
         "task": "app.tasks.metadata_refresh.refresh_all_metadata",
         "schedule": crontab(hour=3, minute=0),  # 3 AM daily
+    },
+    "music-wanted-search": {
+        "task": "app.tasks.music_monitor.search_wanted_music",
+        "schedule": crontab(minute=f"*/{auto_search_interval}"),  # Same interval as other wanted searches
+    },
+    "music-new-releases": {
+        "task": "app.tasks.music_monitor.check_new_releases",
+        "schedule": crontab(hour="*/6"),  # Every 6 hours check for new releases
     },
 }
 

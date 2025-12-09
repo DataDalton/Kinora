@@ -29,6 +29,7 @@ class LeetxIndexer(BaseIndexer):
         "tv": "TV",
         "anime": "Anime",
         "documentaries": "Documentaries",
+        "music": "Music",
     }
 
     def __init__(self):
@@ -77,7 +78,7 @@ class LeetxIndexer(BaseIndexer):
 
             for row in rows[:limit]:
                 try:
-                    release = await self._parse_search_result(row)
+                    release = await self._parse_search_result(row, category)
                     if release:
                         releases.append(release)
                 except Exception as e:
@@ -90,7 +91,7 @@ class LeetxIndexer(BaseIndexer):
 
         return releases
 
-    async def _parse_search_result(self, row) -> Optional[TorrentRelease]:
+    async def _parse_search_result(self, row, category: Optional[str] = None) -> Optional[TorrentRelease]:
         """
         Parse a search result row from 1337x
         """
@@ -122,34 +123,59 @@ class LeetxIndexer(BaseIndexer):
         # Uploader
         uploader = cols[5].text.strip() if len(cols) > 5 else None
 
-        # Parse quality info
-        quality_info = self.parse_quality(title)
-
         # Fetch magnet link (requires visiting detail page)
         magnet = await self._fetch_magnet(detail_url)
 
-        return TorrentRelease(
-            title=title,
-            magnet=magnet,
-            size=size_bytes,
-            size_string=size_str,
-            seeders=seeders,
-            leechers=leechers,
-            upload_date=upload_date,
-            uploader=uploader,
-            indexer=self.name,
-            quality=quality_info.get("quality"),
-            codec=quality_info.get("codec"),
-            source=quality_info.get("source"),
-            audio=quality_info.get("audio"),
-            audio_channels=quality_info.get("audio_channels"),
-            hdr=quality_info.get("hdr"),
-            edition=quality_info.get("edition"),
-            language=quality_info.get("language"),
-            release_group=quality_info.get("release_group"),
-            is_proper="PROPER" in title.upper(),
-            is_repack="REPACK" in title.upper(),
-        )
+        # Parse quality info based on category
+        if category == "music":
+            music_info = self.parse_music_quality(title)
+            return TorrentRelease(
+                title=title,
+                magnet=magnet,
+                size=size_bytes,
+                size_string=size_str,
+                seeders=seeders,
+                leechers=leechers,
+                upload_date=upload_date,
+                uploader=uploader,
+                indexer=self.name,
+                category=category,
+                audio_format=music_info.get("audio_format"),
+                audio_bitrate=music_info.get("audio_bitrate"),
+                is_lossless=music_info.get("is_lossless", False),
+                is_discography=music_info.get("is_discography", False),
+                artist=music_info.get("artist"),
+                album=music_info.get("album"),
+                year=music_info.get("year"),
+                release_group=music_info.get("release_group"),
+                is_proper="PROPER" in title.upper(),
+                is_repack="REPACK" in title.upper(),
+            )
+        else:
+            quality_info = self.parse_quality(title)
+            return TorrentRelease(
+                title=title,
+                magnet=magnet,
+                size=size_bytes,
+                size_string=size_str,
+                seeders=seeders,
+                leechers=leechers,
+                upload_date=upload_date,
+                uploader=uploader,
+                indexer=self.name,
+                category=category,
+                quality=quality_info.get("quality"),
+                codec=quality_info.get("codec"),
+                source=quality_info.get("source"),
+                audio=quality_info.get("audio"),
+                audio_channels=quality_info.get("audio_channels"),
+                hdr=quality_info.get("hdr"),
+                edition=quality_info.get("edition"),
+                language=quality_info.get("language"),
+                release_group=quality_info.get("release_group"),
+                is_proper="PROPER" in title.upper(),
+                is_repack="REPACK" in title.upper(),
+            )
 
     async def _fetch_magnet(self, detail_url: str) -> Optional[str]:
         """

@@ -16,7 +16,9 @@ import {
   Film,
   Tv,
   Sparkles,
+  Music2,
   Compass,
+  Disc3,
   PlusCircle,
   Settings,
   FileVideo,
@@ -79,20 +81,25 @@ export default function Navigation() {
 
       setIsSearching(true);
       try {
-        const [moviesRes, showsRes, animeRes] = await Promise.all([
+        const [moviesRes, showsRes, animeRes, artistsRes, albumsRes] = await Promise.all([
           api.get('/movies').catch(() => ({ data: { movies: [] } })),
           api.get('/shows').catch(() => ({ data: { shows: [] } })),
           api.get('/anime').catch(() => ({ data: { anime: [] } })),
+          api.get('/music/artists').catch(() => ({ data: [] })),
+          api.get('/music/albums').catch(() => ({ data: [] })),
         ]);
 
         const allItems = [
           ...(moviesRes.data?.movies || []).map((item: any) => ({ ...item, media_type: 'movie' })),
           ...(showsRes.data?.shows || []).map((item: any) => ({ ...item, media_type: 'show' })),
           ...(animeRes.data?.anime || []).map((item: any) => ({ ...item, media_type: 'anime' })),
+          ...(artistsRes.data || []).map((item: any) => ({ ...item, media_type: 'artist', title: item.name })),
+          ...(albumsRes.data || []).map((item: any) => ({ ...item, media_type: 'album' })),
         ];
 
         const filtered = allItems.filter((item: any) =>
-          item.title?.toLowerCase().includes(searchQuery.toLowerCase())
+          item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.name?.toLowerCase().includes(searchQuery.toLowerCase())
         ).slice(0, 5);
 
         setSearchResults(filtered);
@@ -131,12 +138,14 @@ export default function Navigation() {
         { href: '/movies', label: 'Movies', icon: Film },
         { href: '/shows', label: 'TV Shows', icon: Tv },
         { href: '/anime', label: 'Anime', icon: Sparkles },
+        { href: '/music', label: 'Music', icon: Music2 },
       ],
     },
     {
       label: 'Discovery',
       links: [
         { href: '/discover', label: 'Discover', icon: Compass },
+        { href: '/discover-music', label: 'Discover Music', icon: Disc3 },
         { href: '/search', label: 'Search', icon: PlusCircle },
       ],
     },
@@ -204,29 +213,56 @@ export default function Navigation() {
                 ) : searchResults.length > 0 ? (
                   <>
                     <div className="p-2">
-                      {searchResults.map((item) => (
-                        <Link
-                          key={`${item.media_type}-${item.id}`}
-                          href={`/${item.media_type === 'movie' ? 'movies' : item.media_type === 'show' ? 'shows' : 'anime'}/${item.id}`}
-                          onClick={() => {
-                            setShowDropdown(false);
-                            setSearchQuery('');
-                          }}
-                          className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition"
-                        >
-                          {item.poster_path && (
-                            <img
-                              src={`https://image.tmdb.org/t/p/w92${item.poster_path}`}
-                              alt={item.title}
-                              className="w-10 h-14 object-cover rounded"
-                            />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{item.title}</p>
-                            <p className="text-xs text-muted-foreground capitalize">{item.media_type}</p>
-                          </div>
-                        </Link>
-                      ))}
+                      {searchResults.map((item) => {
+                        const getImageUrl = () => {
+                          if (item.media_type === 'artist') {
+                            return item.picture_medium || item.picture || '/placeholder-poster.jpg';
+                          }
+                          if (item.media_type === 'album') {
+                            return item.cover_medium || item.cover || '/placeholder-poster.jpg';
+                          }
+                          if (item.poster_path) {
+                            return `https://image.tmdb.org/t/p/w92${item.poster_path}`;
+                          }
+                          return null;
+                        };
+
+                        const getHref = () => {
+                          if (item.media_type === 'artist' || item.media_type === 'album') {
+                            return '/music';
+                          }
+                          if (item.media_type === 'movie') return `/movies/${item.id}`;
+                          if (item.media_type === 'show') return `/shows/${item.id}`;
+                          if (item.media_type === 'anime') return `/anime/${item.id}`;
+                          return '/';
+                        };
+
+                        const imageUrl = getImageUrl();
+
+                        return (
+                          <Link
+                            key={`${item.media_type}-${item.id}`}
+                            href={getHref()}
+                            onClick={() => {
+                              setShowDropdown(false);
+                              setSearchQuery('');
+                            }}
+                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition"
+                          >
+                            {imageUrl && (
+                              <img
+                                src={imageUrl}
+                                alt={item.title || item.name}
+                                className={`object-cover rounded ${item.media_type === 'artist' ? 'w-10 h-10' : 'w-10 h-14'}`}
+                              />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">{item.title || item.name}</p>
+                              <p className="text-xs text-muted-foreground capitalize">{item.media_type}</p>
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
                     <div className="border-t border-border p-2">
                       <button

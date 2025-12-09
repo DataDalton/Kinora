@@ -41,6 +41,10 @@ class SearchEngine:
         self.anime_indexers = [
             self.nyaa_indexer,
         ]
+        # 1337x for music torrents
+        self.music_indexers = [
+            leetx_indexer,
+        ]
 
     async def search_all_indexers(
         self,
@@ -52,13 +56,16 @@ class SearchEngine:
         """
         Search all enabled indexers in parallel
         Returns combined and deduplicated results
-        Uses anime indexers for anime, general indexers for movies/shows
+        Uses appropriate indexers based on media type
         """
         tasks = []
 
-        # Select indexers based on media type
+        # Select indexers and category based on media type
         if media_type == "anime":
             indexers = self.anime_indexers
+        elif media_type == "music":
+            indexers = self.music_indexers
+            category = "music"  # Force music category for 1337x
         else:
             indexers = self.general_indexers
 
@@ -351,6 +358,203 @@ class SearchEngine:
             return False
 
         return True
+
+    async def music_cascading_search(
+        self,
+        query: str,
+        profile: MediaProfile,
+        preferred_uploaders: Optional[List[str]] = None,
+        blocked_uploaders: Optional[List[str]] = None,
+    ) -> Optional[TorrentRelease]:
+        """
+        Music-specific cascading search
+
+        Priority order (highest to lowest):
+        1. Audio format (FLAC -> MP3 320 -> MP3 256 -> MP3 128)
+        2. Uploader preferences
+
+        Cascade: FLAC -> mp3_320 -> mp3_256 -> mp3_128 -> aac -> ogg
+        """
+        # Get preferred quality order from profile
+        quality_order = getattr(profile, 'music_preferred_quality', None) or [
+            'flac', 'mp3_320', 'mp3_256', 'mp3_128', 'aac', 'ogg'
+        ]
+
+        # Map quality values to search terms
+        format_search_terms = {
+            'flac': 'FLAC',
+            'mp3_320': 'MP3 320',
+            'mp3_256': 'MP3 256',
+            'mp3_128': 'MP3 128',
+            'aac': 'AAC',
+            'ogg': 'OGG',
+        }
+
+        print(f"Music cascading search: {query}")
+        print(f"Quality order: {quality_order}")
+
+        for quality in quality_order:
+            search_term = format_search_terms.get(quality, quality.upper())
+            search_query = f"{query} {search_term}"
+
+            print(f"\nSearching: {search_query}")
+
+            releases = await self.search_all_indexers(
+                search_query,
+                category="music",
+                limit_per_indexer=50,
+                media_type="music"
+            )
+
+            if not releases:
+                continue
+
+            # Filter by quality and preferences
+            filtered_releases = []
+            for release in releases:
+                if not self._meets_music_requirements(release, profile):
+                    continue
+
+                if blocked_uploaders and release.uploader in blocked_uploaders:
+                    continue
+
+                filtered_releases.append(release)
+
+            if not filtered_releases:
+                continue
+
+            # Select best release (most seeders for music)
+            best_release = self._select_best_music_release(
+                filtered_releases,
+                profile,
+                preferred_uploaders
+            )
+
+            if best_release:
+                print(f"\n✓ Selected: {best_release.title}")
+                print(f"  Format: {best_release.audio_format}")
+                print(f"  Bitrate: {best_release.audio_bitrate}")
+                print(f"  Lossless: {best_release.is_lossless}")
+                print(f"  Seeders: {best_release.seeders}")
+                return best_release
+
+        print(f"\n✗ No acceptable music release found")
+        return None
+
+    def _meets_music_requirements(self, release: TorrentRelease, profile: MediaProfile) -> bool:
+        """
+        Check if music release meets profile requirements
+        """
+        preferred_quality = getattr(profile, 'music_preferred_quality', None) or []
+
+        if not preferred_quality:
+            return True
+
+        # Map release format to quality values
+        format_to_quality = {
+            'FLAC': 'flac',
+            'MP3': 'mp3_320',  # Default MP3 to 320
+            'AAC': 'aac',
+            'OGG': 'ogg',
+            'ALAC': 'flac',  # Treat ALAC as equivalent to FLAC
+            'WAV': 'flac',   # Treat WAV as lossless
+        }
+
+        # Map bitrate to quality
+        bitrate_to_quality = {
+            '320': 'mp3_320',
+            '256': 'mp3_256',
+            '192': 'mp3_192',
+            '128': 'mp3_128',
+            'V0': 'mp3_320',  # V0 is roughly equivalent to 320
+            'V2': 'mp3_256',
+        }
+
+        # Determine release quality
+        release_quality = None
+
+        if release.audio_format:
+            release_quality = format_to_quality.get(release.audio_format.upper())
+
+        # Override with bitrate if available
+        if release.audio_bitrate:
+            bitrate_quality = bitrate_to_quality.get(release.audio_bitrate)
+            if bitrate_quality:
+                release_quality = bitrate_quality
+
+        # If we can't determine quality, accept it
+        if not release_quality:
+            return True
+
+        # Check if release quality is in preferred list
+        return release_quality in preferred_quality
+
+    def _select_best_music_release(
+        self,
+        releases: List[TorrentRelease],
+        profile: MediaProfile,
+        preferred_uploaders: Optional[List[str]] = None,
+    ) -> Optional[TorrentRelease]:
+        """
+        Select best music release based on seeders and preferences
+        """
+        if not releases:
+            return None
+
+        # Sort by: lossless first, then seeders
+        def score_release(release: TorrentRelease) -> tuple:
+            lossless_score = 1 if release.is_lossless else 0
+            uploader_score = 1 if preferred_uploaders and release.uploader in preferred_uploaders else 0
+            return (lossless_score, uploader_score, release.seeders)
+
+        releases.sort(key=score_release, reverse=True)
+        return releases[0]
+
+    async def search_music_and_download(
+        self,
+        query: str,
+        profile: MediaProfile,
+        save_path: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        preferred_uploaders: Optional[List[str]] = None,
+        blocked_uploaders: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        """
+        Search for music with cascading quality, select best, and download
+        Returns torrent hash if successful
+        """
+        best_release = await self.music_cascading_search(
+            query, profile, preferred_uploaders, blocked_uploaders
+        )
+
+        if not best_release:
+            return None
+
+        torrent_source = best_release.torrent_url or best_release.magnet
+
+        if not torrent_source:
+            print(f"No download source for release: {best_release.title}")
+            return None
+
+        try:
+            client = await get_qbittorrent_client()
+            if not client:
+                print("qBittorrent client not configured")
+                return None
+
+            torrent_hash = await client.add_torrent(
+                torrent=torrent_source,
+                save_path=save_path,
+                category="music",
+                tags=tags,
+            )
+
+            print(f"✓ Added to download client: {torrent_hash}")
+            return torrent_hash
+
+        except Exception as e:
+            print(f"Error adding torrent to client: {e}")
+            return None
 
 
 search_engine = SearchEngine()

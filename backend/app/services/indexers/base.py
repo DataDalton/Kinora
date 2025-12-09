@@ -33,6 +33,14 @@ class TorrentRelease:
     release_group: Optional[str] = None
     is_proper: bool = False
     is_repack: bool = False
+    # Music-specific fields
+    audio_format: Optional[str] = None  # FLAC, MP3, AAC, OGG, etc.
+    audio_bitrate: Optional[str] = None  # 320, 256, 128, V0, etc.
+    is_lossless: bool = False
+    is_discography: bool = False
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    year: Optional[int] = None
     raw_data: Optional[Dict[str, Any]] = None
 
 
@@ -284,3 +292,106 @@ class BaseIndexer(ABC):
         }
 
         return int(value * multipliers.get(unit, 1))
+
+    def parse_music_quality(self, title: str) -> Dict[str, Any]:
+        """
+        Parse music-specific quality information from release title
+        Extracts: audio format, bitrate, lossless flag, discography flag, artist, album, year
+        """
+        import re
+
+        title_upper = title.upper()
+
+        # Audio Format (FLAC, MP3, AAC, OGG, ALAC, WAV, APE, WMA)
+        audio_format = None
+        is_lossless = False
+
+        if "FLAC" in title_upper:
+            audio_format = "FLAC"
+            is_lossless = True
+        elif "ALAC" in title_upper:
+            audio_format = "ALAC"
+            is_lossless = True
+        elif "WAV" in title_upper:
+            audio_format = "WAV"
+            is_lossless = True
+        elif "APE" in title_upper:
+            audio_format = "APE"
+            is_lossless = True
+        elif "MP3" in title_upper:
+            audio_format = "MP3"
+        elif "AAC" in title_upper:
+            audio_format = "AAC"
+        elif "OGG" in title_upper or "VORBIS" in title_upper:
+            audio_format = "OGG"
+        elif "OPUS" in title_upper:
+            audio_format = "OPUS"
+        elif "WMA" in title_upper:
+            audio_format = "WMA"
+
+        # Bitrate (320, 256, 192, 128, V0, V2, 24BIT, 16BIT)
+        audio_bitrate = None
+
+        if "320" in title_upper or "320KBPS" in title_upper or "320 KBPS" in title_upper:
+            audio_bitrate = "320"
+        elif "256" in title_upper or "256KBPS" in title_upper or "256 KBPS" in title_upper:
+            audio_bitrate = "256"
+        elif "192" in title_upper or "192KBPS" in title_upper or "192 KBPS" in title_upper:
+            audio_bitrate = "192"
+        elif "128" in title_upper or "128KBPS" in title_upper or "128 KBPS" in title_upper:
+            audio_bitrate = "128"
+        elif "V0" in title_upper:
+            audio_bitrate = "V0"
+        elif "V2" in title_upper:
+            audio_bitrate = "V2"
+        elif "24BIT" in title_upper or "24-BIT" in title_upper or "24 BIT" in title_upper:
+            audio_bitrate = "24bit"
+            is_lossless = True
+        elif "16BIT" in title_upper or "16-BIT" in title_upper or "16 BIT" in title_upper:
+            audio_bitrate = "16bit"
+
+        # Check for lossless indicators
+        if "LOSSLESS" in title_upper:
+            is_lossless = True
+
+        # Discography detection
+        is_discography = any(x in title_upper for x in [
+            "DISCOGRAPHY", "DISCOGRAFIA", "COMPLETE DISCOGRAPHY",
+            "FULL DISCOGRAPHY", "COLLECTION", "COMPLETE COLLECTION",
+            "ANTHOLOGY", "COMPLETE WORKS"
+        ])
+
+        # Year detection
+        year = None
+        year_match = re.search(r"[\[\(]?(19\d{2}|20[0-2]\d)[\]\)]?", title)
+        if year_match:
+            year = int(year_match.group(1))
+
+        # Artist/Album parsing (common patterns)
+        artist = None
+        album = None
+
+        # Pattern: "Artist - Album"
+        artist_album_match = re.match(r"^([^-]+)\s*-\s*(.+?)(?:\s*[\[\(]|$)", title)
+        if artist_album_match:
+            artist = artist_album_match.group(1).strip()
+            album = artist_album_match.group(2).strip()
+            # Clean up album name (remove year, format indicators)
+            album = re.sub(r"\s*[\[\(].*$", "", album).strip()
+
+        # Release group
+        release_group = None
+        group_match = re.search(r"-([A-Za-z0-9]+)$", title) or re.search(r"\[([A-Za-z0-9]+)\]$", title)
+        if group_match:
+            release_group = group_match.group(1)
+
+        return {
+            "audio_format": audio_format,
+            "audio_bitrate": audio_bitrate,
+            "is_lossless": is_lossless,
+            "is_discography": is_discography,
+            "artist": artist,
+            "album": album,
+            "year": year,
+            "release_group": release_group,
+        }

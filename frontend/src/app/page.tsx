@@ -4,25 +4,28 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
+import { Film, Tv, Sparkles, Music2 } from 'lucide-react';
 
 export default function HomePage() {
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: async () => {
       try {
-        const [movies, shows, anime] = await Promise.all([
+        const [movies, shows, anime, artists] = await Promise.all([
           api.get('/movies', { params: { limit: 1 } }),
           api.get('/shows', { params: { limit: 1 } }),
           api.get('/anime', { params: { limit: 1 } }),
+          api.get('/music/artists').catch(() => ({ data: [] })),
         ]);
 
         return {
           moviesCount: movies.data.movies?.length || 0,
           showsCount: shows.data.shows?.length || 0,
           animeCount: anime.data.anime?.length || 0,
+          musicCount: artists.data?.length || 0,
         };
       } catch (error) {
-        return { moviesCount: 0, showsCount: 0, animeCount: 0 };
+        return { moviesCount: 0, showsCount: 0, animeCount: 0, musicCount: 0 };
       }
     },
   });
@@ -56,14 +59,14 @@ export default function HomePage() {
 
       {/* Content Section */}
       <div className="container mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Link href="/movies" className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6 hover:shadow-lg hover:border-primary/50 transition">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-muted-foreground text-sm">Movies</p>
               <p className="text-3xl font-bold">{stats?.moviesCount || 0}</p>
             </div>
-            <span className="text-4xl">🎬</span>
+            <Film className="w-10 h-10 text-muted-foreground" />
           </div>
         </Link>
 
@@ -73,7 +76,7 @@ export default function HomePage() {
               <p className="text-muted-foreground text-sm">TV Shows</p>
               <p className="text-3xl font-bold">{stats?.showsCount || 0}</p>
             </div>
-            <span className="text-4xl">📺</span>
+            <Tv className="w-10 h-10 text-muted-foreground" />
           </div>
         </Link>
 
@@ -83,7 +86,17 @@ export default function HomePage() {
               <p className="text-muted-foreground text-sm">Anime</p>
               <p className="text-3xl font-bold">{stats?.animeCount || 0}</p>
             </div>
-            <span className="text-4xl">🎌</span>
+            <Sparkles className="w-10 h-10 text-muted-foreground" />
+          </div>
+        </Link>
+
+        <Link href="/music" className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6 hover:shadow-lg hover:border-primary/50 transition">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-muted-foreground text-sm">Music</p>
+              <p className="text-3xl font-bold">{stats?.musicCount || 0}</p>
+            </div>
+            <Music2 className="w-10 h-10 text-muted-foreground" />
           </div>
         </Link>
       </div>

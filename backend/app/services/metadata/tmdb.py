@@ -1,4 +1,5 @@
 import httpx
+import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -209,6 +210,16 @@ class TMDBService:
             return ""
         return f"{self.IMAGE_BASE_URL}/{size}{path}"
 
+    def _parse_genres(self, genres: list) -> str:
+        """
+        Extract genre names from TMDB genres list and serialize to JSON string
+        Returns a JSON string for JSONB storage
+        """
+        if not genres:
+            return json.dumps([])
+        genre_names = [g.get("name") for g in genres if g.get("name")]
+        return json.dumps(genre_names)
+
     def parse_movie_data(self, tmdb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse TMDB movie data into our database format
@@ -220,7 +231,7 @@ class TMDBService:
             "poster_path": tmdb_data.get("poster_path"),
             "backdrop_path": tmdb_data.get("backdrop_path"),
             "release_date": self._parse_date(tmdb_data.get("release_date")),
-            "genres": tmdb_data.get("genres", []),
+            "genres": self._parse_genres(tmdb_data.get("genres", [])),
             "rating": tmdb_data.get("vote_average"),
             "vote_count": tmdb_data.get("vote_count"),
             "popularity": tmdb_data.get("popularity"),
@@ -230,9 +241,9 @@ class TMDBService:
             "budget": tmdb_data.get("budget"),
             "revenue": tmdb_data.get("revenue"),
             "tagline": tmdb_data.get("tagline"),
-            "production_companies": tmdb_data.get("production_companies", []),
-            "production_countries": tmdb_data.get("production_countries", []),
-            "spoken_languages": tmdb_data.get("spoken_languages", []),
+            "production_companies": json.dumps(tmdb_data.get("production_companies", [])),
+            "production_countries": json.dumps(tmdb_data.get("production_countries", [])),
+            "spoken_languages": json.dumps(tmdb_data.get("spoken_languages", [])),
             "collection_id": tmdb_data.get("belongs_to_collection", {}).get("id") if tmdb_data.get("belongs_to_collection") else None,
             "collection_name": tmdb_data.get("belongs_to_collection", {}).get("name") if tmdb_data.get("belongs_to_collection") else None,
         }
@@ -248,7 +259,7 @@ class TMDBService:
             "poster_path": tmdb_data.get("poster_path"),
             "backdrop_path": tmdb_data.get("backdrop_path"),
             "release_date": self._parse_date(tmdb_data.get("first_air_date")),
-            "genres": tmdb_data.get("genres", []),
+            "genres": self._parse_genres(tmdb_data.get("genres", [])),
             "rating": tmdb_data.get("vote_average"),
             "vote_count": tmdb_data.get("vote_count"),
             "popularity": tmdb_data.get("popularity"),
@@ -257,9 +268,9 @@ class TMDBService:
             "tvdb_id": tmdb_data.get("external_ids", {}).get("tvdb_id"),
             "number_of_seasons": tmdb_data.get("number_of_seasons"),
             "number_of_episodes": tmdb_data.get("number_of_episodes"),
-            "episode_run_time": tmdb_data.get("episode_run_time", []),
-            "networks": tmdb_data.get("networks", []),
-            "production_companies": tmdb_data.get("production_companies", []),
+            "episode_run_time": json.dumps(tmdb_data.get("episode_run_time", [])),
+            "networks": json.dumps(tmdb_data.get("networks", [])),
+            "production_companies": json.dumps(tmdb_data.get("production_companies", [])),
             "first_air_date": self._parse_date(tmdb_data.get("first_air_date")),
             "last_air_date": self._parse_date(tmdb_data.get("last_air_date")),
             "in_production": tmdb_data.get("in_production", False),

@@ -3,7 +3,7 @@ fastapi==0.119.1
 granian[reload]==2.5.5
 
 # Database (raw AsyncPG for maximum performance)
-asyncpg==0.30.0
+asyncpg==0.31.0
 
 # Redis & Caching
 redis==6.4.0

@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import MediaDetailModal from '@/components/MediaDetailModal';
 import PageHeader from '@/components/PageHeader';
+import { ArrowUpDown, ChevronDown, Check, Film, Tv, Sparkles, Music2, Layers } from 'lucide-react';
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -33,6 +34,12 @@ interface SearchResult {
   first_air_date?: string;
   vote_average: number;
   media_type?: string;
+  nb_fan?: number;
+  nb_album?: number;
+  nb_tracks?: number;
+  artist_name?: string;
+  album_name?: string;
+  duration?: number;
 }
 
 interface TorrentResult {
@@ -54,9 +61,114 @@ export default function SearchPage() {
   const [query, setQuery] = useState(searchParams.get('query') || searchParams.get('q') || '');
   const debouncedQuery = useDebounce(query, 500);
   const [mediaType, setMediaType] = useState(searchParams.get('type') || 'all');
+  const [musicFilter, setMusicFilter] = useState<'all' | 'artist' | 'album' | 'track'>('all');
   const [selectedMedia, setSelectedMedia] = useState<SearchResult | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [sortBy, setSortBy] = useState('popularity');
+  const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
+  const [sortHighlightedIndex, setSortHighlightedIndex] = useState(-1);
+  const [mediaTypeDropdownOpen, setMediaTypeDropdownOpen] = useState(false);
+  const [mediaTypeHighlightedIndex, setMediaTypeHighlightedIndex] = useState(-1);
+
+  const isMusic = mediaType === 'music';
+
+  const mediaTypeOptions = [
+    { value: 'all', label: 'All', icon: Layers },
+    { value: 'movie', label: 'Movies', icon: Film },
+    { value: 'show', label: 'TV Shows', icon: Tv },
+    { value: 'anime', label: 'Anime', icon: Sparkles },
+    { value: 'music', label: 'Music', icon: Music2 },
+  ];
+
+  const currentMediaTypeOption = mediaTypeOptions.find(opt => opt.value === mediaType) || mediaTypeOptions[0];
+
+  const sortOptions = isMusic
+    ? [
+        { value: 'popularity', label: 'Popularity' },
+        { value: 'fans-desc', label: 'Fans (High to Low)' },
+        { value: 'fans-asc', label: 'Fans (Low to High)' },
+        { value: 'albums-desc', label: 'Albums (Most)' },
+        { value: 'tracks-desc', label: 'Tracks (Most)' },
+        { value: 'release-desc', label: 'Release Date (Newest)' },
+        { value: 'release-asc', label: 'Release Date (Oldest)' },
+        { value: 'title', label: 'Name (A-Z)' },
+      ]
+    : [
+        { value: 'popularity', label: 'Popularity' },
+        { value: 'rating-desc', label: 'Rating (High to Low)' },
+        { value: 'rating-asc', label: 'Rating (Low to High)' },
+        { value: 'release-desc', label: 'Release Date (Newest)' },
+        { value: 'release-asc', label: 'Release Date (Oldest)' },
+        { value: 'title', label: 'Title (A-Z)' },
+      ];
+
+  const currentSortLabel = sortOptions.find(opt => opt.value === sortBy)?.label || 'Sort';
+
+  const handleSortKeyDown = (e: React.KeyboardEvent) => {
+    if (!sortDropdownOpen) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSortDropdownOpen(true);
+        setSortHighlightedIndex(sortOptions.findIndex(opt => opt.value === sortBy));
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSortHighlightedIndex(prev => (prev + 1) % sortOptions.length);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSortHighlightedIndex(prev => (prev - 1 + sortOptions.length) % sortOptions.length);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (sortHighlightedIndex >= 0) {
+          setSortBy(sortOptions[sortHighlightedIndex].value);
+          setSortDropdownOpen(false);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setSortDropdownOpen(false);
+        break;
+    }
+  };
+
+  const handleMediaTypeKeyDown = (e: React.KeyboardEvent) => {
+    if (!mediaTypeDropdownOpen) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMediaTypeDropdownOpen(true);
+        setMediaTypeHighlightedIndex(mediaTypeOptions.findIndex(opt => opt.value === mediaType));
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setMediaTypeHighlightedIndex(prev => (prev + 1) % mediaTypeOptions.length);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setMediaTypeHighlightedIndex(prev => (prev - 1 + mediaTypeOptions.length) % mediaTypeOptions.length);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (mediaTypeHighlightedIndex >= 0) {
+          setMediaType(mediaTypeOptions[mediaTypeHighlightedIndex].value);
+          setMediaTypeDropdownOpen(false);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setMediaTypeDropdownOpen(false);
+        break;
+    }
+  };
 
   const { data: searchResults, isLoading: searchLoading } = useQuery({
     queryKey: ['search', debouncedQuery, mediaType],
@@ -73,7 +185,12 @@ export default function SearchPage() {
   const sortedResults = useMemo(() => {
     if (!searchResults) return [];
 
-    const results = [...searchResults];
+    let results = [...searchResults];
+
+    // Filter by music sub-type if music is selected
+    if (isMusic && musicFilter !== 'all') {
+      results = results.filter((r) => r.media_type === musicFilter);
+    }
 
     switch (sortBy) {
       case 'rating-desc':
@@ -98,11 +215,19 @@ export default function SearchPage() {
           const titleB = (b.title || b.name || '').toLowerCase();
           return titleA.localeCompare(titleB);
         });
+      case 'fans-desc':
+        return results.sort((a, b) => (b.nb_fan || 0) - (a.nb_fan || 0));
+      case 'fans-asc':
+        return results.sort((a, b) => (a.nb_fan || 0) - (b.nb_fan || 0));
+      case 'albums-desc':
+        return results.sort((a, b) => (b.nb_album || 0) - (a.nb_album || 0));
+      case 'tracks-desc':
+        return results.sort((a, b) => (b.nb_tracks || 0) - (a.nb_tracks || 0));
       case 'popularity':
       default:
-        return results.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+        return results.sort((a, b) => (b.popularity || b.nb_fan || 0) - (a.popularity || a.nb_fan || 0));
     }
-  }, [searchResults, sortBy]);
+  }, [searchResults, sortBy, isMusic, musicFilter]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,6 +274,15 @@ export default function SearchPage() {
     return `https://image.tmdb.org/t/p/${size}${path}`;
   };
 
+  const formatDuration = (seconds: number) => {
+    if (!seconds) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const isMusicType = (type?: string) => type === 'artist' || type === 'album' || type === 'track';
+
 
   return (
     <div className="min-h-screen">
@@ -163,22 +297,54 @@ export default function SearchPage() {
       <div className="container mx-auto px-6 py-8">
         <form onSubmit={handleSearch} className="mb-8">
         <div className="flex gap-4">
-          <select
-            value={mediaType}
-            onChange={(e) => setMediaType(e.target.value)}
-            className="px-4 py-3 bg-card border-2 border-border rounded-lg focus:outline-none focus:border-primary transition-colors font-medium"
-          >
-            <option value="all">All</option>
-            <option value="movie">Movies</option>
-            <option value="show">TV Shows</option>
-            <option value="anime">Anime</option>
-          </select>
+          {/* Media type dropdown - custom styled */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMediaTypeDropdownOpen(!mediaTypeDropdownOpen)}
+              onKeyDown={handleMediaTypeKeyDown}
+              onBlur={() => setTimeout(() => setMediaTypeDropdownOpen(false), 150)}
+              className="flex items-center gap-2 px-4 py-3 bg-card border-2 border-border rounded-lg hover:border-primary/50 focus:outline-none focus:border-primary transition-colors font-medium cursor-pointer min-w-[140px]"
+            >
+              {(() => {
+                const IconComponent = currentMediaTypeOption.icon;
+                return <IconComponent className="w-4 h-4 text-muted-foreground" />;
+              })()}
+              <span className="flex-1 text-left">{currentMediaTypeOption.label}</span>
+              <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${mediaTypeDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {mediaTypeDropdownOpen && (
+              <div className="absolute left-0 top-full mt-1 w-48 bg-card border-2 border-border rounded-lg shadow-lg z-50 py-1 overflow-hidden">
+                {mediaTypeOptions.map((option, index) => {
+                  const IconComponent = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      onClick={() => {
+                        setMediaType(option.value);
+                        setMediaTypeDropdownOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors cursor-pointer ${
+                        mediaTypeHighlightedIndex === index ? 'bg-muted' : ''
+                      } ${
+                        mediaType === option.value ? 'text-primary font-medium' : 'text-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <IconComponent className="w-4 h-4" />
+                      <span className="flex-1">{option.label}</span>
+                      {mediaType === option.value && <Check className="w-4 h-4" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search for movies, shows, or anime..."
+            placeholder="Search for movies, shows, anime, or music..."
             className="flex-1 px-4 py-3 bg-card border-2 border-border rounded-lg focus:outline-none focus:border-primary transition-colors"
           />
 
@@ -195,25 +361,64 @@ export default function SearchPage() {
 
       {sortedResults && sortedResults.length > 0 && (
         <>
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
             <p className="text-sm text-muted-foreground">
               {sortedResults.length} result{sortedResults.length !== 1 ? 's' : ''} found
             </p>
-            <div className="flex items-center gap-2">
-              <label htmlFor="sortBy" className="text-sm text-muted-foreground">Sort by:</label>
-              <select
-                id="sortBy"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-2 bg-card border-2 border-border rounded-lg focus:outline-none focus:border-primary transition-colors text-sm font-medium"
-              >
-                <option value="popularity">Popularity</option>
-                <option value="rating-desc">Rating (High to Low)</option>
-                <option value="rating-asc">Rating (Low to High)</option>
-                <option value="release-desc">Release Date (Newest)</option>
-                <option value="release-asc">Release Date (Oldest)</option>
-                <option value="title">Title (A-Z)</option>
-              </select>
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* Music type filter - pill buttons */}
+              {isMusic && (
+                <div className="flex items-center gap-1 bg-card border-2 border-border rounded-lg p-1">
+                  {(['all', 'artist', 'album', 'track'] as const).map((filter) => (
+                    <button
+                      key={filter}
+                      onClick={() => setMusicFilter(filter)}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                        musicFilter === filter
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                      }`}
+                    >
+                      {filter === 'all' ? 'All' : filter === 'artist' ? 'Artists' : filter === 'album' ? 'Albums' : 'Tracks'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Sort options - custom dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setSortDropdownOpen(!sortDropdownOpen)}
+                  onKeyDown={handleSortKeyDown}
+                  onBlur={() => setTimeout(() => setSortDropdownOpen(false), 150)}
+                  className="flex items-center gap-2 pl-3 pr-3 py-2 bg-card border-2 border-border rounded-lg hover:border-primary/50 focus:outline-none focus:border-primary transition-colors text-sm font-medium cursor-pointer"
+                >
+                  <ArrowUpDown className="w-4 h-4 text-muted-foreground" />
+                  <span>{currentSortLabel}</span>
+                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${sortDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {sortDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-56 bg-card border-2 border-border rounded-lg shadow-lg z-50 py-1 overflow-hidden">
+                    {sortOptions.map((option, index) => (
+                      <button
+                        key={option.value}
+                        onClick={() => {
+                          setSortBy(option.value);
+                          setSortDropdownOpen(false);
+                        }}
+                        className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between transition-colors cursor-pointer ${
+                          sortHighlightedIndex === index ? 'bg-muted' : ''
+                        } ${
+                          sortBy === option.value ? 'text-primary font-medium' : 'text-foreground hover:bg-muted'
+                        }`}
+                      >
+                        {option.label}
+                        {sortBy === option.value && <Check className="w-4 h-4" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -226,7 +431,7 @@ export default function SearchPage() {
               }}
               className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden hover:shadow-lg hover:border-primary/50 transition cursor-pointer"
             >
-              <div className="relative aspect-[2/3]">
+              <div className="relative aspect-2/3">
                 <img
                   src={getPosterUrl(result.poster_path)}
                   alt={result.title || result.name}
@@ -237,28 +442,51 @@ export default function SearchPage() {
                 <h3 className="font-semibold text-sm truncate">
                   {result.title || result.name}
                 </h3>
+                {/* Secondary info line for music types */}
+                {result.media_type === 'track' && result.artist_name && (
+                  <p className="text-xs text-muted-foreground truncate">{result.artist_name}</p>
+                )}
+                {result.media_type === 'album' && result.artist_name && (
+                  <p className="text-xs text-muted-foreground truncate">{result.artist_name}</p>
+                )}
                 <div className="flex justify-between items-center mt-2">
                   <span className="text-xs text-muted-foreground">
-                    {result.release_date
-                      ? new Date(result.release_date).getFullYear()
-                      : result.first_air_date
-                      ? new Date(result.first_air_date).getFullYear()
-                      : 'Unknown'}
-                  </span>
-                  <div className="flex items-center text-xs">
-                    <svg
-                      className="w-4 h-4 text-yellow-400 mr-1"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                    </svg>
-                    {result.vote_average > 0 ? (
-                      <span>{result.vote_average.toFixed(1)}</span>
+                    {result.media_type === 'artist' ? (
+                      result.nb_album ? `${result.nb_album} albums` : 'Artist'
+                    ) : result.media_type === 'track' ? (
+                      result.duration ? formatDuration(result.duration) : 'Track'
+                    ) : result.media_type === 'album' ? (
+                      // Show both track count and year for albums
+                      [
+                        result.nb_tracks ? `${result.nb_tracks} tracks` : null,
+                        result.release_date ? new Date(result.release_date).getFullYear() : null
+                      ].filter(Boolean).join(' · ') || 'Album'
+                    ) : result.release_date ? (
+                      new Date(result.release_date).getFullYear()
+                    ) : result.first_air_date ? (
+                      new Date(result.first_air_date).getFullYear()
                     ) : (
-                      <span className="text-muted-foreground">-</span>
+                      ''
                     )}
-                  </div>
+                  </span>
+                  {isMusicType(result.media_type) ? (
+                    <span className="text-xs text-muted-foreground capitalize">{result.media_type}</span>
+                  ) : (
+                    <div className="flex items-center text-xs">
+                      <svg
+                        className="w-4 h-4 text-yellow-400 mr-1"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      {result.vote_average > 0 ? (
+                        <span>{result.vote_average.toFixed(1)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

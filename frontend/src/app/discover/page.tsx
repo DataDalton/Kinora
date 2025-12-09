@@ -166,7 +166,7 @@ export default function DiscoverPage() {
     return (
       <Link
         href={`/discover/${genre}`}
-        className="relative rounded-lg overflow-hidden aspect-[3/2] group hover:shadow-xl transition transform hover:scale-105"
+        className="relative rounded-lg overflow-hidden aspect-3/2 group hover:shadow-xl transition transform hover:scale-105"
       >
         <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-1">
           {posters.map((poster: string, idx: number) => (
@@ -177,10 +177,10 @@ export default function DiscoverPage() {
             />
           ))}
           {posters.length === 0 && (
-            <div className="col-span-2 row-span-2 bg-gradient-to-br from-gray-700 to-gray-900" />
+            <div className="col-span-2 row-span-2 bg-linear-to-br from-gray-700 to-gray-900" />
           )}
         </div>
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
+        <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/50 to-transparent" />
         <div className="absolute bottom-0 left-0 right-0 p-4">
           <h3 className="text-xl font-bold text-white">{title}</h3>
         </div>
@@ -206,7 +206,7 @@ export default function DiscoverPage() {
                 }}
                 className="bg-card text-card-foreground rounded-lg shadow overflow-hidden hover:shadow-lg transition cursor-pointer"
               >
-                <div className="relative aspect-[2/3]">
+                <div className="relative aspect-2/3">
                   <img
                     src={getPosterUrl(item.poster_path, isAnime)}
                     alt={getTitle(item)}

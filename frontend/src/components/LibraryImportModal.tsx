@@ -8,7 +8,7 @@ import { X, Folder, Upload, Check, AlertCircle, Loader2 } from 'lucide-react';
 interface LibraryImportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  mediaType: 'movie' | 'show' | 'anime';
+  mediaType: 'movie' | 'show' | 'anime' | 'music';
 }
 
 interface ScannedFile {
@@ -141,7 +141,7 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
 
   if (!isOpen) return null;
 
-  const mediaTypeLabel = mediaType === 'movie' ? 'Movies' : mediaType === 'show' ? 'TV Shows' : 'Anime';
+  const mediaTypeLabel = mediaType === 'movie' ? 'Movies' : mediaType === 'show' ? 'TV Shows' : mediaType === 'anime' ? 'Anime' : 'Music';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={handleClose}>

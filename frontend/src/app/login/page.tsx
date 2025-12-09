@@ -156,7 +156,7 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const assertion = await navigator.credentials.get({
+      const credential = await navigator.credentials.get({
         publicKey: {
           challenge: Uint8Array.from(atob(challenge), c => c.charCodeAt(0)),
           rpId: 'localhost',
@@ -164,16 +164,23 @@ export default function LoginPage() {
         },
       });
 
+      if (!credential) {
+        throw new Error('WebAuthn authentication was cancelled or no credential found.');
+      }
+
+      const assertion = credential as PublicKeyCredential;
+      const assertionResponse = assertion.response as AuthenticatorAssertionResponse;
+
       const response = await api.post('/auth/verify-2fa', {
         username,
         credential: {
           id: assertion.id,
           rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
           response: {
-            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
-            authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
-            signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
-            userHandle: assertion.response.userHandle ? btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle))) : null,
+            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertionResponse.clientDataJSON))),
+            authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertionResponse.authenticatorData))),
+            signature: btoa(String.fromCharCode(...new Uint8Array(assertionResponse.signature))),
+            userHandle: assertionResponse.userHandle ? btoa(String.fromCharCode(...new Uint8Array(assertionResponse.userHandle))) : null,
           },
           type: assertion.type,
         },

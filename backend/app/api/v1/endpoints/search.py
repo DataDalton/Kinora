@@ -5,6 +5,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
 from app.services.metadata.tmdb import tmdb_service
 from app.services.metadata.anilist import anilist_service
+from app.services.metadata.deezer import deezer_service
 
 router = APIRouter()
 
@@ -12,7 +13,7 @@ router = APIRouter()
 @router.get("/")
 async def search_media(
     query: str = Query(..., min_length=1),
-    media_type: str = Query("all", regex="^(all|movie|show|anime)$"),
+    media_type: str = Query("all", regex="^(all|movie|show|anime|music)$"),
     current_user: User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """
@@ -78,6 +79,65 @@ async def search_media(
                     "media_type": "anime",
                     "anilist_id": anime.get("id"),
                     "mal_id": anime.get("idMal")
+                })
+
+        if media_type in ["all", "music"]:
+            album_results = await deezer_service.search_album(query, limit=10)
+            for album in album_results:
+                artist = album.get("artist", {})
+                results.append({
+                    "id": album.get("id"),
+                    "title": album.get("title"),
+                    "name": album.get("title"),
+                    "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                    "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
+                    "backdrop_path": album.get("cover_xl"),
+                    "release_date": album.get("release_date"),
+                    "vote_average": 0,
+                    "popularity": 0,
+                    "media_type": "album",
+                    "deezer_id": album.get("id"),
+                    "artist_name": artist.get("name"),
+                    "artist_id": artist.get("id"),
+                    "nb_tracks": album.get("nb_tracks")
+                })
+
+            track_results = await deezer_service.search_track(query, limit=10)
+            for track in track_results:
+                artist = track.get("artist", {})
+                album = track.get("album", {})
+                results.append({
+                    "id": track.get("id"),
+                    "title": track.get("title"),
+                    "name": track.get("title"),
+                    "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                    "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
+                    "backdrop_path": album.get("cover_xl"),
+                    "vote_average": 0,
+                    "popularity": 0,
+                    "media_type": "track",
+                    "deezer_id": track.get("id"),
+                    "artist_name": artist.get("name"),
+                    "artist_id": artist.get("id"),
+                    "album_name": album.get("title"),
+                    "album_id": album.get("id"),
+                    "duration": track.get("duration")
+                })
+
+            artist_results = await deezer_service.search_artist(query, limit=5)
+            for artist in artist_results:
+                results.append({
+                    "id": artist.get("id"),
+                    "title": artist.get("name"),
+                    "name": artist.get("name"),
+                    "overview": f"{artist.get('nb_album', 0)} albums",
+                    "poster_path": artist.get("picture_xl") or artist.get("picture_big") or artist.get("picture_medium"),
+                    "backdrop_path": artist.get("picture_xl"),
+                    "vote_average": 0,
+                    "popularity": 0,
+                    "media_type": "artist",
+                    "deezer_id": artist.get("id"),
+                    "nb_album": artist.get("nb_album")
                 })
 
         results.sort(key=lambda x: x.get("popularity", 0), reverse=True)
@@ -173,10 +233,137 @@ async def get_media_details(
                 "media_type": "anime"
             }
 
+        elif media_type == "artist":
+            details = await deezer_service.get_artist(media_id)
+            top_tracks = await deezer_service.get_artist_top_tracks(media_id, limit=10)
+            albums = await deezer_service.get_artist_albums(media_id, limit=12)
+
+            return {
+                "id": media_id,
+                "title": details.get("name"),
+                "name": details.get("name"),
+                "overview": f"{details.get('nb_album', 0)} albums • {details.get('nb_fan', 0):,} fans",
+                "poster_path": details.get("picture_xl") or details.get("picture_big"),
+                "backdrop_path": details.get("picture_xl"),
+                "nb_fan": details.get("nb_fan", 0),
+                "nb_album": details.get("nb_album", 0),
+                "deezer_link": details.get("link"),
+                "top_tracks": [
+                    {
+                        "id": track.get("id"),
+                        "title": track.get("title"),
+                        "duration": track.get("duration"),
+                        "preview": track.get("preview"),
+                        "album": track.get("album", {}),
+                    }
+                    for track in top_tracks
+                ],
+                "albums": [
+                    {
+                        "id": album.get("id"),
+                        "title": album.get("title"),
+                        "cover": album.get("cover_medium"),
+                        "cover_xl": album.get("cover_xl"),
+                        "release_date": album.get("release_date"),
+                        "record_type": album.get("record_type"),
+                    }
+                    for album in albums
+                ],
+                "media_type": "artist"
+            }
+
+        elif media_type == "album":
+            details = await deezer_service.get_album(media_id)
+            artist = details.get("artist", {})
+            genres = details.get("genres", {}).get("data", [])
+            tracks = details.get("tracks", {}).get("data", [])
+
+            return {
+                "id": media_id,
+                "title": details.get("title"),
+                "name": details.get("title"),
+                "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                "poster_path": details.get("cover_xl") or details.get("cover_big"),
+                "backdrop_path": details.get("cover_xl"),
+                "release_date": details.get("release_date"),
+                "nb_tracks": details.get("nb_tracks"),
+                "duration": details.get("duration"),
+                "label": details.get("label"),
+                "fans": details.get("fans", 0),
+                "record_type": details.get("record_type"),
+                "explicit_lyrics": details.get("explicit_lyrics", False),
+                "artist": {
+                    "id": artist.get("id"),
+                    "name": artist.get("name"),
+                    "picture": artist.get("picture_medium"),
+                    "picture_xl": artist.get("picture_xl"),
+                },
+                "genres": [{"id": g.get("id"), "name": g.get("name")} for g in genres],
+                "tracks": [
+                    {
+                        "id": track.get("id"),
+                        "title": track.get("title"),
+                        "duration": track.get("duration"),
+                        "track_position": track.get("track_position"),
+                        "disk_number": track.get("disk_number"),
+                        "preview": track.get("preview"),
+                        "explicit_lyrics": track.get("explicit_lyrics", False),
+                    }
+                    for track in tracks
+                ],
+                "deezer_link": details.get("link"),
+                "media_type": "album"
+            }
+
+        elif media_type == "track":
+            details = await deezer_service.get_track(media_id)
+            artist = details.get("artist", {})
+            album = details.get("album", {})
+
+            # Fetch album details to get release_date
+            album_release_date = None
+            if album.get("id"):
+                try:
+                    album_details = await deezer_service.get_album(album.get("id"))
+                    album_release_date = album_details.get("release_date")
+                except Exception:
+                    pass
+
+            return {
+                "id": media_id,
+                "title": details.get("title"),
+                "name": details.get("title"),
+                "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                "poster_path": album.get("cover_xl") or album.get("cover_big"),
+                "backdrop_path": album.get("cover_xl"),
+                "duration": details.get("duration"),
+                "track_position": details.get("track_position"),
+                "disk_number": details.get("disk_number"),
+                "explicit_lyrics": details.get("explicit_lyrics", False),
+                "preview": details.get("preview"),
+                "isrc": details.get("isrc"),
+                "release_date": album_release_date,
+                "artist": {
+                    "id": artist.get("id"),
+                    "name": artist.get("name"),
+                    "picture": artist.get("picture_medium"),
+                    "picture_xl": artist.get("picture_xl"),
+                },
+                "album": {
+                    "id": album.get("id"),
+                    "title": album.get("title"),
+                    "cover": album.get("cover_medium"),
+                    "cover_xl": album.get("cover_xl"),
+                    "release_date": album_release_date,
+                },
+                "deezer_id": media_id,
+                "media_type": "track"
+            }
+
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid media type. Must be 'movie', 'show', or 'anime'"
+                detail="Invalid media type. Must be 'movie', 'show', 'anime', 'artist', 'album', or 'track'"
             )
 
     except Exception as e:

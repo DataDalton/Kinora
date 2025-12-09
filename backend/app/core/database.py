@@ -257,6 +257,99 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_anime_status ON anime(status);
         """)
 
+        # Artists table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS artists (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                picture VARCHAR(500),
+                picture_medium VARCHAR(500),
+                picture_big VARCHAR(500),
+                picture_xl VARCHAR(500),
+                deezer_id BIGINT UNIQUE,
+                monitored BOOLEAN DEFAULT TRUE NOT NULL,
+                root_folder_path VARCHAR(500),
+                genres JSONB,
+                nb_album INTEGER,
+                nb_fan INTEGER,
+                has_files BOOLEAN DEFAULT FALSE NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_artists_name ON artists USING GIN (to_tsvector('english', name));
+            CREATE INDEX IF NOT EXISTS idx_artists_deezer_id ON artists(deezer_id);
+            CREATE INDEX IF NOT EXISTS idx_artists_monitored ON artists(monitored);
+        """)
+
+        # Albums table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS albums (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                cover VARCHAR(500),
+                cover_medium VARCHAR(500),
+                cover_big VARCHAR(500),
+                cover_xl VARCHAR(500),
+                release_date TIMESTAMP,
+                deezer_id BIGINT UNIQUE,
+                artist_id INTEGER REFERENCES artists(id) ON DELETE CASCADE,
+                upc VARCHAR(50),
+                monitored BOOLEAN DEFAULT TRUE NOT NULL,
+                media_profile_id INTEGER,
+                root_folder_path VARCHAR(500),
+                status VARCHAR(50) DEFAULT 'wanted' NOT NULL,
+                genres JSONB,
+                nb_tracks INTEGER,
+                duration INTEGER,
+                label VARCHAR(255),
+                explicit_lyrics BOOLEAN DEFAULT FALSE,
+                record_type VARCHAR(50),
+                artist_name VARCHAR(255),
+                has_file BOOLEAN DEFAULT FALSE NOT NULL,
+                file_path VARCHAR(1000),
+                file_size BIGINT,
+                quality_detected VARCHAR(50),
+                codec VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_albums_title ON albums USING GIN (to_tsvector('english', title));
+            CREATE INDEX IF NOT EXISTS idx_albums_deezer_id ON albums(deezer_id);
+            CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums(artist_id);
+            CREATE INDEX IF NOT EXISTS idx_albums_status ON albums(status);
+            CREATE INDEX IF NOT EXISTS idx_albums_monitored ON albums(monitored);
+        """)
+
+        # Tracks table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tracks (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                duration INTEGER,
+                track_position INTEGER,
+                disk_number INTEGER,
+                deezer_id BIGINT UNIQUE,
+                album_id INTEGER REFERENCES albums(id) ON DELETE CASCADE,
+                isrc VARCHAR(50),
+                explicit_lyrics BOOLEAN DEFAULT FALSE,
+                preview VARCHAR(500),
+                artist_name VARCHAR(255),
+                album_title VARCHAR(255),
+                has_file BOOLEAN DEFAULT FALSE NOT NULL,
+                file_path VARCHAR(1000),
+                file_size BIGINT,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks USING GIN (to_tsvector('english', title));
+            CREATE INDEX IF NOT EXISTS idx_tracks_deezer_id ON tracks(deezer_id);
+            CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id);
+            CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks(isrc);
+        """)
+
         # Media profiles table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS media_profiles (
@@ -264,6 +357,7 @@ async def init_db():
                 name VARCHAR(100) UNIQUE NOT NULL,
                 min_size INTEGER,
                 max_size INTEGER,
+                -- Legacy global quality fields (kept for backward compatibility)
                 resolutions TEXT[] DEFAULT ARRAY[]::TEXT[],
                 codecs TEXT[] DEFAULT ARRAY[]::TEXT[],
                 sources TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -271,6 +365,35 @@ async def init_db():
                 audio_channels TEXT[] DEFAULT ARRAY[]::TEXT[],
                 hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[],
                 editions TEXT[] DEFAULT ARRAY[]::TEXT[],
+                -- Per-media-type quality: Movies
+                movie_resolutions TEXT[] DEFAULT ARRAY[]::TEXT[],
+                movie_codecs TEXT[] DEFAULT ARRAY[]::TEXT[],
+                movie_sources TEXT[] DEFAULT ARRAY[]::TEXT[],
+                movie_audio_codecs TEXT[] DEFAULT ARRAY[]::TEXT[],
+                movie_audio_channels TEXT[] DEFAULT ARRAY[]::TEXT[],
+                movie_hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[],
+                movie_editions TEXT[] DEFAULT ARRAY[]::TEXT[],
+                movie_min_size INTEGER,
+                movie_max_size INTEGER,
+                -- Per-media-type quality: TV Shows
+                show_resolutions TEXT[] DEFAULT ARRAY[]::TEXT[],
+                show_codecs TEXT[] DEFAULT ARRAY[]::TEXT[],
+                show_sources TEXT[] DEFAULT ARRAY[]::TEXT[],
+                show_audio_codecs TEXT[] DEFAULT ARRAY[]::TEXT[],
+                show_audio_channels TEXT[] DEFAULT ARRAY[]::TEXT[],
+                show_hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[],
+                show_min_size INTEGER,
+                show_max_size INTEGER,
+                -- Per-media-type quality: Anime
+                anime_resolutions TEXT[] DEFAULT ARRAY[]::TEXT[],
+                anime_codecs TEXT[] DEFAULT ARRAY[]::TEXT[],
+                anime_sources TEXT[] DEFAULT ARRAY[]::TEXT[],
+                anime_audio_codecs TEXT[] DEFAULT ARRAY[]::TEXT[],
+                anime_audio_channels TEXT[] DEFAULT ARRAY[]::TEXT[],
+                anime_hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[],
+                anime_min_size INTEGER,
+                anime_max_size INTEGER,
+                -- Common settings
                 languages TEXT[] DEFAULT ARRAY[]::TEXT[],
                 subtitle_languages TEXT[] DEFAULT ARRAY[]::TEXT[],
                 upgrade_allowed BOOLEAN DEFAULT TRUE,
@@ -286,20 +409,33 @@ async def init_db():
                 search_timeout INTEGER DEFAULT 30,
                 max_retries INTEGER DEFAULT 3,
                 max_results INTEGER DEFAULT 100,
+                -- Naming formats
                 movie_naming_format TEXT,
                 movie_folder_format TEXT,
                 show_naming_format TEXT,
                 show_folder_format TEXT,
                 anime_naming_format TEXT,
                 anime_folder_format TEXT,
+                -- Anime options
                 anime_subtitle_preference VARCHAR(20) DEFAULT 'softsub',
                 anime_allow_hardsub BOOLEAN DEFAULT FALSE,
                 anime_prefer_dual_audio BOOLEAN DEFAULT FALSE,
                 anime_audio_language VARCHAR(10) DEFAULT 'ja',
                 anime_subtitle_language VARCHAR(10) DEFAULT 'en',
+                -- Indexers per media type
                 movie_indexers TEXT[] DEFAULT ARRAY[]::TEXT[],
                 show_indexers TEXT[] DEFAULT ARRAY[]::TEXT[],
                 anime_indexers TEXT[] DEFAULT ARRAY[]::TEXT[],
+                music_indexers TEXT[] DEFAULT ARRAY[]::TEXT[],
+                -- Music settings
+                music_artist_folder_format TEXT DEFAULT '{artist}',
+                music_album_folder_format TEXT DEFAULT '{album} ({year})',
+                music_track_naming_format TEXT DEFAULT '{track:00} - {title}',
+                music_multi_disc_format TEXT DEFAULT '{disc:00}-{track:00} - {title}',
+                music_preferred_quality TEXT[] DEFAULT ARRAY['flac', 'mp3_320', 'mp3_256', 'aac']::TEXT[],
+                music_embed_lyrics BOOLEAN DEFAULT TRUE,
+                music_embed_artwork BOOLEAN DEFAULT TRUE,
+                -- File output settings
                 media_server VARCHAR(20) DEFAULT 'jellyfin',
                 use_hardlinks BOOLEAN DEFAULT TRUE,
                 illegal_char_replacement VARCHAR(5) DEFAULT '_',
@@ -309,6 +445,116 @@ async def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_media_profiles_name ON media_profiles(name);
+        """)
+
+        # Add new columns if they don't exist (migration for existing databases)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                -- Movie quality columns
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_resolutions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_resolutions TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_codecs') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_codecs TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_sources') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_sources TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_audio_codecs') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_audio_codecs TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_audio_channels') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_audio_channels TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_hdr_formats') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_editions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_editions TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_min_size') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_min_size INTEGER;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_max_size') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_max_size INTEGER;
+                END IF;
+                -- Show quality columns
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_resolutions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_resolutions TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_codecs') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_codecs TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_sources') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_sources TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_audio_codecs') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_audio_codecs TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_audio_channels') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_audio_channels TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_hdr_formats') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_min_size') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_min_size INTEGER;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_max_size') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_max_size INTEGER;
+                END IF;
+                -- Anime quality columns
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_resolutions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_resolutions TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_codecs') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_codecs TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_sources') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_sources TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_audio_codecs') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_audio_codecs TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_audio_channels') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_audio_channels TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_hdr_formats') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_hdr_formats TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_min_size') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_min_size INTEGER;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_max_size') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_max_size INTEGER;
+                END IF;
+                -- Music columns
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_indexers') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_indexers TEXT[] DEFAULT ARRAY[]::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_artist_folder_format') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_artist_folder_format TEXT DEFAULT '{artist}';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_album_folder_format') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_album_folder_format TEXT DEFAULT '{album} ({year})';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_track_naming_format') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_track_naming_format TEXT DEFAULT '{track:00} - {title}';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_multi_disc_format') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_multi_disc_format TEXT DEFAULT '{disc:00}-{track:00} - {title}';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_preferred_quality') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_preferred_quality TEXT[] DEFAULT ARRAY['flac', 'mp3_320', 'mp3_256', 'aac']::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_embed_lyrics') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_embed_lyrics BOOLEAN DEFAULT TRUE;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_embed_artwork') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_embed_artwork BOOLEAN DEFAULT TRUE;
+                END IF;
+            END $$;
         """)
 
         # Download history table

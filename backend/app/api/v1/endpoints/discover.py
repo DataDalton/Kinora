@@ -4,6 +4,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
 from app.services.metadata.tmdb import tmdb_service
 from app.services.metadata.anilist import anilist_service
+from app.services.metadata.deezer import deezer_service
 
 router = APIRouter()
 
@@ -295,4 +296,103 @@ async def get_by_genre(
         return {"results": all_results[:20]}
     except Exception as e:
         print(f"Error fetching genre content: {e}")
+        return {"results": []}
+
+
+@router.get("/music/charts")
+async def get_music_charts(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get global music charts from Deezer (top tracks, albums, artists)
+    """
+    try:
+        charts = await deezer_service.get_chart(limit)
+
+        return {
+            "tracks": charts.get("tracks", {}).get("data", []),
+            "albums": charts.get("albums", {}).get("data", []),
+            "artists": charts.get("artists", {}).get("data", []),
+        }
+    except Exception as e:
+        print(f"Error fetching music charts: {e}")
+        return {"tracks": [], "albums": [], "artists": []}
+
+
+@router.get("/music/new-releases")
+async def get_music_new_releases(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get new music releases from Deezer editorial
+    """
+    try:
+        releases = await deezer_service.get_editorial_releases(limit)
+
+        formatted_results = []
+        for album in releases:
+            artist = album.get("artist", {})
+            formatted_results.append({
+                "id": album.get("id"),
+                "title": album.get("title"),
+                "cover": album.get("cover_medium"),
+                "cover_xl": album.get("cover_xl"),
+                "artist_name": artist.get("name") if artist else None,
+                "artist_id": artist.get("id") if artist else None,
+                "release_date": album.get("release_date"),
+                "nb_tracks": album.get("nb_tracks"),
+                "record_type": album.get("record_type"),
+                "media_type": "music"
+            })
+
+        return {"results": formatted_results}
+    except Exception as e:
+        print(f"Error fetching new releases: {e}")
+        return {"results": []}
+
+
+@router.get("/music/genres")
+async def get_music_genres(
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get all available music genres from Deezer
+    """
+    try:
+        genres = await deezer_service.get_genres()
+        return {"results": genres}
+    except Exception as e:
+        print(f"Error fetching music genres: {e}")
+        return {"results": []}
+
+
+@router.get("/music/genre/{genre_id}")
+async def get_music_by_genre(
+    genre_id: int,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get top artists for a specific music genre
+    """
+    try:
+        artists = await deezer_service.get_genre_artists(genre_id, limit)
+
+        formatted_results = []
+        for artist in artists:
+            formatted_results.append({
+                "id": artist.get("id"),
+                "name": artist.get("name"),
+                "picture": artist.get("picture_medium"),
+                "picture_xl": artist.get("picture_xl"),
+                "nb_album": artist.get("nb_album"),
+                "nb_fan": artist.get("nb_fan"),
+                "media_type": "music"
+            })
+
+        return {"results": formatted_results}
+    except Exception as e:
+        print(f"Error fetching genre artists: {e}")
         return {"results": []}

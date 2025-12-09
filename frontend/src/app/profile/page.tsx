@@ -41,7 +41,9 @@ export default function ProfilePage() {
       <PageHeader
         title="User Profile"
         description="Manage your account settings and security"
-        icon={User}
+        gradientFrom="indigo-600/10"
+        gradientVia="purple-600/10"
+        gradientTo="pink-600/10"
       />
 
       <div className="grid grid-cols-12 gap-6 mt-6">
