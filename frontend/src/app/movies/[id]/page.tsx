@@ -10,9 +10,9 @@ import InteractiveSearchModal from '@/components/InteractiveSearchModal';
 import ManualImportModal from '@/components/ManualImportModal';
 import MonitoringOptionsDropdown from '@/components/MonitoringOptionsDropdown';
 import DownloadHistoryPanel from '@/components/DownloadHistoryPanel';
+import FileQualityInfo from '@/components/FileQualityInfo';
 import TagsEditor from '@/components/TagsEditor';
 import CastCrewSection from '@/components/CastCrewSection';
-import SeasonEpisodeList from '@/components/SeasonEpisodeList';
 import {
   ArrowLeft,
   Eye,
@@ -25,14 +25,14 @@ import {
   Clock,
   Calendar,
   Star,
-  Tv,
-  Play,
+  Film,
+  DollarSign,
+  Folder,
   ScanLine,
-  Building2,
 } from 'lucide-react';
 import Link from 'next/link';
 
-interface Show {
+interface Movie {
   id: number;
   title: string;
   original_title: string;
@@ -42,24 +42,26 @@ interface Show {
   release_date: string;
   genres: { id: number; name: string }[] | string[];
   rating: number;
-  vote_count: number | null;
+  vote_count: number;
   popularity: number;
   status: string;
   monitored: boolean;
   upgrade_allowed: boolean | null;
-  season_monitoring: string;
-  number_of_seasons: number | null;
-  number_of_episodes: number | null;
-  episode_run_time: number[] | string | null;
-  networks: { id: number; name: string; logo_path: string | null }[] | string | null;
-  production_companies: { id: number; name: string; logo_path: string | null }[] | string | null;
-  first_air_date: string | null;
-  last_air_date: string | null;
-  in_production: boolean;
+  has_file: boolean;
+  file_path: string | null;
+  file_size: number | null;
+  quality_detected: string | null;
+  codec: string | null;
+  resolution: string | null;
+  runtime: number | null;
+  budget: number | null;
+  revenue: number | null;
+  tagline: string | null;
   tmdb_id: number | null;
   imdb_id: string | null;
-  tvdb_id: number | null;
-  root_folder_path: string | null;
+  collection_id: number | null;
+  collection_name: string | null;
+  production_companies: { id: number; name: string; logo_path: string | null }[] | null;
 }
 
 interface CastMember {
@@ -78,97 +80,100 @@ interface CrewMember {
   profile_path: string | null;
 }
 
-interface Season {
-  id: number;
-  show_id: number;
-  season_number: number;
-  title: string | null;
-  overview: string | null;
-  poster_path: string | null;
-  air_date: string | null;
-  episode_count: number | null;
-  monitored: boolean;
+interface FileInfo {
+  file_path: string;
+  file_name: string;
+  file_size: number | null;
+  quality: string | null;
+  resolution: string | null;
+  codec: string | null;
+  audio_codec: string | null;
+  audio_channels: string | null;
+  container: string | null;
+  bit_depth: string | null;
+  hdr: boolean;
+  created_at: string | null;
 }
 
-export default function ShowDetailPage() {
+export default function MovieDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const showId = parseInt(params.id as string);
+  const movieId = parseInt(params.id as string);
   const queryClient = useQueryClient();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
   const [showManualImport, setShowManualImport] = useState(false);
 
-  const { data: show, isLoading: showLoading } = useQuery({
-    queryKey: ['show', showId],
+  const { data: movie, isLoading: movieLoading } = useQuery({
+    queryKey: ['movie', movieId],
     queryFn: async () => {
-      const response = await api.get(`/shows/${showId}`);
-      return response.data as Show;
+      const response = await api.get(`/movies/${movieId}`);
+      return response.data as Movie;
     },
   });
 
   const { data: credits } = useQuery({
-    queryKey: ['show-credits', showId],
+    queryKey: ['movie-credits', movieId],
     queryFn: async () => {
-      const response = await api.get(`/shows/${showId}/credits`);
+      const response = await api.get(`/movies/${movieId}/credits`);
       return response.data as { cast: CastMember[]; crew: CrewMember[] };
     },
-    enabled: !!show?.tmdb_id,
+    enabled: !!movie?.tmdb_id,
   });
 
-  const { data: seasonsData } = useQuery({
-    queryKey: ['show-seasons', showId],
+  const { data: files } = useQuery({
+    queryKey: ['files', 'movie', movieId],
     queryFn: async () => {
-      const response = await api.get(`/shows/${showId}/seasons`);
-      return response.data as { seasons: Season[]; total_seasons: number };
+      const response = await api.get(`/files/movie/${movieId}`);
+      return response.data.files as FileInfo[];
     },
+    enabled: !!movie?.has_file,
   });
 
   const searchDownloadMutation = useMutation({
     mutationFn: async () => {
       const response = await api.post(`/search/search-download`, {
-        media_type: 'show',
-        media_id: showId,
+        media_type: 'movie',
+        media_id: movieId,
       });
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['show', showId] });
+      queryClient.invalidateQueries({ queryKey: ['movie', movieId] });
     },
   });
 
   const refreshMetadataMutation = useMutation({
     mutationFn: async () => {
-      const response = await api.post(`/shows/${showId}/refresh-metadata`);
+      const response = await api.post(`/movies/${movieId}/refresh-metadata`);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['show', showId] });
-      queryClient.invalidateQueries({ queryKey: ['show-credits', showId] });
-      queryClient.invalidateQueries({ queryKey: ['show-seasons', showId] });
+      queryClient.invalidateQueries({ queryKey: ['movie', movieId] });
+      queryClient.invalidateQueries({ queryKey: ['movie-credits', movieId] });
     },
   });
 
   const rescanFilesMutation = useMutation({
     mutationFn: async () => {
-      const response = await api.post(`/shows/${showId}/rescan`);
+      const response = await api.post(`/movies/${movieId}/rescan`);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['show', showId] });
-      queryClient.invalidateQueries({ queryKey: ['show-seasons', showId] });
+      queryClient.invalidateQueries({ queryKey: ['movie', movieId] });
+      queryClient.invalidateQueries({ queryKey: ['files', 'movie', movieId] });
     },
   });
 
-  const deleteShowMutation = useMutation({
+  const deleteMovieMutation = useMutation({
     mutationFn: async (deleteFiles: boolean) => {
-      const response = await api.delete(`/shows/${showId}/delete?delete_files=${deleteFiles}`);
+      const response = await api.delete(`/movies/${movieId}/delete?delete_files=${deleteFiles}`);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['shows'] });
-      router.push('/shows');
+      queryClient.invalidateQueries({ queryKey: ['movies'] });
+      router.push('/movies');
     },
   });
 
@@ -177,27 +182,39 @@ export default function ShowDetailPage() {
     return `https://image.tmdb.org/t/p/${size}${path}`;
   };
 
-  const formatRuntime = (runtime: Show['episode_run_time']) => {
-    if (!runtime) return 'Unknown';
-    if (typeof runtime === 'string') {
-      try {
-        const parsed = JSON.parse(runtime);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return `${parsed[0]} min/ep`;
-        }
-      } catch {
-        return 'Unknown';
-      }
+  const formatRuntime = (minutes: number | null) => {
+    if (!minutes) return 'Unknown';
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours > 0) {
+      return `${hours}h ${mins}m`;
     }
-    if (Array.isArray(runtime) && runtime.length > 0) {
-      return `${runtime[0]} min/ep`;
-    }
-    return 'Unknown';
+    return `${mins}m`;
   };
 
-  const getStatusBadge = (status: string, inProduction: boolean) => {
-    if (inProduction) {
-      return <span className="px-3 py-1 text-sm rounded bg-green-500/20 text-green-400 border border-green-500/50 font-medium">Continuing</span>;
+  const formatMoney = (amount: number | null) => {
+    if (!amount || amount === 0) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(amount);
+  };
+
+  const formatFileSize = (bytes: number | null) => {
+    if (!bytes) return 'Unknown';
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) {
+      return `${gb.toFixed(2)} GB`;
+    }
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(0)} MB`;
+  };
+
+  const getStatusBadge = (status: string, hasFile: boolean) => {
+    if (hasFile) {
+      return <span className="px-3 py-1 text-sm rounded bg-green-500/20 text-green-400 border border-green-500/50 font-medium">Downloaded</span>;
     }
     if (status === 'downloading') {
       return <span className="px-3 py-1 text-sm rounded bg-blue-500/20 text-blue-400 border border-blue-500/50 font-medium">Downloading</span>;
@@ -205,10 +222,10 @@ export default function ShowDetailPage() {
     if (status === 'wanted') {
       return <span className="px-3 py-1 text-sm rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 font-medium">Wanted</span>;
     }
-    return <span className="px-3 py-1 text-sm rounded bg-gray-500/20 text-gray-400 border border-gray-500/50 font-medium">Ended</span>;
+    return <span className="px-3 py-1 text-sm rounded bg-gray-500/20 text-gray-400 border border-gray-500/50 font-medium capitalize">{status}</span>;
   };
 
-  const parseGenres = (genres: Show['genres']): string[] => {
+  const parseGenres = (genres: Movie['genres']): string[] => {
     if (!genres) return [];
     if (Array.isArray(genres)) {
       return genres.map(g => typeof g === 'string' ? g : g.name);
@@ -224,40 +241,24 @@ export default function ShowDetailPage() {
     return [];
   };
 
-  const parseNetworks = (networks: Show['networks']): { name: string; logo_path: string | null }[] => {
-    if (!networks) return [];
-    if (Array.isArray(networks)) {
-      return networks;
-    }
-    if (typeof networks === 'string') {
-      try {
-        const parsed = JSON.parse(networks);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  };
-
   const handleDeleteConfirm = (deleteFiles: boolean) => {
     setShowDeleteModal(false);
-    deleteShowMutation.mutate(deleteFiles);
+    deleteMovieMutation.mutate(deleteFiles);
   };
 
   const handleMonitoringUpdate = () => {
-    queryClient.invalidateQueries({ queryKey: ['show', showId] });
+    queryClient.invalidateQueries({ queryKey: ['movie', movieId] });
   };
 
-  if (showLoading) {
+  if (movieLoading) {
     return (
       <div className="min-h-screen">
         <PageHeader
           title="Loading..."
-          description="Loading show details"
-          gradientFrom="green-600/10"
-          gradientVia="teal-600/10"
-          gradientTo="cyan-600/10"
+          description="Loading movie details"
+          gradientFrom="blue-600/10"
+          gradientVia="purple-600/10"
+          gradientTo="pink-600/10"
         />
         <div className="container mx-auto px-6 py-8">
           <div className="flex items-center justify-center py-12">
@@ -268,25 +269,25 @@ export default function ShowDetailPage() {
     );
   }
 
-  if (!show) {
+  if (!movie) {
     return (
       <div className="min-h-screen">
         <PageHeader
           title="Not Found"
-          description="Show not found"
-          gradientFrom="green-600/10"
-          gradientVia="teal-600/10"
-          gradientTo="cyan-600/10"
+          description="Movie not found"
+          gradientFrom="blue-600/10"
+          gradientVia="purple-600/10"
+          gradientTo="pink-600/10"
         />
         <div className="container mx-auto px-6 py-8">
           <div className="text-center py-12">
-            <p className="text-muted-foreground mb-4">Show not found</p>
+            <p className="text-muted-foreground mb-4">Movie not found</p>
             <Link
-              href="/shows"
+              href="/movies"
               className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium"
             >
               <ArrowLeft className="w-5 h-5" />
-              Back to Shows
+              Back to Movies
             </Link>
           </div>
         </div>
@@ -294,17 +295,16 @@ export default function ShowDetailPage() {
     );
   }
 
-  const genres = parseGenres(show.genres);
-  const networks = parseNetworks(show.networks);
-  const creator = credits?.crew?.find(c => c.job === 'Creator');
+  const genres = parseGenres(movie.genres);
+  const director = credits?.crew?.find(c => c.job === 'Director');
 
   return (
     <div className="min-h-screen">
       {/* Backdrop */}
-      {show.backdrop_path && (
+      {movie.backdrop_path && (
         <div className="fixed inset-0 z-0">
           <img
-            src={getPosterUrl(show.backdrop_path, 'original')}
+            src={getPosterUrl(movie.backdrop_path, 'original')}
             alt=""
             className="w-full h-full object-cover opacity-10"
           />
@@ -314,18 +314,18 @@ export default function ShowDetailPage() {
 
       <div className="relative z-10">
         <PageHeader
-          title={show.title}
-          description={`${show.first_air_date ? new Date(show.first_air_date).getFullYear() : 'Unknown'} • ${show.number_of_seasons || '?'} Seasons • ${show.number_of_episodes || '?'} Episodes`}
-          gradientFrom="green-600/10"
-          gradientVia="teal-600/10"
-          gradientTo="cyan-600/10"
+          title={movie.title}
+          description={movie.tagline || `${movie.release_date ? new Date(movie.release_date).getFullYear() : 'Unknown'} • ${formatRuntime(movie.runtime)}`}
+          gradientFrom="blue-600/10"
+          gradientVia="purple-600/10"
+          gradientTo="pink-600/10"
         >
           <Link
-            href="/shows"
+            href="/movies"
             className="flex items-center gap-2 px-4 py-2 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Shows
+            Back to Movies
           </Link>
         </PageHeader>
 
@@ -336,11 +336,11 @@ export default function ShowDetailPage() {
               <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden sticky top-8">
                 <div className="relative aspect-[2/3]">
                   <img
-                    src={getPosterUrl(show.poster_path)}
-                    alt={show.title}
+                    src={getPosterUrl(movie.poster_path)}
+                    alt={movie.title}
                     className="w-full h-full object-cover"
                   />
-                  {show.monitored && (
+                  {movie.monitored && (
                     <div className="absolute top-4 right-4 bg-primary text-primary-foreground p-2 rounded-lg shadow-lg">
                       <Eye className="w-5 h-5" />
                     </div>
@@ -348,13 +348,13 @@ export default function ShowDetailPage() {
                 </div>
                 <div className="p-6 space-y-4">
                   <div>
-                    <h2 className="text-2xl font-bold mb-1">{show.title}</h2>
-                    {show.original_title && show.original_title !== show.title && (
-                      <p className="text-sm text-muted-foreground italic mb-2">{show.original_title}</p>
+                    <h2 className="text-2xl font-bold mb-1">{movie.title}</h2>
+                    {movie.original_title && movie.original_title !== movie.title && (
+                      <p className="text-sm text-muted-foreground italic mb-2">{movie.original_title}</p>
                     )}
-                    {creator && (
+                    {director && (
                       <p className="text-sm text-muted-foreground">
-                        Created by <span className="text-foreground font-medium">{creator.name}</span>
+                        Directed by <span className="text-foreground font-medium">{director.name}</span>
                       </p>
                     )}
                   </div>
@@ -373,47 +373,23 @@ export default function ShowDetailPage() {
                     </div>
                   )}
 
-                  {/* Networks */}
-                  {networks.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">
-                        {networks.map(n => n.name).join(', ')}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Show Details */}
+                  {/* Movie Details */}
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between items-center">
                       <span className="flex items-center gap-2 text-muted-foreground">
                         <Calendar className="w-4 h-4" />
-                        First Aired
+                        Release Date
                       </span>
                       <span className="font-medium">
-                        {show.first_air_date ? new Date(show.first_air_date).toLocaleDateString() : 'Unknown'}
+                        {movie.release_date ? new Date(movie.release_date).toLocaleDateString() : 'Unknown'}
                       </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="flex items-center gap-2 text-muted-foreground">
-                        <Tv className="w-4 h-4" />
-                        Seasons
-                      </span>
-                      <span className="font-medium">{show.number_of_seasons || '?'}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="flex items-center gap-2 text-muted-foreground">
-                        <Play className="w-4 h-4" />
-                        Episodes
-                      </span>
-                      <span className="font-medium">{show.number_of_episodes || '?'}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="flex items-center gap-2 text-muted-foreground">
                         <Clock className="w-4 h-4" />
                         Runtime
                       </span>
-                      <span className="font-medium">{formatRuntime(show.episode_run_time)}</span>
+                      <span className="font-medium">{formatRuntime(movie.runtime)}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="flex items-center gap-2 text-muted-foreground">
@@ -421,31 +397,47 @@ export default function ShowDetailPage() {
                         Rating
                       </span>
                       <span className="font-medium">
-                        {show.rating ? `${show.rating.toFixed(1)} / 10` : 'N/A'}
-                        {show.vote_count && (
+                        {movie.rating ? `${movie.rating.toFixed(1)} / 10` : 'N/A'}
+                        {movie.vote_count && (
                           <span className="text-xs text-muted-foreground ml-1">
-                            ({show.vote_count.toLocaleString()} votes)
+                            ({movie.vote_count.toLocaleString()} votes)
                           </span>
                         )}
                       </span>
                     </div>
+                    {movie.budget && movie.budget > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-2 text-muted-foreground">
+                          <DollarSign className="w-4 h-4" />
+                          Budget
+                        </span>
+                        <span className="font-medium">{formatMoney(movie.budget)}</span>
+                      </div>
+                    )}
+                    {movie.revenue && movie.revenue > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-2 text-muted-foreground">
+                          <DollarSign className="w-4 h-4" />
+                          Revenue
+                        </span>
+                        <span className="font-medium">{formatMoney(movie.revenue)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center pt-2 border-t border-border">
                       <span className="text-muted-foreground">Status</span>
-                      {getStatusBadge(show.status, show.in_production)}
+                      {getStatusBadge(movie.status, movie.has_file)}
                     </div>
                   </div>
 
                   {/* Monitoring Options */}
                   <div className="pt-4 border-t border-border">
                     <MonitoringOptionsDropdown
-                      mediaType="show"
-                      mediaId={show.id}
+                      mediaType="movie"
+                      mediaId={movie.id}
                       currentState={{
-                        monitored: show.monitored,
-                        upgradeAllowed: show.upgrade_allowed,
-                        seasonMonitoring: show.season_monitoring as any,
+                        monitored: movie.monitored,
+                        upgradeAllowed: movie.upgrade_allowed,
                       }}
-                      showSeasonOptions={true}
                       onUpdate={handleMonitoringUpdate}
                     />
                   </div>
@@ -462,7 +454,7 @@ export default function ShowDetailPage() {
 
                     <button
                       onClick={() => searchDownloadMutation.mutate()}
-                      disabled={searchDownloadMutation.isPending || show.status === 'downloading'}
+                      disabled={searchDownloadMutation.isPending || movie.status === 'downloading'}
                       className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
                     >
                       <Download className="w-5 h-5" />
@@ -503,17 +495,28 @@ export default function ShowDetailPage() {
                       className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium"
                     >
                       <Trash2 className="w-5 h-5" />
-                      Delete Show
+                      Delete Movie
                     </button>
                   </div>
+
+                  {/* Collection */}
+                  {movie.collection_name && (
+                    <div className="pt-4 border-t border-border">
+                      <h4 className="text-sm font-medium text-muted-foreground mb-2">Collection</h4>
+                      <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
+                        <Folder className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-medium">{movie.collection_name}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* External Links */}
                   <div className="pt-4 border-t border-border">
                     <h4 className="text-sm font-medium text-muted-foreground mb-2">External Links</h4>
                     <div className="space-y-2">
-                      {show.tmdb_id && (
+                      {movie.tmdb_id && (
                         <a
-                          href={`https://www.themoviedb.org/tv/${show.tmdb_id}`}
+                          href={`https://www.themoviedb.org/movie/${movie.tmdb_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
@@ -523,27 +526,15 @@ export default function ShowDetailPage() {
                           <ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
                         </a>
                       )}
-                      {show.imdb_id && (
+                      {movie.imdb_id && (
                         <a
-                          href={`https://www.imdb.com/title/${show.imdb_id}`}
+                          href={`https://www.imdb.com/title/${movie.imdb_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
                         >
                           <img src="https://www.imdb.com/favicon.ico" alt="IMDb" className="w-4 h-4" />
                           View on IMDb
-                          <ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
-                        </a>
-                      )}
-                      {show.tvdb_id && (
-                        <a
-                          href={`https://thetvdb.com/series/${show.tvdb_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
-                        >
-                          <img src="https://thetvdb.com/images/icon.png" alt="TVDB" className="w-4 h-4" />
-                          View on TVDB
                           <ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
                         </a>
                       )}
@@ -556,28 +547,29 @@ export default function ShowDetailPage() {
             {/* Right Column - Details */}
             <div className="lg:col-span-2 space-y-6">
               {/* Overview */}
-              {show.overview && (
+              {movie.overview && (
                 <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6">
                   <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
-                    <Tv className="w-5 h-5" />
+                    <Film className="w-5 h-5" />
                     Overview
                   </h3>
-                  <p className="text-muted-foreground leading-relaxed">{show.overview}</p>
+                  <p className="text-muted-foreground leading-relaxed">{movie.overview}</p>
                 </div>
               )}
 
-              {/* Seasons & Episodes */}
-              {seasonsData && seasonsData.seasons.length > 0 && (
-                <SeasonEpisodeList
-                  showId={show.id}
-                  seasons={seasonsData.seasons}
+              {/* File Quality Info */}
+              {movie.has_file && (
+                <FileQualityInfo
+                  mediaType="movie"
+                  mediaId={movie.id}
+                  files={files || []}
                 />
               )}
 
               {/* Cast & Crew */}
               {credits && (credits.cast?.length > 0 || credits.crew?.length > 0) && (
                 <CastCrewSection
-                  mediaType="show"
+                  mediaType="movie"
                   cast={credits.cast || []}
                   crew={credits.crew || []}
                 />
@@ -585,15 +577,39 @@ export default function ShowDetailPage() {
 
               {/* Tags */}
               <TagsEditor
-                mediaType="show"
-                mediaId={show.id}
+                mediaType="movie"
+                mediaId={movie.id}
               />
 
               {/* Download History */}
               <DownloadHistoryPanel
-                mediaType="show"
-                mediaId={show.id}
+                mediaType="movie"
+                mediaId={movie.id}
               />
+
+              {/* Production Companies */}
+              {movie.production_companies && Array.isArray(movie.production_companies) && movie.production_companies.length > 0 && (
+                <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6">
+                  <h3 className="text-lg font-bold mb-4">Production Companies</h3>
+                  <div className="flex flex-wrap gap-4">
+                    {movie.production_companies.map((company: any) => (
+                      <div
+                        key={company.id || company.name}
+                        className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg"
+                      >
+                        {company.logo_path ? (
+                          <img
+                            src={getPosterUrl(company.logo_path, 'w92')}
+                            alt={company.name}
+                            className="h-6 w-auto object-contain"
+                          />
+                        ) : null}
+                        <span className="text-sm font-medium">{company.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -604,29 +620,29 @@ export default function ShowDetailPage() {
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteConfirm}
-        title={show.title}
-        itemType="show"
-        hasFiles={!!show.root_folder_path}
+        title={movie.title}
+        itemType="movie"
+        hasFiles={movie.has_file}
       />
 
       <InteractiveSearchModal
         isOpen={showInteractiveSearch}
         onClose={() => setShowInteractiveSearch(false)}
-        mediaType="show"
-        mediaId={show.id}
-        mediaTitle={show.title}
-        searchQuery={show.title}
+        mediaType="movie"
+        mediaId={movie.id}
+        mediaTitle={movie.title}
+        searchQuery={`${movie.title} ${movie.release_date ? new Date(movie.release_date).getFullYear() : ''}`}
       />
 
       <ManualImportModal
         isOpen={showManualImport}
         onClose={() => setShowManualImport(false)}
-        mediaType="show"
-        mediaId={show.id}
-        mediaTitle={show.title}
+        mediaType="movie"
+        mediaId={movie.id}
+        mediaTitle={movie.title}
         onImportComplete={() => {
-          queryClient.invalidateQueries({ queryKey: ['show', showId] });
-          queryClient.invalidateQueries({ queryKey: ['show-seasons', showId] });
+          queryClient.invalidateQueries({ queryKey: ['movie', movieId] });
+          queryClient.invalidateQueries({ queryKey: ['files', 'movie', movieId] });
         }}
       />
     </div>

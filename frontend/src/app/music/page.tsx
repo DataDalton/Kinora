@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Search, Plus, Music2, Upload } from 'lucide-react';
+import { Search, Plus, Music2, Upload, Check } from 'lucide-react';
 import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import LibraryImportModal from '@/components/LibraryImportModal';
+import BulkSelectionToolbar from '@/components/BulkSelectionToolbar';
 
 interface Artist {
   id: number;
@@ -44,6 +45,9 @@ export default function MusicPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const queryClient = useQueryClient();
 
   const { data: artistsData, isLoading: artistsLoading } = useQuery({
     queryKey: ['artists'],
@@ -115,6 +119,46 @@ export default function MusicPage() {
   const isLoading = view === 'artists' ? artistsLoading : albumsLoading;
   const items = view === 'artists' ? filteredArtists : filteredAlbums;
 
+  const handleToggleSelection = (itemId: number) => {
+    setSelectedIds(prev =>
+      prev.includes(itemId)
+        ? prev.filter(id => id !== itemId)
+        : [...prev, itemId]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (view === 'artists') {
+      setSelectedIds(filteredArtists.map((a: Artist) => a.id));
+    } else {
+      setSelectedIds(filteredAlbums.map((a: Album) => a.id));
+    }
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedIds([]);
+  };
+
+  const handleSelectionModeToggle = () => {
+    setIsSelectionMode(!isSelectionMode);
+    if (isSelectionMode) {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleOperationComplete = () => {
+    setIsSelectionMode(false);
+    setSelectedIds([]);
+    queryClient.invalidateQueries({ queryKey: ['artists'] });
+    queryClient.invalidateQueries({ queryKey: ['albums'] });
+  };
+
+  const handleViewChange = (newView: 'artists' | 'albums') => {
+    setView(newView);
+    setSelectedIds([]);
+    setIsSelectionMode(false);
+  };
+
   return (
     <div className="min-h-screen">
       <PageHeader
@@ -156,11 +200,11 @@ export default function MusicPage() {
         </div>
 
         {/* View Toggle and Status Filter */}
-        <div className="flex flex-col md:flex-row gap-4 mb-8">
+        <div className="flex flex-col md:flex-row gap-4 mb-6">
           {/* View Toggle */}
           <div className="flex gap-2 flex-wrap">
             <button
-              onClick={() => setView('artists')}
+              onClick={() => handleViewChange('artists')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition cursor-pointer ${
                 view === 'artists'
                   ? 'bg-primary text-primary-foreground shadow-lg'
@@ -171,7 +215,7 @@ export default function MusicPage() {
               {artistsData && <span className="text-xs opacity-75">({filteredArtists.length})</span>}
             </button>
             <button
-              onClick={() => setView('albums')}
+              onClick={() => handleViewChange('albums')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition cursor-pointer ${
                 view === 'albums'
                   ? 'bg-primary text-primary-foreground shadow-lg'
@@ -221,6 +265,20 @@ export default function MusicPage() {
           </div>
         </div>
 
+        {/* Bulk Selection Toolbar */}
+        <div className="mb-6">
+          <BulkSelectionToolbar
+            mediaType={view === 'artists' ? 'artist' : 'album'}
+            selectedIds={selectedIds}
+            totalCount={items.length}
+            onSelectAll={handleSelectAll}
+            onDeselectAll={handleDeselectAll}
+            onSelectionModeToggle={handleSelectionModeToggle}
+            isSelectionMode={isSelectionMode}
+            onOperationComplete={handleOperationComplete}
+          />
+        </div>
+
         {isLoading ? (
           <div className="text-center py-12">Loading {view}...</div>
         ) : items.length === 0 ? (
@@ -239,15 +297,46 @@ export default function MusicPage() {
           <>
             {view === 'artists' ? (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {filteredArtists.map((artist: Artist) => (
-                  <Link key={artist.id} href={`/music/artist/${artist.id}`}>
-                    <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden hover:shadow-lg hover:border-primary/50 transition cursor-pointer">
+                {filteredArtists.map((artist: Artist) => {
+                  const isSelected = selectedIds.includes(artist.id);
+                  const CardWrapper = isSelectionMode ? 'div' : Link;
+                  const cardProps = isSelectionMode
+                    ? {
+                        onClick: () => handleToggleSelection(artist.id),
+                      }
+                    : {
+                        href: `/music/artist/${artist.id}`,
+                      };
+
+                  return (
+                    <CardWrapper
+                      key={artist.id}
+                      {...(cardProps as any)}
+                      className={`bg-card text-card-foreground rounded-lg shadow border-2 overflow-hidden hover:shadow-lg transition cursor-pointer ${
+                        isSelected
+                          ? 'border-primary ring-2 ring-primary/50'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
                       <div className="relative aspect-square">
                         <img
                           src={getPictureUrl(artist)}
                           alt={artist.name}
                           className="w-full h-full object-cover"
                         />
+                        {isSelectionMode && (
+                          <div className="absolute top-2 left-2">
+                            <div
+                              className={`w-6 h-6 rounded border-2 flex items-center justify-center transition ${
+                                isSelected
+                                  ? 'bg-primary border-primary'
+                                  : 'bg-black/50 border-white/50'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-4 h-4 text-white" />}
+                            </div>
+                          </div>
+                        )}
                         {artist.monitored && (
                           <div className="absolute top-2 right-2 bg-primary text-primary-foreground p-1 rounded">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -255,6 +344,9 @@ export default function MusicPage() {
                               <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
                             </svg>
                           </div>
+                        )}
+                        {isSelectionMode && (
+                          <div className="absolute inset-0 bg-black/20 pointer-events-none" />
                         )}
                       </div>
                       <div className="p-3">
@@ -277,21 +369,52 @@ export default function MusicPage() {
                           </div>
                         )}
                       </div>
-                    </div>
-                  </Link>
-                ))}
+                    </CardWrapper>
+                  );
+                })}
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {filteredAlbums.map((album: Album) => (
-                  <Link key={album.id} href={`/music/album/${album.id}`}>
-                    <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden hover:shadow-lg hover:border-primary/50 transition cursor-pointer">
+                {filteredAlbums.map((album: Album) => {
+                  const isSelected = selectedIds.includes(album.id);
+                  const CardWrapper = isSelectionMode ? 'div' : Link;
+                  const cardProps = isSelectionMode
+                    ? {
+                        onClick: () => handleToggleSelection(album.id),
+                      }
+                    : {
+                        href: `/music/album/${album.id}`,
+                      };
+
+                  return (
+                    <CardWrapper
+                      key={album.id}
+                      {...(cardProps as any)}
+                      className={`bg-card text-card-foreground rounded-lg shadow border-2 overflow-hidden hover:shadow-lg transition cursor-pointer ${
+                        isSelected
+                          ? 'border-primary ring-2 ring-primary/50'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
                       <div className="relative aspect-square">
                         <img
                           src={getCoverUrl(album)}
                           alt={album.title}
                           className="w-full h-full object-cover"
                         />
+                        {isSelectionMode && (
+                          <div className="absolute top-2 left-2">
+                            <div
+                              className={`w-6 h-6 rounded border-2 flex items-center justify-center transition ${
+                                isSelected
+                                  ? 'bg-primary border-primary'
+                                  : 'bg-black/50 border-white/50'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-4 h-4 text-white" />}
+                            </div>
+                          </div>
+                        )}
                         {album.monitored && (
                           <div className="absolute top-2 right-2 bg-primary text-primary-foreground p-1 rounded">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -299,6 +422,9 @@ export default function MusicPage() {
                               <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
                             </svg>
                           </div>
+                        )}
+                        {isSelectionMode && (
+                          <div className="absolute inset-0 bg-black/20 pointer-events-none" />
                         )}
                       </div>
                       <div className="p-3">
@@ -320,9 +446,9 @@ export default function MusicPage() {
                           </div>
                         )}
                       </div>
-                    </div>
-                  </Link>
-                ))}
+                    </CardWrapper>
+                  );
+                })}
               </div>
             )}
           </>

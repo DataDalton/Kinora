@@ -12,11 +12,21 @@ import {
   Music2,
   Plus,
   Calendar,
-  Disc3
+  Disc3,
+  Trash2,
+  RefreshCw,
+  Search,
+  ExternalLink,
+  Filter,
 } from 'lucide-react';
 import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import ConfirmModal from '@/components/ConfirmModal';
+import DeleteConfirmModal from '@/components/DeleteConfirmModal';
+import InteractiveSearchModal from '@/components/InteractiveSearchModal';
+import MonitoringOptionsDropdown from '@/components/MonitoringOptionsDropdown';
+import DownloadHistoryPanel from '@/components/DownloadHistoryPanel';
+import TagsEditor from '@/components/TagsEditor';
 
 interface Artist {
   id: number;
@@ -27,9 +37,11 @@ interface Artist {
   picture_xl: string | null;
   deezer_id: number;
   monitored: boolean;
+  upgrade_allowed: boolean | null;
   nb_album: number;
   nb_fan: number;
   has_files: boolean;
+  root_folder_path: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,14 +64,20 @@ interface Album {
   record_type?: string;
 }
 
+type RecordTypeFilter = 'all' | 'album' | 'single' | 'ep' | 'compilation';
+
 export default function ArtistDetailPage() {
   const params = useParams();
   const router = useRouter();
   const queryClient = useQueryClient();
   const artistId = params?.id as string;
+
   const [downloadingAlbumId, setDownloadingAlbumId] = useState<number | null>(null);
   const [showDiscographyModal, setShowDiscographyModal] = useState(false);
   const [showDownloadAllModal, setShowDownloadAllModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
+  const [recordTypeFilter, setRecordTypeFilter] = useState<RecordTypeFilter>('all');
 
   const { data: artist, isLoading: artistLoading } = useQuery({
     queryKey: ['artist', artistId],
@@ -71,9 +89,13 @@ export default function ArtistDetailPage() {
   });
 
   const { data: albums, isLoading: albumsLoading } = useQuery({
-    queryKey: ['albums', artistId],
+    queryKey: ['albums', artistId, recordTypeFilter],
     queryFn: async () => {
-      const response = await api.get(`/music/albums?artist_id=${artistId}`);
+      let url = `/music/artists/${artistId}/albums`;
+      if (recordTypeFilter !== 'all') {
+        url += `?record_type=${recordTypeFilter}`;
+      }
+      const response = await api.get(url);
       return response.data as Album[];
     },
     enabled: !!artistId,
@@ -122,6 +144,37 @@ export default function ArtistDetailPage() {
     },
     onError: () => {
       setDownloadingAlbumId(null);
+    },
+  });
+
+  const refreshMetadataMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/music/artists/${artistId}/refresh-metadata`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
+    },
+  });
+
+  const deleteArtistMutation = useMutation({
+    mutationFn: async (deleteFiles: boolean) => {
+      const response = await api.delete(`/music/artists/${artistId}/delete?delete_files=${deleteFiles}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      router.push('/music');
+    },
+  });
+
+  const monitorAllAlbumsMutation = useMutation({
+    mutationFn: async (monitored: boolean) => {
+      const response = await api.put(`/music/artists/${artistId}/monitor-all-albums?monitored=${monitored}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['albums', artistId] });
     },
   });
 
@@ -175,6 +228,15 @@ export default function ArtistDetailPage() {
     downloadAlbumMutation.mutate(albumId);
   };
 
+  const handleDeleteConfirm = (deleteFiles: boolean) => {
+    setShowDeleteModal(false);
+    deleteArtistMutation.mutate(deleteFiles);
+  };
+
+  const handleMonitoringUpdate = (newState: { monitored: boolean; upgradeAllowed: boolean | null }) => {
+    queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
+  };
+
   if (artistLoading) {
     return (
       <div className="min-h-screen">
@@ -186,7 +248,9 @@ export default function ArtistDetailPage() {
           gradientTo="rose-600/10"
         />
         <div className="container mx-auto px-6 py-8">
-          <div className="text-center py-12">Loading artist...</div>
+          <div className="flex items-center justify-center py-12">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
         </div>
       </div>
     );
@@ -219,6 +283,16 @@ export default function ArtistDetailPage() {
   }
 
   const wantedAlbumsCount = albums?.filter(a => a.status === 'wanted' && a.monitored).length || 0;
+  const monitoredAlbumsCount = albums?.filter(a => a.monitored).length || 0;
+  const downloadedAlbumsCount = albums?.filter(a => a.has_file).length || 0;
+
+  const recordTypeFilters: { value: RecordTypeFilter; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'album', label: 'Albums' },
+    { value: 'single', label: 'Singles' },
+    { value: 'ep', label: 'EPs' },
+    { value: 'compilation', label: 'Compilations' },
+  ];
 
   return (
     <div className="min-h-screen">
@@ -266,50 +340,41 @@ export default function ArtistDetailPage() {
                         {artist.nb_fan.toLocaleString()} fans
                       </div>
                     )}
+                    {albums && (
+                      <div className="flex items-center gap-1">
+                        <Download className="w-4 h-4" />
+                        {downloadedAlbumsCount}/{albums.length} downloaded
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {artist.monitored ? (
-                    <span className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground border border-primary font-medium flex items-center gap-2">
-                      <Eye className="w-4 h-4" />
-                      Monitored
-                    </span>
-                  ) : (
-                    <span className="px-3 py-1.5 text-sm rounded bg-gray-500/20 text-gray-400 border border-gray-500/50 font-medium flex items-center gap-2">
-                      <EyeOff className="w-4 h-4" />
-                      Not Monitored
-                    </span>
-                  )}
-                  {artist.has_files && (
-                    <span className="px-3 py-1.5 text-sm rounded bg-green-500/20 text-green-400 border border-green-500/50 font-medium flex items-center gap-2">
-                      <Download className="w-4 h-4" />
-                      Has Files
-                    </span>
-                  )}
-                </div>
+                <MonitoringOptionsDropdown
+                  mediaType="artist"
+                  mediaId={artist.id}
+                  currentState={{
+                    monitored: artist.monitored,
+                    upgradeAllowed: artist.upgrade_allowed,
+                  }}
+                  onUpdate={handleMonitoringUpdate}
+                />
               </div>
 
               {/* Action Buttons */}
               <div className="flex flex-wrap gap-3 mt-6">
                 <button
-                  onClick={handleToggleMonitored}
-                  disabled={toggleMonitoredMutation.isPending}
-                  className="flex items-center gap-2 px-4 py-2 bg-card text-foreground rounded-lg hover:bg-accent transition font-medium border-2 border-border disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => setShowInteractiveSearch(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium"
                 >
-                  {artist.monitored ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  {toggleMonitoredMutation.isPending
-                    ? 'Updating...'
-                    : artist.monitored
-                    ? 'Unmonitor'
-                    : 'Monitor'}
+                  <Search className="w-5 h-5" />
+                  Interactive Search
                 </button>
                 <button
                   onClick={handleAddDiscography}
                   disabled={addDiscographyMutation.isPending}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-4 py-2 bg-card text-foreground rounded-lg hover:bg-accent transition font-medium border-2 border-border disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-5 h-5" />
-                  {addDiscographyMutation.isPending ? 'Adding...' : 'Add Full Discography'}
+                  {addDiscographyMutation.isPending ? 'Adding...' : 'Add Discography'}
                 </button>
                 {wantedAlbumsCount > 0 && (
                   <button
@@ -320,9 +385,48 @@ export default function ArtistDetailPage() {
                     <Download className="w-5 h-5" />
                     {downloadAllWantedMutation.isPending
                       ? 'Downloading...'
-                      : `Download All Wanted (${wantedAlbumsCount})`}
+                      : `Download Wanted (${wantedAlbumsCount})`}
                   </button>
                 )}
+                <button
+                  onClick={() => refreshMetadataMutation.mutate()}
+                  disabled={refreshMetadataMutation.isPending}
+                  className="flex items-center gap-2 px-4 py-2 bg-card text-foreground rounded-lg hover:bg-accent transition font-medium border-2 border-border disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-5 h-5 ${refreshMetadataMutation.isPending ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium"
+                >
+                  <Trash2 className="w-5 h-5" />
+                  Delete
+                </button>
+              </div>
+
+              {/* Batch Album Monitoring */}
+              <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border">
+                <span className="text-sm text-muted-foreground">Album Monitoring:</span>
+                <button
+                  onClick={() => monitorAllAlbumsMutation.mutate(true)}
+                  disabled={monitorAllAlbumsMutation.isPending}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm disabled:opacity-50"
+                >
+                  <Eye className="w-4 h-4" />
+                  Monitor All
+                </button>
+                <button
+                  onClick={() => monitorAllAlbumsMutation.mutate(false)}
+                  disabled={monitorAllAlbumsMutation.isPending}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm disabled:opacity-50"
+                >
+                  <EyeOff className="w-4 h-4" />
+                  Unmonitor All
+                </button>
+                <span className="text-sm text-muted-foreground ml-2">
+                  {monitoredAlbumsCount}/{albums?.length || 0} monitored
+                </span>
               </div>
 
               {/* Success Messages */}
@@ -336,32 +440,126 @@ export default function ArtistDetailPage() {
                   {downloadAllWantedMutation.data.message}
                 </div>
               )}
+              {refreshMetadataMutation.isSuccess && (
+                <div className="mt-4 p-3 bg-green-500/20 text-green-400 border border-green-500/50 rounded-lg">
+                  Metadata refreshed successfully
+                </div>
+              )}
             </div>
           </div>
         </div>
 
+        {/* External Links & Tags Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* External Links */}
+          <div className="bg-muted/30 rounded-lg border border-border p-4">
+            <h4 className="font-medium mb-3 flex items-center gap-2">
+              <ExternalLink className="w-5 h-5 text-muted-foreground" />
+              External Links
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {artist.deezer_id && (
+                <a
+                  href={`https://www.deezer.com/artist/${artist.deezer_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 bg-background hover:bg-muted rounded-lg transition text-sm"
+                >
+                  <img src="https://www.deezer.com/favicon.ico" alt="Deezer" className="w-4 h-4" />
+                  Deezer
+                  <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                </a>
+              )}
+              <a
+                href={`https://www.last.fm/music/${encodeURIComponent(artist.name)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-3 py-2 bg-background hover:bg-muted rounded-lg transition text-sm"
+              >
+                <img src="https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png" alt="Last.fm" className="w-4 h-4 rounded" />
+                Last.fm
+                <ExternalLink className="w-3 h-3 text-muted-foreground" />
+              </a>
+              <a
+                href={`https://musicbrainz.org/search?query=${encodeURIComponent(artist.name)}&type=artist`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-3 py-2 bg-background hover:bg-muted rounded-lg transition text-sm"
+              >
+                <img src="https://musicbrainz.org/static/images/favicons/favicon-32x32.png" alt="MusicBrainz" className="w-4 h-4" />
+                MusicBrainz
+                <ExternalLink className="w-3 h-3 text-muted-foreground" />
+              </a>
+            </div>
+          </div>
+
+          {/* Tags */}
+          <TagsEditor
+            mediaType="artist"
+            mediaId={artist.id}
+          />
+        </div>
+
+        {/* Download History */}
+        <div className="mb-8">
+          <DownloadHistoryPanel
+            mediaType="album"
+            mediaId={artist.id}
+          />
+        </div>
+
         {/* Albums Section */}
-        <div className="mb-4">
-          <h3 className="text-2xl font-bold">Albums</h3>
-          <p className="text-muted-foreground">
-            {albums?.length || 0} {albums?.length === 1 ? 'album' : 'albums'} in library
-          </p>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-2xl font-bold">Albums</h3>
+            <p className="text-muted-foreground">
+              {albums?.length || 0} {albums?.length === 1 ? 'album' : 'albums'} in library
+            </p>
+          </div>
+
+          {/* Record Type Filter */}
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-muted-foreground" />
+            <div className="flex items-center bg-muted rounded-lg p-1">
+              {recordTypeFilters.map((filter) => (
+                <button
+                  key={filter.value}
+                  onClick={() => setRecordTypeFilter(filter.value)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
+                    recordTypeFilter === filter.value
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-background'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {albumsLoading ? (
-          <div className="text-center py-12">Loading albums...</div>
+          <div className="flex items-center justify-center py-12">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
         ) : !albums || albums.length === 0 ? (
           <div className="text-center py-12">
             <Disc3 className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-            <p className="text-muted-foreground mb-4">No albums found in library for this artist.</p>
-            <button
-              onClick={handleAddDiscography}
-              disabled={addDiscographyMutation.isPending}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Plus className="w-5 h-5" />
-              {addDiscographyMutation.isPending ? 'Adding...' : 'Add Full Discography'}
-            </button>
+            <p className="text-muted-foreground mb-4">
+              {recordTypeFilter !== 'all'
+                ? `No ${recordTypeFilter}s found for this artist.`
+                : 'No albums found in library for this artist.'}
+            </p>
+            {recordTypeFilter === 'all' && (
+              <button
+                onClick={handleAddDiscography}
+                disabled={addDiscographyMutation.isPending}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-5 h-5" />
+                {addDiscographyMutation.isPending ? 'Adding...' : 'Add Full Discography'}
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -379,10 +577,7 @@ export default function ArtistDetailPage() {
                     />
                     {album.monitored && (
                       <div className="absolute top-2 right-2 bg-primary text-primary-foreground p-1 rounded">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
-                          <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
-                        </svg>
+                        <Eye className="w-4 h-4" />
                       </div>
                     )}
                     {!album.has_file && album.status === 'wanted' && (
@@ -434,7 +629,7 @@ export default function ArtistDetailPage() {
         )}
       </div>
 
-      {/* Confirmation Modals */}
+      {/* Modals */}
       <ConfirmModal
         isOpen={showDiscographyModal}
         title="Add Full Discography"
@@ -455,6 +650,24 @@ export default function ArtistDetailPage() {
         onConfirm={handleConfirmDownloadAll}
         onCancel={() => setShowDownloadAllModal(false)}
         variant="info"
+      />
+
+      <DeleteConfirmModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDeleteConfirm}
+        title={artist.name}
+        itemType="artist"
+        hasFiles={artist.has_files}
+      />
+
+      <InteractiveSearchModal
+        isOpen={showInteractiveSearch}
+        onClose={() => setShowInteractiveSearch(false)}
+        mediaType="album"
+        mediaId={artist.id}
+        mediaTitle={artist.name}
+        searchQuery={artist.name}
       />
     </div>
   );

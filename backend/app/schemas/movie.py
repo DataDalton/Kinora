@@ -57,6 +57,7 @@ class Movie(MovieBase):
     quality_detected: Optional[str] = None
     codec: Optional[str] = None
     resolution: Optional[str] = None
+    upgrade_allowed: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
 

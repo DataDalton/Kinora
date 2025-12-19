@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional
 from datetime import datetime
 import asyncpg
+import os
+import shutil
 
 from app.core.database import get_db
 
@@ -971,3 +973,396 @@ async def search_and_download_discography(
         "started": started,
         "failed": failed,
     }
+
+
+# Batch Monitoring Operations
+@router.put("/artists/{artist_id}/monitor-all-albums")
+async def monitor_all_artist_albums(
+    artist_id: int,
+    monitored: bool = True,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Monitor or unmonitor all albums for an artist
+    """
+    artist = await conn.fetchrow("SELECT id FROM artists WHERE id = $1", artist_id)
+    if not artist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artist not found",
+        )
+
+    result = await conn.execute(
+        "UPDATE albums SET monitored = $1, updated_at = NOW() WHERE artist_id = $2",
+        monitored,
+        artist_id,
+    )
+
+    count = int(result.split()[-1]) if result else 0
+
+    return {
+        "message": f"{'Monitored' if monitored else 'Unmonitored'} {count} albums",
+        "updated_count": count,
+    }
+
+
+@router.put("/artists/{artist_id}/monitoring")
+async def update_artist_monitoring(
+    artist_id: int,
+    monitored: Optional[bool] = None,
+    upgrade_allowed: Optional[bool] = None,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Update monitoring settings for an artist
+    """
+    artist = await conn.fetchrow("SELECT * FROM artists WHERE id = $1", artist_id)
+    if not artist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artist not found",
+        )
+
+    update_fields = []
+    values = []
+    param_count = 1
+
+    if monitored is not None:
+        update_fields.append(f"monitored = ${param_count}")
+        values.append(monitored)
+        param_count += 1
+
+    if upgrade_allowed is not None:
+        update_fields.append(f"upgrade_allowed = ${param_count}")
+        values.append(upgrade_allowed)
+        param_count += 1
+
+    if not update_fields:
+        return Artist(**dict(artist))
+
+    values.append(artist_id)
+    query = f"""
+        UPDATE artists SET {', '.join(update_fields)}, updated_at = NOW()
+        WHERE id = ${param_count}
+        RETURNING *
+    """
+
+    row = await conn.fetchrow(query, *values)
+    return Artist(**dict(row))
+
+
+@router.put("/albums/{album_id}/monitoring")
+async def update_album_monitoring(
+    album_id: int,
+    monitored: Optional[bool] = None,
+    upgrade_allowed: Optional[bool] = None,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Update monitoring settings for an album
+    """
+    album = await conn.fetchrow("SELECT * FROM albums WHERE id = $1", album_id)
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album not found",
+        )
+
+    update_fields = []
+    values = []
+    param_count = 1
+
+    if monitored is not None:
+        update_fields.append(f"monitored = ${param_count}")
+        values.append(monitored)
+        param_count += 1
+
+    if upgrade_allowed is not None:
+        update_fields.append(f"upgrade_allowed = ${param_count}")
+        values.append(upgrade_allowed)
+        param_count += 1
+
+    if not update_fields:
+        return Album(**dict(album))
+
+    values.append(album_id)
+    query = f"""
+        UPDATE albums SET {', '.join(update_fields)}, updated_at = NOW()
+        WHERE id = ${param_count}
+        RETURNING *
+    """
+
+    row = await conn.fetchrow(query, *values)
+    return Album(**dict(row))
+
+
+# Delete with files
+@router.delete("/artists/{artist_id}/delete")
+async def delete_artist_with_files(
+    artist_id: int,
+    delete_files: bool = Query(False, description="Also delete files from disk"),
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Delete an artist and optionally their files from disk
+    """
+    artist = await conn.fetchrow("SELECT * FROM artists WHERE id = $1", artist_id)
+    if not artist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artist not found",
+        )
+
+    deleted_files = []
+    errors = []
+
+    if delete_files:
+        albums = await conn.fetch(
+            "SELECT file_path FROM albums WHERE artist_id = $1 AND file_path IS NOT NULL",
+            artist_id,
+        )
+
+        for album in albums:
+            if album["file_path"] and os.path.exists(album["file_path"]):
+                try:
+                    if os.path.isdir(album["file_path"]):
+                        shutil.rmtree(album["file_path"])
+                    else:
+                        os.remove(album["file_path"])
+                    deleted_files.append(album["file_path"])
+                except Exception as e:
+                    errors.append(f"Failed to delete {album['file_path']}: {str(e)}")
+
+        if artist["root_folder_path"] and os.path.exists(artist["root_folder_path"]):
+            try:
+                if os.path.isdir(artist["root_folder_path"]):
+                    if not os.listdir(artist["root_folder_path"]):
+                        os.rmdir(artist["root_folder_path"])
+            except Exception as e:
+                errors.append(f"Failed to remove artist folder: {str(e)}")
+
+    await conn.execute("DELETE FROM artists WHERE id = $1", artist_id)
+
+    return {
+        "message": "Artist deleted successfully",
+        "deleted_files": deleted_files,
+        "errors": errors if errors else None,
+    }
+
+
+@router.delete("/albums/{album_id}/delete")
+async def delete_album_with_files(
+    album_id: int,
+    delete_files: bool = Query(False, description="Also delete files from disk"),
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Delete an album and optionally its files from disk
+    """
+    album = await conn.fetchrow("SELECT * FROM albums WHERE id = $1", album_id)
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album not found",
+        )
+
+    deleted_files = []
+    errors = []
+
+    if delete_files and album["file_path"]:
+        if os.path.exists(album["file_path"]):
+            try:
+                if os.path.isdir(album["file_path"]):
+                    shutil.rmtree(album["file_path"])
+                else:
+                    os.remove(album["file_path"])
+                deleted_files.append(album["file_path"])
+            except Exception as e:
+                errors.append(f"Failed to delete {album['file_path']}: {str(e)}")
+
+    await conn.execute("DELETE FROM albums WHERE id = $1", album_id)
+
+    return {
+        "message": "Album deleted successfully",
+        "deleted_files": deleted_files,
+        "errors": errors if errors else None,
+    }
+
+
+# Refresh Metadata
+@router.post("/artists/{artist_id}/refresh-metadata")
+async def refresh_artist_metadata(
+    artist_id: int,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Refresh artist metadata from Deezer
+    """
+    artist = await conn.fetchrow("SELECT * FROM artists WHERE id = $1", artist_id)
+    if not artist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artist not found",
+        )
+
+    if not artist["deezer_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Artist has no Deezer ID for refreshing metadata",
+        )
+
+    try:
+        deezer_data = await deezer_service.get_artist(artist["deezer_id"])
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to fetch artist data from Deezer: {str(e)}",
+        )
+
+    if not deezer_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artist not found on Deezer",
+        )
+
+    row = await conn.fetchrow(
+        """
+        UPDATE artists SET
+            name = $1,
+            picture = $2,
+            picture_medium = $3,
+            picture_big = $4,
+            picture_xl = $5,
+            nb_album = $6,
+            nb_fan = $7,
+            updated_at = NOW()
+        WHERE id = $8
+        RETURNING *
+        """,
+        deezer_data.get("name"),
+        deezer_data.get("picture"),
+        deezer_data.get("picture_medium"),
+        deezer_data.get("picture_big"),
+        deezer_data.get("picture_xl"),
+        deezer_data.get("nb_album"),
+        deezer_data.get("nb_fan"),
+        artist_id,
+    )
+
+    return {
+        "message": "Artist metadata refreshed successfully",
+        "artist": Artist(**dict(row)),
+    }
+
+
+@router.post("/albums/{album_id}/refresh-metadata")
+async def refresh_album_metadata(
+    album_id: int,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Refresh album metadata from Deezer
+    """
+    album = await conn.fetchrow("SELECT * FROM albums WHERE id = $1", album_id)
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album not found",
+        )
+
+    if not album["deezer_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Album has no Deezer ID for refreshing metadata",
+        )
+
+    try:
+        deezer_data = await deezer_service.get_album(album["deezer_id"])
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to fetch album data from Deezer: {str(e)}",
+        )
+
+    if not deezer_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album not found on Deezer",
+        )
+
+    row = await conn.fetchrow(
+        """
+        UPDATE albums SET
+            title = $1,
+            cover = $2,
+            cover_medium = $3,
+            cover_big = $4,
+            cover_xl = $5,
+            release_date = $6,
+            nb_tracks = $7,
+            record_type = $8,
+            upc = $9,
+            updated_at = NOW()
+        WHERE id = $10
+        RETURNING *
+        """,
+        deezer_data.get("title"),
+        deezer_data.get("cover"),
+        deezer_data.get("cover_medium"),
+        deezer_data.get("cover_big"),
+        deezer_data.get("cover_xl"),
+        parse_release_date(deezer_data.get("release_date")),
+        deezer_data.get("nb_tracks"),
+        deezer_data.get("record_type"),
+        deezer_data.get("upc"),
+        album_id,
+    )
+
+    return {
+        "message": "Album metadata refreshed successfully",
+        "album": Album(**dict(row)),
+    }
+
+
+# Get albums by artist with filtering
+@router.get("/artists/{artist_id}/albums", response_model=List[Album])
+async def get_artist_albums(
+    artist_id: int,
+    record_type: Optional[str] = Query(None, description="Filter by record type: album, single, ep, compilation"),
+    monitored_only: bool = False,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Get all albums for a specific artist with optional filtering
+    """
+    artist = await conn.fetchrow("SELECT id FROM artists WHERE id = $1", artist_id)
+    if not artist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artist not found",
+        )
+
+    query = "SELECT * FROM albums WHERE artist_id = $1"
+    params = [artist_id]
+    param_count = 2
+
+    if record_type:
+        query += f" AND record_type = ${param_count}"
+        params.append(record_type)
+        param_count += 1
+
+    if monitored_only:
+        query += " AND monitored = TRUE"
+
+    query += " ORDER BY release_date DESC"
+
+    rows = await conn.fetch(query, *params)
+    return [Album(**dict(row)) for row in rows]

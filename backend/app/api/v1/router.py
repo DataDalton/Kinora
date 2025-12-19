@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, movies, shows, anime, music, search, discover, webtransport, settings, media_profiles, transcoding, library_import, setup, two_factor
+from app.api.v1.endpoints import auth, users, movies, shows, anime, music, search, discover, webtransport, settings, media_profiles, transcoding, library_import, setup, two_factor, tags, history, blocklist, bulk, files
 
 api_router = APIRouter()
 
@@ -20,3 +20,8 @@ api_router.include_router(settings.router, prefix="/settings", tags=["settings"]
 api_router.include_router(media_profiles.router, prefix="/media-profiles", tags=["media-profiles"])
 api_router.include_router(transcoding.router, prefix="/transcoding", tags=["transcoding"])
 api_router.include_router(library_import.router, prefix="/library-import", tags=["library-import"])
+api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
+api_router.include_router(history.router, prefix="/history", tags=["history"])
+api_router.include_router(blocklist.router, prefix="/blocklist", tags=["blocklist"])
+api_router.include_router(bulk.router, prefix="/bulk", tags=["bulk-operations"])
+api_router.include_router(files.router, prefix="/files", tags=["file-management"])

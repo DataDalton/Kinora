@@ -5,7 +5,29 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/PageHeader';
-import { Play, Download, Music2, Clock, Disc3, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import DeleteConfirmModal from '@/components/DeleteConfirmModal';
+import InteractiveSearchModal from '@/components/InteractiveSearchModal';
+import ManualImportModal from '@/components/ManualImportModal';
+import MonitoringOptionsDropdown from '@/components/MonitoringOptionsDropdown';
+import DownloadHistoryPanel from '@/components/DownloadHistoryPanel';
+import FileQualityInfo from '@/components/FileQualityInfo';
+import TagsEditor from '@/components/TagsEditor';
+import {
+  Play,
+  Download,
+  Music2,
+  Clock,
+  Disc3,
+  ArrowLeft,
+  Eye,
+  EyeOff,
+  Trash2,
+  RefreshCw,
+  Search,
+  ExternalLink,
+  Upload,
+  User,
+} from 'lucide-react';
 import Link from 'next/link';
 
 interface Album {
@@ -23,7 +45,12 @@ interface Album {
   duration: number;
   status: string;
   monitored: boolean;
+  upgrade_allowed: boolean | null;
   has_file: boolean;
+  file_path: string | null;
+  file_size: number | null;
+  record_type: string | null;
+  upc: string | null;
 }
 
 interface Track {
@@ -38,12 +65,31 @@ interface Track {
   artist_name: string;
 }
 
+interface FileInfo {
+  file_path: string;
+  file_name: string;
+  file_size: number | null;
+  quality: string | null;
+  resolution: string | null;
+  codec: string | null;
+  audio_codec: string | null;
+  audio_channels: string | null;
+  container: string | null;
+  bit_depth: string | null;
+  hdr: boolean;
+  created_at: string | null;
+}
+
 export default function AlbumDetailPage() {
   const params = useParams();
   const router = useRouter();
   const albumId = parseInt(params.id as string);
   const queryClient = useQueryClient();
+
   const [currentlyPlaying, setCurrentlyPlaying] = useState<number | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
+  const [showManualImport, setShowManualImport] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const { data: album, isLoading: albumLoading } = useQuery({
@@ -60,6 +106,15 @@ export default function AlbumDetailPage() {
       const response = await api.get(`/music/tracks?album_id=${albumId}`);
       return response.data as Track[];
     },
+  });
+
+  const { data: files } = useQuery({
+    queryKey: ['files', 'album', albumId],
+    queryFn: async () => {
+      const response = await api.get(`/files/album/${albumId}`);
+      return response.data.files as FileInfo[];
+    },
+    enabled: !!album?.has_file,
   });
 
   const addTracksMutation = useMutation({
@@ -90,6 +145,31 @@ export default function AlbumDetailPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+    },
+  });
+
+  const refreshMetadataMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/music/albums/${albumId}/refresh-metadata`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+    },
+  });
+
+  const deleteAlbumMutation = useMutation({
+    mutationFn: async (deleteFiles: boolean) => {
+      const response = await api.delete(`/music/albums/${albumId}/delete?delete_files=${deleteFiles}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['albums'] });
+      if (album?.artist_id) {
+        router.push(`/music/artist/${album.artist_id}`);
+      } else {
+        router.push('/music');
+      }
     },
   });
 
@@ -153,6 +233,15 @@ export default function AlbumDetailPage() {
     }
   };
 
+  const handleDeleteConfirm = (deleteFiles: boolean) => {
+    setShowDeleteModal(false);
+    deleteAlbumMutation.mutate(deleteFiles);
+  };
+
+  const handleMonitoringUpdate = (newState: { monitored: boolean; upgradeAllowed: boolean | null }) => {
+    queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+  };
+
   if (albumLoading) {
     return (
       <div className="min-h-screen">
@@ -163,6 +252,11 @@ export default function AlbumDetailPage() {
           gradientVia="pink-600/10"
           gradientTo="rose-600/10"
         />
+        <div className="container mx-auto px-6 py-8">
+          <div className="flex items-center justify-center py-12">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -177,9 +271,24 @@ export default function AlbumDetailPage() {
           gradientVia="pink-600/10"
           gradientTo="rose-600/10"
         />
+        <div className="container mx-auto px-6 py-8">
+          <div className="text-center py-12">
+            <p className="text-muted-foreground mb-4">Album not found</p>
+            <Link
+              href="/music"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              Back to Music
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
+
+  const backLink = album.artist_id ? `/music/artist/${album.artist_id}` : '/music';
+  const backText = album.artist_id ? `Back to ${album.artist_name}` : 'Back to Music';
 
   return (
     <div className="min-h-screen">
@@ -191,18 +300,18 @@ export default function AlbumDetailPage() {
         gradientTo="rose-600/10"
       >
         <Link
-          href="/music"
+          href={backLink}
           className="flex items-center gap-2 px-4 py-2 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Music
+          {backText}
         </Link>
       </PageHeader>
 
       <div className="container mx-auto px-6 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Album Info Card */}
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 space-y-6">
             <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden sticky top-8">
               <div className="relative aspect-square">
                 <img
@@ -219,16 +328,19 @@ export default function AlbumDetailPage() {
               <div className="p-6 space-y-4">
                 <div>
                   <h2 className="text-2xl font-bold mb-2">{album.title}</h2>
-                  {album.artist_id && (
+                  {album.artist_id ? (
                     <Link
                       href={`/music/artist/${album.artist_id}`}
-                      className="text-primary hover:underline font-medium"
+                      className="flex items-center gap-2 text-primary hover:underline font-medium"
                     >
+                      <User className="w-4 h-4" />
                       {album.artist_name}
                     </Link>
-                  )}
-                  {!album.artist_id && (
-                    <p className="text-muted-foreground">{album.artist_name}</p>
+                  ) : (
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <User className="w-4 h-4" />
+                      {album.artist_name}
+                    </p>
                   )}
                 </div>
 
@@ -247,33 +359,43 @@ export default function AlbumDetailPage() {
                     <span className="text-muted-foreground">Duration:</span>
                     <span className="font-medium">{formatTotalDuration(album.duration)}</span>
                   </div>
+                  {album.record_type && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Type:</span>
+                      <span className="font-medium capitalize">{album.record_type}</span>
+                    </div>
+                  )}
+                  {album.upc && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">UPC:</span>
+                      <span className="font-mono text-xs">{album.upc}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">Status:</span>
                     {getStatusBadge(album.status, album.has_file)}
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-border space-y-2">
+                <div className="pt-4 border-t border-border">
+                  <MonitoringOptionsDropdown
+                    mediaType="album"
+                    mediaId={album.id}
+                    currentState={{
+                      monitored: album.monitored,
+                      upgradeAllowed: album.upgrade_allowed,
+                    }}
+                    onUpdate={handleMonitoringUpdate}
+                  />
+                </div>
+
+                <div className="space-y-2">
                   <button
-                    onClick={() => toggleMonitoredMutation.mutate(!album.monitored)}
-                    disabled={toggleMonitoredMutation.isPending}
-                    className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition ${
-                      album.monitored
-                        ? 'bg-primary text-primary-foreground hover:opacity-90'
-                        : 'bg-card text-foreground border-2 border-border hover:bg-accent'
-                    }`}
+                    onClick={() => setShowInteractiveSearch(true)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium"
                   >
-                    {album.monitored ? (
-                      <>
-                        <Eye className="w-5 h-5" />
-                        Monitored
-                      </>
-                    ) : (
-                      <>
-                        <EyeOff className="w-5 h-5" />
-                        Not Monitored
-                      </>
-                    )}
+                    <Search className="w-5 h-5" />
+                    Interactive Search
                   </button>
 
                   <button
@@ -282,15 +404,79 @@ export default function AlbumDetailPage() {
                     className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
                   >
                     <Download className="w-5 h-5" />
-                    {searchDownloadMutation.isPending ? 'Searching...' : 'Search & Download'}
+                    {searchDownloadMutation.isPending ? 'Searching...' : 'Auto Search & Download'}
                   </button>
+
+                  <button
+                    onClick={() => setShowManualImport(true)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium"
+                  >
+                    <Upload className="w-5 h-5" />
+                    Manual Import
+                  </button>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => refreshMetadataMutation.mutate()}
+                      disabled={refreshMetadataMutation.isPending}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-5 h-5 ${refreshMetadataMutation.isPending ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+                    <button
+                      onClick={() => setShowDeleteModal(true)}
+                      className="flex items-center justify-center gap-2 px-4 py-3 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
+
+                {/* External Links */}
+                {album.deezer_id && (
+                  <div className="pt-4 border-t border-border">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-2">External Links</h4>
+                    <a
+                      href={`https://www.deezer.com/album/${album.deezer_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+                    >
+                      <img src="https://www.deezer.com/favicon.ico" alt="Deezer" className="w-4 h-4" />
+                      View on Deezer
+                      <ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Tracks Listing */}
-          <div className="lg:col-span-2">
+          {/* Right Column - Tracks & Info */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* File Quality Info */}
+            {album.has_file && (
+              <FileQualityInfo
+                mediaType="album"
+                mediaId={album.id}
+                files={files || []}
+              />
+            )}
+
+            {/* Tags */}
+            <TagsEditor
+              mediaType="album"
+              mediaId={album.id}
+            />
+
+            {/* Download History */}
+            <DownloadHistoryPanel
+              mediaType="album"
+              mediaId={album.id}
+            />
+
+            {/* Tracks Listing */}
             <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden">
               <div className="p-6 border-b border-border">
                 <div className="flex justify-between items-center">
@@ -312,8 +498,8 @@ export default function AlbumDetailPage() {
               </div>
 
               {tracksLoading ? (
-                <div className="p-12 text-center text-muted-foreground">
-                  Loading tracks...
+                <div className="p-12 text-center">
+                  <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
                 </div>
               ) : !tracks || tracks.length === 0 ? (
                 <div className="p-12 text-center">
@@ -434,6 +620,37 @@ export default function AlbumDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      <DeleteConfirmModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDeleteConfirm}
+        title={album.title}
+        itemType="album"
+        hasFiles={album.has_file}
+      />
+
+      <InteractiveSearchModal
+        isOpen={showInteractiveSearch}
+        onClose={() => setShowInteractiveSearch(false)}
+        mediaType="album"
+        mediaId={album.id}
+        mediaTitle={album.title}
+        searchQuery={`${album.artist_name} ${album.title}`}
+      />
+
+      <ManualImportModal
+        isOpen={showManualImport}
+        onClose={() => setShowManualImport(false)}
+        mediaType="album"
+        mediaId={album.id}
+        mediaTitle={album.title}
+        onImportComplete={() => {
+          queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+          queryClient.invalidateQueries({ queryKey: ['files', 'album', albumId] });
+        }}
+      />
     </div>
   );
 }

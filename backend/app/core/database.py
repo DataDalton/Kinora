@@ -789,3 +789,176 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_download_clients_enabled ON download_clients(is_enabled);
             CREATE INDEX IF NOT EXISTS idx_download_clients_default ON download_clients(is_default);
         """)
+
+        # Seasons table for TV shows
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS seasons (
+                id SERIAL PRIMARY KEY,
+                show_id INTEGER REFERENCES shows(id) ON DELETE CASCADE NOT NULL,
+                season_number INTEGER NOT NULL,
+                title VARCHAR(500),
+                overview TEXT,
+                poster_path VARCHAR(500),
+                air_date DATE,
+                episode_count INTEGER,
+                monitored BOOLEAN DEFAULT TRUE NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                UNIQUE(show_id, season_number)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_seasons_show ON seasons(show_id);
+            CREATE INDEX IF NOT EXISTS idx_seasons_monitored ON seasons(monitored);
+        """)
+
+        # Episodes table for TV shows
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS episodes (
+                id SERIAL PRIMARY KEY,
+                show_id INTEGER REFERENCES shows(id) ON DELETE CASCADE NOT NULL,
+                season_id INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+                season_number INTEGER NOT NULL,
+                episode_number INTEGER NOT NULL,
+                title VARCHAR(500),
+                overview TEXT,
+                still_path VARCHAR(500),
+                air_date DATE,
+                runtime INTEGER,
+                monitored BOOLEAN DEFAULT TRUE NOT NULL,
+                has_file BOOLEAN DEFAULT FALSE NOT NULL,
+                file_path VARCHAR(1000),
+                file_size BIGINT,
+                quality_detected VARCHAR(50),
+                codec VARCHAR(50),
+                resolution VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                UNIQUE(show_id, season_number, episode_number)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_episodes_show ON episodes(show_id);
+            CREATE INDEX IF NOT EXISTS idx_episodes_season ON episodes(season_id);
+            CREATE INDEX IF NOT EXISTS idx_episodes_monitored ON episodes(monitored);
+            CREATE INDEX IF NOT EXISTS idx_episodes_has_file ON episodes(has_file);
+        """)
+
+        # Anime episodes table with absolute and season-based numbering support
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS anime_episodes (
+                id SERIAL PRIMARY KEY,
+                anime_id INTEGER REFERENCES anime(id) ON DELETE CASCADE NOT NULL,
+                episode_number INTEGER NOT NULL,
+                season_number INTEGER,
+                season_episode INTEGER,
+                title VARCHAR(500),
+                air_date DATE,
+                monitored BOOLEAN DEFAULT TRUE NOT NULL,
+                has_file BOOLEAN DEFAULT FALSE NOT NULL,
+                file_path VARCHAR(1000),
+                file_size BIGINT,
+                quality_detected VARCHAR(50),
+                codec VARCHAR(50),
+                resolution VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                UNIQUE(anime_id, episode_number)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_anime_episodes_anime ON anime_episodes(anime_id);
+            CREATE INDEX IF NOT EXISTS idx_anime_episodes_monitored ON anime_episodes(monitored);
+            CREATE INDEX IF NOT EXISTS idx_anime_episodes_has_file ON anime_episodes(has_file);
+        """)
+
+        # Blocklist table for rejected releases
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS blocklist (
+                id SERIAL PRIMARY KEY,
+                media_type VARCHAR(50) NOT NULL,
+                media_id INTEGER NOT NULL,
+                release_title VARCHAR(1000) NOT NULL,
+                reason VARCHAR(500),
+                blocked_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_blocklist_media ON blocklist(media_type, media_id);
+            CREATE INDEX IF NOT EXISTS idx_blocklist_title ON blocklist(release_title);
+        """)
+
+        # Tags table for organizing media
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tags (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                color VARCHAR(20) DEFAULT '#6366f1',
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
+        """)
+
+        # Media tags junction table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS media_tags (
+                id SERIAL PRIMARY KEY,
+                tag_id INTEGER REFERENCES tags(id) ON DELETE CASCADE NOT NULL,
+                media_type VARCHAR(50) NOT NULL,
+                media_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+                UNIQUE(tag_id, media_type, media_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_media_tags_tag ON media_tags(tag_id);
+            CREATE INDEX IF NOT EXISTS idx_media_tags_media ON media_tags(media_type, media_id);
+        """)
+
+        # Add upgrade_allowed column and other new columns to existing tables
+        await conn.execute("""
+            DO $$
+            BEGIN
+                -- Movies: upgrade_allowed
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'movies' AND column_name = 'upgrade_allowed') THEN
+                    ALTER TABLE movies ADD COLUMN upgrade_allowed BOOLEAN DEFAULT NULL;
+                END IF;
+
+                -- Shows: upgrade_allowed
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shows' AND column_name = 'upgrade_allowed') THEN
+                    ALTER TABLE shows ADD COLUMN upgrade_allowed BOOLEAN DEFAULT NULL;
+                END IF;
+
+                -- Anime: upgrade_allowed
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'anime' AND column_name = 'upgrade_allowed') THEN
+                    ALTER TABLE anime ADD COLUMN upgrade_allowed BOOLEAN DEFAULT NULL;
+                END IF;
+
+                -- Albums: upgrade_allowed
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'albums' AND column_name = 'upgrade_allowed') THEN
+                    ALTER TABLE albums ADD COLUMN upgrade_allowed BOOLEAN DEFAULT NULL;
+                END IF;
+
+                -- Download history: add new columns for detailed tracking
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'episode_id') THEN
+                    ALTER TABLE download_history ADD COLUMN episode_id INTEGER;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'indexer_page_url') THEN
+                    ALTER TABLE download_history ADD COLUMN indexer_page_url VARCHAR(2000);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'torrent_url') THEN
+                    ALTER TABLE download_history ADD COLUMN torrent_url VARCHAR(2000);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'magnet_link') THEN
+                    ALTER TABLE download_history ADD COLUMN magnet_link TEXT;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'info_hash') THEN
+                    ALTER TABLE download_history ADD COLUMN info_hash VARCHAR(64);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'source') THEN
+                    ALTER TABLE download_history ADD COLUMN source VARCHAR(50);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'seeders') THEN
+                    ALTER TABLE download_history ADD COLUMN seeders INTEGER;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'download_history' AND column_name = 'was_upgrade') THEN
+                    ALTER TABLE download_history ADD COLUMN was_upgrade BOOLEAN DEFAULT FALSE;
+                END IF;
+            END $$;
+        """)

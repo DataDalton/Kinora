@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Search, Plus, Upload } from 'lucide-react';
+import { Search, Plus, Upload, Check } from 'lucide-react';
 import Link from 'next/link';
 import LibraryImportModal from '@/components/LibraryImportModal';
 import PageHeader from '@/components/PageHeader';
+import BulkSelectionToolbar from '@/components/BulkSelectionToolbar';
 
 interface Show {
   id: number;
@@ -27,6 +28,9 @@ export default function ShowsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['shows', page, statusFilter],
@@ -58,6 +62,35 @@ export default function ShowsPage() {
   const filteredShows = data?.shows?.filter((show: Show) =>
     show.title.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
+
+  const handleToggleSelection = (showId: number) => {
+    setSelectedIds(prev =>
+      prev.includes(showId)
+        ? prev.filter(id => id !== showId)
+        : [...prev, showId]
+    );
+  };
+
+  const handleSelectAll = () => {
+    setSelectedIds(filteredShows.map((s: Show) => s.id));
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedIds([]);
+  };
+
+  const handleSelectionModeToggle = () => {
+    setIsSelectionMode(!isSelectionMode);
+    if (isSelectionMode) {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleOperationComplete = () => {
+    setIsSelectionMode(false);
+    setSelectedIds([]);
+    queryClient.invalidateQueries({ queryKey: ['shows'] });
+  };
 
   return (
     <div className="min-h-screen">
@@ -100,7 +133,7 @@ export default function ShowsPage() {
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex gap-2 flex-wrap mb-8">
+        <div className="flex gap-2 flex-wrap mb-6">
           <button
             onClick={() => setStatusFilter('all')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition cursor-pointer ${
@@ -134,6 +167,20 @@ export default function ShowsPage() {
           </button>
         </div>
 
+        {/* Bulk Selection Toolbar */}
+        <div className="mb-6">
+          <BulkSelectionToolbar
+            mediaType="show"
+            selectedIds={selectedIds}
+            totalCount={filteredShows.length}
+            onSelectAll={handleSelectAll}
+            onDeselectAll={handleDeselectAll}
+            onSelectionModeToggle={handleSelectionModeToggle}
+            isSelectionMode={isSelectionMode}
+            onOperationComplete={handleOperationComplete}
+          />
+        </div>
+
         {isLoading ? (
           <div className="text-center py-12">Loading shows...</div>
         ) : filteredShows.length === 0 ? (
@@ -143,15 +190,46 @@ export default function ShowsPage() {
         ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {filteredShows.map((show: Show) => (
-                <Link key={show.id} href={`/shows/${show.id}`}>
-                  <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden hover:shadow-lg hover:border-primary/50 transition cursor-pointer">
+              {filteredShows.map((show: Show) => {
+                const isSelected = selectedIds.includes(show.id);
+                const CardWrapper = isSelectionMode ? 'div' : Link;
+                const cardProps = isSelectionMode
+                  ? {
+                      onClick: () => handleToggleSelection(show.id),
+                    }
+                  : {
+                      href: `/shows/${show.id}`,
+                    };
+
+                return (
+                  <CardWrapper
+                    key={show.id}
+                    {...(cardProps as any)}
+                    className={`bg-card text-card-foreground rounded-lg shadow border-2 overflow-hidden hover:shadow-lg transition cursor-pointer ${
+                      isSelected
+                        ? 'border-primary ring-2 ring-primary/50'
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                  >
                     <div className="relative aspect-[2/3]">
                       <img
                         src={getPosterUrl(show.poster_path)}
                         alt={show.title}
                         className="w-full h-full object-cover"
                       />
+                      {isSelectionMode && (
+                        <div className="absolute top-2 left-2">
+                          <div
+                            className={`w-6 h-6 rounded border-2 flex items-center justify-center transition ${
+                              isSelected
+                                ? 'bg-primary border-primary'
+                                : 'bg-black/50 border-white/50'
+                            }`}
+                          >
+                            {isSelected && <Check className="w-4 h-4 text-white" />}
+                          </div>
+                        </div>
+                      )}
                       {show.monitored && (
                         <div className="absolute top-2 right-2 bg-primary text-primary-foreground p-1 rounded">
                           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -159,6 +237,9 @@ export default function ShowsPage() {
                             <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
                           </svg>
                         </div>
+                      )}
+                      {isSelectionMode && (
+                        <div className="absolute inset-0 bg-black/20 pointer-events-none" />
                       )}
                     </div>
                     <div className="p-3">
@@ -180,9 +261,9 @@ export default function ShowsPage() {
                         </div>
                       )}
                     </div>
-                  </div>
-                </Link>
-              ))}
+                  </CardWrapper>
+                );
+              })}
             </div>
 
             <div className="mt-8 flex justify-center gap-2">
