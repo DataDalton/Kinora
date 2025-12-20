@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import ORJSONResponse
 
 from app.core.config import settings
 from app.core.database import init_db, close_pool
+from app.core.http_client import close_http_client
 from app.api.v1.router import api_router
 
 
@@ -16,8 +18,9 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize database and connection pool
     await init_db()
     yield
-    # Shutdown: Close database connection pool
+    # Shutdown: Close database connection pool and HTTP client
     await close_pool()
+    await close_http_client()
 
 
 app = FastAPI(
@@ -28,7 +31,11 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    default_response_class=ORJSONResponse,
 )
+
+# GZip compression for responses over 1KB
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # CORS configuration
 cors_origins = settings.get_cors_origins() or ["*"]

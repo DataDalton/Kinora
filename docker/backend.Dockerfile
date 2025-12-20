@@ -33,8 +33,8 @@ FROM base AS development
 # Copy application code
 COPY . .
 
-# Start server with reload
-CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--reload", "app.main:app"]
+# Start server with reload and HTTP/2
+CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--reload", "--http", "2", "app.main:app"]
 
 # Production stage
 FROM base AS production
@@ -42,5 +42,5 @@ FROM base AS production
 # Copy application code
 COPY . .
 
-# Start server
-CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "app.main:app"]
+# Start server with HTTP/2, backpressure handling, and worker respawning
+CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--http", "2", "--backpressure", "1024", "--respawn-failed-workers", "app.main:app"]

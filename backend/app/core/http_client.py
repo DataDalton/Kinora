@@ -4,41 +4,39 @@ from typing import Optional
 # Global shared HTTP client with connection pooling
 _client: Optional[httpx.AsyncClient] = None
 
+# Default headers for all requests
+DEFAULT_HEADERS = {
+    "User-Agent": "Nexarr/1.0 (Media Management Platform)",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate, br",
+}
+
 
 async def get_http_client() -> httpx.AsyncClient:
     """
-    Get shared HTTP client with connection pooling and HTTP/3 support.
-    Reuses connections across requests for better performance.
-    Falls back to HTTP/2 if HTTP/3 is unavailable.
+    Get shared HTTP client with connection pooling.
+    HTTP/3 is automatically negotiated when httpx[http3] is installed.
+    HTTP/2 is enabled as fallback. Connection reuse across requests.
     """
     global _client
 
     if _client is None:
-        # Try HTTP/3 first, fall back to HTTP/2
-        try:
-            _client = httpx.AsyncClient(
-                limits=httpx.Limits(
-                    max_connections=100,
-                    max_keepalive_connections=20,
-                    keepalive_expiry=30.0,
-                ),
-                timeout=httpx.Timeout(30.0, connect=10.0),
-                http2=True,
-                http3=True,
-                follow_redirects=True,
-            )
-        except TypeError:
-            # http3 parameter not available, use HTTP/2
-            _client = httpx.AsyncClient(
-                limits=httpx.Limits(
-                    max_connections=100,
-                    max_keepalive_connections=20,
-                    keepalive_expiry=30.0,
-                ),
-                timeout=httpx.Timeout(30.0, connect=10.0),
-                http2=True,
-                follow_redirects=True,
-            )
+        _client = httpx.AsyncClient(
+            http2=True,
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=30,
+                keepalive_expiry=60.0,
+            ),
+            timeout=httpx.Timeout(
+                connect=10.0,
+                read=30.0,
+                write=30.0,
+                pool=10.0,
+            ),
+            follow_redirects=True,
+            headers=DEFAULT_HEADERS,
+        )
 
     return _client
 
