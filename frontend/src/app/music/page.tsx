@@ -9,6 +9,12 @@ import PageHeader from '@/components/PageHeader';
 import LibraryImportModal from '@/components/LibraryImportModal';
 import BulkSelectionToolbar from '@/components/BulkSelectionToolbar';
 
+interface Tag {
+  id: number;
+  name: string;
+  color: string | null;
+}
+
 interface Artist {
   id: number;
   name: string;
@@ -21,6 +27,7 @@ interface Artist {
   nb_album: number;
   nb_fan: number;
   has_files: boolean;
+  tags?: Tag[];
 }
 
 interface Album {
@@ -38,6 +45,7 @@ interface Album {
   status: string;
   monitored: boolean;
   has_file: boolean;
+  tags?: Tag[];
 }
 
 export default function MusicPage() {
@@ -151,6 +159,10 @@ export default function MusicPage() {
     setSelectedIds([]);
     queryClient.invalidateQueries({ queryKey: ['artists'] });
     queryClient.invalidateQueries({ queryKey: ['albums'] });
+  };
+
+  const handleSelectByTag = (ids: number[]) => {
+    setSelectedIds(ids);
   };
 
   const handleViewChange = (newView: 'artists' | 'albums') => {
@@ -276,6 +288,8 @@ export default function MusicPage() {
             onSelectionModeToggle={handleSelectionModeToggle}
             isSelectionMode={isSelectionMode}
             onOperationComplete={handleOperationComplete}
+            items={items}
+            onSelectByTag={handleSelectByTag}
           />
         </div>
 
@@ -368,6 +382,28 @@ export default function MusicPage() {
                             {artist.nb_fan.toLocaleString()} fans
                           </div>
                         )}
+                        {artist.tags && artist.tags.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {artist.tags.slice(0, 2).map((tag) => (
+                              <span
+                                key={tag.id}
+                                className="px-1.5 py-0.5 text-xs rounded"
+                                style={{
+                                  backgroundColor: tag.color ? `${tag.color}20` : 'rgba(var(--primary), 0.2)',
+                                  color: tag.color || 'rgb(var(--primary))',
+                                  border: `1px solid ${tag.color || 'rgb(var(--primary))'}40`,
+                                }}
+                              >
+                                {tag.name}
+                              </span>
+                            ))}
+                            {artist.tags.length > 2 && (
+                              <span className="px-1.5 py-0.5 text-xs rounded bg-muted text-muted-foreground">
+                                +{artist.tags.length - 2}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </CardWrapper>
                   );
@@ -443,6 +479,28 @@ export default function MusicPage() {
                         {album.nb_tracks && (
                           <div className="mt-2 text-xs text-muted-foreground">
                             {album.nb_tracks} tracks
+                          </div>
+                        )}
+                        {album.tags && album.tags.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {album.tags.slice(0, 2).map((tag) => (
+                              <span
+                                key={tag.id}
+                                className="px-1.5 py-0.5 text-xs rounded"
+                                style={{
+                                  backgroundColor: tag.color ? `${tag.color}20` : 'rgba(var(--primary), 0.2)',
+                                  color: tag.color || 'rgb(var(--primary))',
+                                  border: `1px solid ${tag.color || 'rgb(var(--primary))'}40`,
+                                }}
+                              >
+                                {tag.name}
+                              </span>
+                            ))}
+                            {album.tags.length > 2 && (
+                              <span className="px-1.5 py-0.5 text-xs rounded bg-muted text-muted-foreground">
+                                +{album.tags.length - 2}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>

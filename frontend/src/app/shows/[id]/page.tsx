@@ -454,7 +454,7 @@ export default function ShowDetailPage() {
                   <div className="space-y-2">
                     <button
                       onClick={() => setShowInteractiveSearch(true)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
                     >
                       <Search className="w-5 h-5" />
                       Interactive Search
@@ -463,7 +463,7 @@ export default function ShowDetailPage() {
                     <button
                       onClick={() => searchDownloadMutation.mutate()}
                       disabled={searchDownloadMutation.isPending || show.status === 'downloading'}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
                     >
                       <Download className="w-5 h-5" />
                       {searchDownloadMutation.isPending ? 'Searching...' : 'Auto Search & Download'}
@@ -471,7 +471,7 @@ export default function ShowDetailPage() {
 
                     <button
                       onClick={() => setShowManualImport(true)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer"
                     >
                       <Upload className="w-5 h-5" />
                       Manual Import
@@ -481,7 +481,7 @@ export default function ShowDetailPage() {
                       <button
                         onClick={() => refreshMetadataMutation.mutate()}
                         disabled={refreshMetadataMutation.isPending}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium disabled:opacity-50"
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Refresh metadata from TMDB"
                       >
                         <RefreshCw className={`w-5 h-5 ${refreshMetadataMutation.isPending ? 'animate-spin' : ''}`} />
@@ -490,7 +490,7 @@ export default function ShowDetailPage() {
                       <button
                         onClick={() => rescanFilesMutation.mutate()}
                         disabled={rescanFilesMutation.isPending}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium disabled:opacity-50"
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Rescan files on disk"
                       >
                         <ScanLine className={`w-5 h-5 ${rescanFilesMutation.isPending ? 'animate-spin' : ''}`} />
@@ -500,7 +500,7 @@ export default function ShowDetailPage() {
 
                     <button
                       onClick={() => setShowDeleteModal(true)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
                     >
                       <Trash2 className="w-5 h-5" />
                       Delete Show
@@ -516,7 +516,7 @@ export default function ShowDetailPage() {
                           href={`https://www.themoviedb.org/tv/${show.tmdb_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+                          className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
                         >
                           <img src="https://www.themoviedb.org/favicon.ico" alt="TMDB" className="w-4 h-4" />
                           View on TMDB
@@ -528,7 +528,7 @@ export default function ShowDetailPage() {
                           href={`https://www.imdb.com/title/${show.imdb_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+                          className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
                         >
                           <img src="https://www.imdb.com/favicon.ico" alt="IMDb" className="w-4 h-4" />
                           View on IMDb
@@ -540,7 +540,7 @@ export default function ShowDetailPage() {
                           href={`https://thetvdb.com/series/${show.tvdb_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+                          className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
                         >
                           <img src="https://thetvdb.com/images/icon.png" alt="TVDB" className="w-4 h-4" />
                           View on TVDB

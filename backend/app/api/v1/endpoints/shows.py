@@ -20,6 +20,20 @@ class ShowCreate(BaseModel):
     season_monitoring: str = "all"
 
 
+class MonitoringUpdate(BaseModel):
+    monitored: Optional[bool] = None
+    upgradeAllowed: Optional[bool] = None
+    seasonMonitoring: Optional[str] = None
+
+
+class SeasonMonitoringUpdate(BaseModel):
+    monitored: bool
+
+
+class EpisodeMonitoringUpdate(BaseModel):
+    monitored: bool
+
+
 @router.get("/")
 async def get_shows(
     page: int = 1,
@@ -30,7 +44,7 @@ async def get_shows(
     current_user = Depends(get_current_user),
 ):
     """
-    Get all TV shows from library with pagination and filtering
+    Get all TV shows from library with pagination, filtering, and tags
     """
     offset = (page - 1) * limit
 
@@ -52,9 +66,34 @@ async def get_shows(
     params.extend([limit, offset])
 
     rows = await conn.fetch(query, *params)
+    shows = [dict(row) for row in rows]
+
+    if shows:
+        show_ids = [s["id"] for s in shows]
+        tags_query = """
+            SELECT mt.media_id, t.id, t.name, t.color
+            FROM media_tags mt
+            JOIN tags t ON t.id = mt.tag_id
+            WHERE mt.media_type = 'show' AND mt.media_id = ANY($1)
+        """
+        tag_rows = await conn.fetch(tags_query, show_ids)
+
+        tags_by_show = {}
+        for row in tag_rows:
+            show_id = row["media_id"]
+            if show_id not in tags_by_show:
+                tags_by_show[show_id] = []
+            tags_by_show[show_id].append({
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+            })
+
+        for show in shows:
+            show["tags"] = tags_by_show.get(show["id"], [])
 
     return {
-        "shows": [dict(row) for row in rows],
+        "shows": shows,
         "page": page,
         "limit": limit,
     }
@@ -214,9 +253,7 @@ async def delete_show(
 @router.put("/{show_id}/monitoring")
 async def update_show_monitoring(
     show_id: int,
-    monitored: Optional[bool] = None,
-    upgrade_allowed: Optional[bool] = None,
-    season_monitoring: Optional[str] = None,
+    data: MonitoringUpdate,
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
@@ -230,23 +267,26 @@ async def update_show_monitoring(
             detail="Show not found",
         )
 
+    # Use exclude_unset to distinguish between "not sent" and "explicitly set to null"
+    sent_fields = data.model_dump(exclude_unset=True)
+
     update_fields = []
     values = []
     param_count = 1
 
-    if monitored is not None:
+    if "monitored" in sent_fields:
         update_fields.append(f"monitored = ${param_count}")
-        values.append(monitored)
+        values.append(data.monitored)
         param_count += 1
 
-    if upgrade_allowed is not None:
+    if "upgradeAllowed" in sent_fields:
         update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(upgrade_allowed)
+        values.append(data.upgradeAllowed)
         param_count += 1
 
-    if season_monitoring is not None:
+    if "seasonMonitoring" in sent_fields:
         update_fields.append(f"season_monitoring = ${param_count}")
-        values.append(season_monitoring)
+        values.append(data.seasonMonitoring)
         param_count += 1
 
     if not update_fields:
@@ -580,7 +620,7 @@ async def get_season_episodes(
 async def update_season_monitoring(
     show_id: int,
     season_number: int,
-    monitored: bool = True,
+    data: SeasonMonitoringUpdate,
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
@@ -599,7 +639,7 @@ async def update_season_monitoring(
         UPDATE seasons SET monitored = $1, updated_at = NOW()
         WHERE show_id = $2 AND season_number = $3
         """,
-        monitored, show_id, season_number,
+        data.monitored, show_id, season_number,
     )
 
     await conn.execute(
@@ -607,7 +647,7 @@ async def update_season_monitoring(
         UPDATE episodes SET monitored = $1, updated_at = NOW()
         WHERE show_id = $2 AND season_number = $3
         """,
-        monitored, show_id, season_number,
+        data.monitored, show_id, season_number,
     )
 
     season = await conn.fetchrow(
@@ -622,7 +662,7 @@ async def update_season_monitoring(
 async def update_episode_monitoring(
     show_id: int,
     episode_id: int,
-    monitored: bool = True,
+    data: EpisodeMonitoringUpdate,
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
@@ -645,7 +685,7 @@ async def update_episode_monitoring(
         UPDATE episodes SET monitored = $1, updated_at = NOW()
         WHERE id = $2
         """,
-        monitored, episode_id,
+        data.monitored, episode_id,
     )
 
     updated = await conn.fetchrow("SELECT * FROM episodes WHERE id = $1", episode_id)

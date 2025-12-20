@@ -228,7 +228,7 @@ export default function InteractiveSearchModal({
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-muted rounded-lg transition"
+            className="p-2 hover:bg-muted rounded-lg transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -250,7 +250,7 @@ export default function InteractiveSearchModal({
             <button
               onClick={handleSearch}
               disabled={isLoading || isFetching}
-              className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50 flex items-center gap-2"
+              className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {(isLoading || isFetching) ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -261,7 +261,7 @@ export default function InteractiveSearchModal({
             </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`px-4 py-2 rounded-lg transition flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-lg transition cursor-pointer flex items-center gap-2 ${
                 showFilters ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
               }`}
             >
@@ -312,7 +312,7 @@ export default function InteractiveSearchModal({
                 </select>
                 <button
                   onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-                  className="p-1.5 bg-muted rounded-lg hover:bg-muted/80 transition"
+                  className="p-1.5 bg-muted rounded-lg hover:bg-muted/80 transition cursor-pointer"
                 >
                   {sortDirection === 'desc' ? (
                     <SortDesc className="w-4 h-4" />
@@ -378,7 +378,7 @@ export default function InteractiveSearchModal({
                       <button
                         onClick={() => downloadMutation.mutate(result)}
                         disabled={downloadMutation.isPending}
-                        className="p-2 bg-green-600 text-white rounded-lg hover:opacity-90 transition disabled:opacity-50"
+                        className="p-2 bg-green-600 text-white rounded-lg hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Download"
                       >
                         {downloadMutation.isPending ? (
@@ -390,7 +390,7 @@ export default function InteractiveSearchModal({
                       <button
                         onClick={() => blocklistMutation.mutate(result)}
                         disabled={blocklistMutation.isPending}
-                        className="p-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50"
+                        className="p-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Add to blocklist"
                       >
                         {blocklistMutation.isPending ? (
@@ -421,7 +421,7 @@ export default function InteractiveSearchModal({
         <div className="p-4 border-t border-border flex justify-end">
           <button
             onClick={onClose}
-            className="px-6 py-2 bg-muted text-foreground rounded-lg hover:opacity-90 transition"
+            className="px-6 py-2 bg-muted text-foreground rounded-lg hover:opacity-90 transition cursor-pointer"
           >
             Close
           </button>

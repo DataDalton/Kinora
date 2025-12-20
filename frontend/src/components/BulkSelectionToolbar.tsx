@@ -20,6 +20,11 @@ import {
   Minus,
 } from 'lucide-react';
 
+interface MediaItemWithTags {
+  id: number;
+  tags?: TagItem[];
+}
+
 interface BulkSelectionToolbarProps {
   mediaType: 'movie' | 'show' | 'anime' | 'album' | 'artist';
   selectedIds: number[];
@@ -29,6 +34,8 @@ interface BulkSelectionToolbarProps {
   onSelectionModeToggle: () => void;
   isSelectionMode: boolean;
   onOperationComplete?: () => void;
+  items?: MediaItemWithTags[];
+  onSelectByTag?: (ids: number[]) => void;
 }
 
 interface TagItem {
@@ -63,6 +70,8 @@ export default function BulkSelectionToolbar({
   onSelectionModeToggle,
   isSelectionMode,
   onOperationComplete,
+  items = [],
+  onSelectByTag,
 }: BulkSelectionToolbarProps) {
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [activeAction, setActiveAction] = useState<BulkAction | null>(null);
@@ -70,6 +79,7 @@ export default function BulkSelectionToolbar({
   const [pendingAction, setPendingAction] = useState<BulkAction | null>(null);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [showProfileSelector, setShowProfileSelector] = useState(false);
+  const [showSelectByTagDropdown, setShowSelectByTagDropdown] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [operationProgress, setOperationProgress] = useState<{
@@ -79,6 +89,7 @@ export default function BulkSelectionToolbar({
   } | null>(null);
 
   const actionsRef = useRef<HTMLDivElement>(null);
+  const selectByTagRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
   const { data: tags } = useQuery({
@@ -87,8 +98,32 @@ export default function BulkSelectionToolbar({
       const response = await api.get('/tags/');
       return response.data as TagItem[];
     },
-    enabled: showTagSelector,
+    enabled: showTagSelector || showSelectByTagDropdown,
   });
+
+  // Compute available tags from items for "Select by Tag" feature
+  const availableTagsFromItems = (() => {
+    const tagMap = new Map<number, TagItem>();
+    items.forEach((item) => {
+      item.tags?.forEach((tag) => {
+        if (!tagMap.has(tag.id)) {
+          tagMap.set(tag.id, tag);
+        }
+      });
+    });
+    return Array.from(tagMap.values());
+  })();
+
+  const handleSelectByTag = (tagId: number) => {
+    const matchingIds = items
+      .filter((item) => item.tags?.some((tag) => tag.id === tagId))
+      .map((item) => item.id);
+
+    if (onSelectByTag) {
+      onSelectByTag(matchingIds);
+    }
+    setShowSelectByTagDropdown(false);
+  };
 
   const { data: profiles } = useQuery({
     queryKey: ['media-profiles'],
@@ -103,6 +138,9 @@ export default function BulkSelectionToolbar({
     const handleClickOutside = (event: MouseEvent) => {
       if (actionsRef.current && !actionsRef.current.contains(event.target as Node)) {
         setIsActionsOpen(false);
+      }
+      if (selectByTagRef.current && !selectByTagRef.current.contains(event.target as Node)) {
+        setShowSelectByTagDropdown(false);
       }
     };
 
@@ -275,7 +313,7 @@ export default function BulkSelectionToolbar({
       <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border border-border">
         <button
           onClick={onSelectionModeToggle}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition text-sm font-medium ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition text-sm font-medium cursor-pointer ${
             isSelectionMode
               ? 'bg-primary text-primary-foreground'
               : 'bg-muted hover:bg-muted/80'
@@ -295,7 +333,7 @@ export default function BulkSelectionToolbar({
 
             <button
               onClick={allSelected ? onDeselectAll : onSelectAll}
-              className="flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+              className="flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
             >
               {allSelected ? (
                 <Minus className="w-4 h-4" />
@@ -306,6 +344,48 @@ export default function BulkSelectionToolbar({
               )}
               {allSelected ? 'Deselect All' : 'Select All'}
             </button>
+
+            {/* Select by Tag Dropdown */}
+            {onSelectByTag && availableTagsFromItems.length > 0 && (
+              <div className="relative" ref={selectByTagRef}>
+                <button
+                  onClick={() => setShowSelectByTagDropdown(!showSelectByTagDropdown)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
+                >
+                  <Tag className="w-4 h-4" />
+                  Select by Tag
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showSelectByTagDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showSelectByTagDropdown && (
+                  <div className="absolute z-20 mt-2 w-56 bg-background rounded-lg border border-border shadow-xl">
+                    <div className="p-1 max-h-60 overflow-y-auto">
+                      {availableTagsFromItems.map((tag) => {
+                        const count = items.filter((item) =>
+                          item.tags?.some((t) => t.id === tag.id)
+                        ).length;
+                        return (
+                          <button
+                            key={tag.id}
+                            onClick={() => handleSelectByTag(tag.id)}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-muted transition text-sm text-left cursor-pointer"
+                          >
+                            <span
+                              className="w-3 h-3 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: tag.color || '#6b7280' }}
+                            />
+                            <span className="flex-1">{tag.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {selectedIds.length > 0 && (
               <>
@@ -319,7 +399,7 @@ export default function BulkSelectionToolbar({
                   <button
                     onClick={() => setIsActionsOpen(!isActionsOpen)}
                     disabled={bulkMutation.isPending}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition text-sm font-medium"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition text-sm font-medium cursor-pointer"
                   >
                     {bulkMutation.isPending ? (
                       <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
@@ -341,7 +421,7 @@ export default function BulkSelectionToolbar({
                             )}
                             <button
                               onClick={() => handleAction(action.id)}
-                              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition text-sm text-left ${
+                              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition text-sm text-left cursor-pointer ${
                                 action.destructive
                                   ? 'text-destructive hover:bg-destructive/10'
                                   : 'hover:bg-muted'
@@ -359,7 +439,7 @@ export default function BulkSelectionToolbar({
 
                 <button
                   onClick={onDeselectAll}
-                  className="p-1.5 hover:bg-muted rounded-lg transition"
+                  className="p-1.5 hover:bg-muted rounded-lg transition cursor-pointer"
                   title="Clear selection"
                 >
                   <X className="w-4 h-4" />
@@ -403,13 +483,13 @@ export default function BulkSelectionToolbar({
                   setShowConfirmModal(false);
                   setPendingAction(null);
                 }}
-                className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-lg transition"
+                className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-lg transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmAction}
-                className="px-4 py-2 bg-destructive text-destructive-foreground text-sm font-medium rounded-lg hover:bg-destructive/90 transition"
+                className="px-4 py-2 bg-destructive text-destructive-foreground text-sm font-medium rounded-lg hover:bg-destructive/90 transition cursor-pointer"
               >
                 {pendingAction === 'delete-files' ? 'Delete Files' : 'Remove'}
               </button>
@@ -448,7 +528,7 @@ export default function BulkSelectionToolbar({
                         : [...prev, tag.id]
                     );
                   }}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition text-left ${
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition text-left cursor-pointer ${
                     selectedTagIds.includes(tag.id) ? 'bg-primary/20' : 'hover:bg-muted'
                   }`}
                 >
@@ -475,14 +555,14 @@ export default function BulkSelectionToolbar({
                   setPendingAction(null);
                   setSelectedTagIds([]);
                 }}
-                className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-lg transition"
+                className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-lg transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmTagAction}
                 disabled={selectedTagIds.length === 0}
-                className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {pendingAction === 'add-tags' ? 'Add Tags' : 'Remove Tags'}
               </button>
@@ -513,7 +593,7 @@ export default function BulkSelectionToolbar({
                 <button
                   key={profile.id}
                   onClick={() => setSelectedProfileId(profile.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition text-left ${
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition text-left cursor-pointer ${
                     selectedProfileId === profile.id ? 'bg-primary/20' : 'hover:bg-muted'
                   }`}
                 >
@@ -537,14 +617,14 @@ export default function BulkSelectionToolbar({
                   setPendingAction(null);
                   setSelectedProfileId(null);
                 }}
-                className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-lg transition"
+                className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-lg transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmProfileAction}
                 disabled={!selectedProfileId}
-                className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Change Profile
               </button>

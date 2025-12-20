@@ -20,6 +20,12 @@ class AnimeCreate(BaseModel):
     episode_monitoring: str = "all"
 
 
+class AnimeMonitoringUpdate(BaseModel):
+    monitored: Optional[bool] = None
+    upgradeAllowed: Optional[bool] = None
+    episodeMonitoring: Optional[str] = None
+
+
 @router.get("/")
 async def get_anime(
     page: int = 1,
@@ -30,7 +36,7 @@ async def get_anime(
     current_user = Depends(get_current_user),
 ):
     """
-    Get all anime from library with pagination and filtering
+    Get all anime from library with pagination, filtering, and tags
     """
     offset = (page - 1) * limit
 
@@ -52,9 +58,34 @@ async def get_anime(
     params.extend([limit, offset])
 
     rows = await conn.fetch(query, *params)
+    anime_list = [dict(row) for row in rows]
+
+    if anime_list:
+        anime_ids = [a["id"] for a in anime_list]
+        tags_query = """
+            SELECT mt.media_id, t.id, t.name, t.color
+            FROM media_tags mt
+            JOIN tags t ON t.id = mt.tag_id
+            WHERE mt.media_type = 'anime' AND mt.media_id = ANY($1)
+        """
+        tag_rows = await conn.fetch(tags_query, anime_ids)
+
+        tags_by_anime = {}
+        for row in tag_rows:
+            anime_id = row["media_id"]
+            if anime_id not in tags_by_anime:
+                tags_by_anime[anime_id] = []
+            tags_by_anime[anime_id].append({
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+            })
+
+        for anime in anime_list:
+            anime["tags"] = tags_by_anime.get(anime["id"], [])
 
     return {
-        "anime": [dict(row) for row in rows],
+        "anime": anime_list,
         "page": page,
         "limit": limit,
     }
@@ -214,9 +245,7 @@ async def delete_anime(
 @router.put("/{anime_id}/monitoring")
 async def update_anime_monitoring(
     anime_id: int,
-    monitored: Optional[bool] = None,
-    upgrade_allowed: Optional[bool] = None,
-    episode_monitoring: Optional[str] = None,
+    data: AnimeMonitoringUpdate,
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
@@ -230,23 +259,26 @@ async def update_anime_monitoring(
             detail="Anime not found",
         )
 
+    # Use exclude_unset to distinguish between "not sent" and "explicitly set to null"
+    sent_fields = data.model_dump(exclude_unset=True)
+
     update_fields = []
     values = []
     param_count = 1
 
-    if monitored is not None:
+    if "monitored" in sent_fields:
         update_fields.append(f"monitored = ${param_count}")
-        values.append(monitored)
+        values.append(data.monitored)
         param_count += 1
 
-    if upgrade_allowed is not None:
+    if "upgradeAllowed" in sent_fields:
         update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(upgrade_allowed)
+        values.append(data.upgradeAllowed)
         param_count += 1
 
-    if episode_monitoring is not None:
+    if "episodeMonitoring" in sent_fields:
         update_fields.append(f"episode_monitoring = ${param_count}")
-        values.append(episode_monitoring)
+        values.append(data.episodeMonitoring)
         param_count += 1
 
     if not update_fields:

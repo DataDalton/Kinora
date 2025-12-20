@@ -9,6 +9,12 @@ import LibraryImportModal from '@/components/LibraryImportModal';
 import PageHeader from '@/components/PageHeader';
 import BulkSelectionToolbar from '@/components/BulkSelectionToolbar';
 
+interface Tag {
+  id: number;
+  name: string;
+  color: string | null;
+}
+
 interface Movie {
   id: number;
   title: string;
@@ -20,6 +26,7 @@ interface Movie {
   status: string;
   monitored: boolean;
   has_file: boolean;
+  tags?: Tag[];
 }
 
 export default function MoviesPage() {
@@ -92,6 +99,10 @@ export default function MoviesPage() {
     setIsSelectionMode(false);
     setSelectedIds([]);
     queryClient.invalidateQueries({ queryKey: ['movies'] });
+  };
+
+  const handleSelectByTag = (ids: number[]) => {
+    setSelectedIds(ids);
   };
 
   return (
@@ -180,6 +191,8 @@ export default function MoviesPage() {
             onSelectionModeToggle={handleSelectionModeToggle}
             isSelectionMode={isSelectionMode}
             onOperationComplete={handleOperationComplete}
+            items={filteredMovies}
+            onSelectByTag={handleSelectByTag}
           />
         </div>
 
@@ -260,6 +273,28 @@ export default function MoviesPage() {
                             <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
                           </svg>
                           {movie.rating.toFixed(1)}
+                        </div>
+                      )}
+                      {movie.tags && movie.tags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {movie.tags.slice(0, 2).map((tag) => (
+                            <span
+                              key={tag.id}
+                              className="px-1.5 py-0.5 text-xs rounded"
+                              style={{
+                                backgroundColor: tag.color ? `${tag.color}20` : 'rgba(var(--primary), 0.2)',
+                                color: tag.color || 'rgb(var(--primary))',
+                                border: `1px solid ${tag.color || 'rgb(var(--primary))'}40`,
+                              }}
+                            >
+                              {tag.name}
+                            </span>
+                          ))}
+                          {movie.tags.length > 2 && (
+                            <span className="px-1.5 py-0.5 text-xs rounded bg-muted text-muted-foreground">
+                              +{movie.tags.length - 2}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>

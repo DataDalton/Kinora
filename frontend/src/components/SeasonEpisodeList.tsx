@@ -90,11 +90,11 @@ export default function SeasonEpisodeList({
   const [expandedSeasons, setExpandedSeasons] = useState<Set<number>>(new Set());
   const queryClient = useQueryClient();
 
-  const { data: seasons } = useQuery({
+  const { data: seasons = [] } = useQuery({
     queryKey: ['seasons', showId],
     queryFn: async () => {
       const response = await api.get(`/shows/${showId}/seasons`);
-      return response.data as Season[];
+      return (response.data?.seasons || response.data || []) as Season[];
     },
     initialData: initialSeasons,
   });
@@ -131,11 +131,11 @@ export default function SeasonEpisodeList({
   const SeasonCard = ({ season }: { season: Season }) => {
     const isExpanded = expandedSeasons.has(season.season_number);
 
-    const { data: episodes, isLoading: episodesLoading } = useQuery({
+    const { data: episodes = [], isLoading: episodesLoading } = useQuery({
       queryKey: ['episodes', showId, season.season_number],
       queryFn: async () => {
         const response = await api.get(`/shows/${showId}/seasons/${season.season_number}/episodes`);
-        return response.data as Episode[];
+        return (response.data?.episodes || response.data || []) as Episode[];
       },
       enabled: isExpanded,
     });
@@ -206,7 +206,7 @@ export default function SeasonEpisodeList({
                 monitored: !season.monitored,
               })}
               disabled={toggleSeasonMutation.isPending}
-              className={`p-2 rounded-lg transition ${
+              className={`p-2 rounded-lg transition cursor-pointer ${
                 season.monitored
                   ? 'bg-primary/20 text-primary hover:bg-primary/30'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
@@ -219,7 +219,7 @@ export default function SeasonEpisodeList({
             {onSearchSeason && (
               <button
                 onClick={() => onSearchSeason(season.season_number)}
-                className="p-2 bg-muted hover:bg-muted/80 rounded-lg transition"
+                className="p-2 bg-muted hover:bg-muted/80 rounded-lg transition cursor-pointer"
                 title="Search season pack"
               >
                 <Search className="w-4 h-4" />
@@ -334,7 +334,7 @@ export default function SeasonEpisodeList({
         <div className="flex items-center gap-1">
           <button
             onClick={() => onToggleMonitor(!episode.monitored)}
-            className={`p-1.5 rounded transition ${
+            className={`p-1.5 rounded transition cursor-pointer ${
               episode.monitored
                 ? 'text-primary hover:bg-primary/20'
                 : 'text-muted-foreground hover:bg-muted'
@@ -347,7 +347,7 @@ export default function SeasonEpisodeList({
           {onSearch && aired && !episode.has_file && (
             <button
               onClick={onSearch}
-              className="p-1.5 hover:bg-muted rounded transition"
+              className="p-1.5 hover:bg-muted rounded transition cursor-pointer"
               title="Search episode"
             >
               <Search className="w-4 h-4" />
@@ -358,7 +358,9 @@ export default function SeasonEpisodeList({
     );
   };
 
-  if (!seasons || seasons.length === 0) {
+  const seasonsArray = Array.isArray(seasons) ? seasons : [];
+
+  if (seasonsArray.length === 0) {
     return (
       <div className="bg-muted/30 rounded-lg border border-border p-8">
         <div className="flex flex-col items-center justify-center text-muted-foreground">
@@ -369,7 +371,7 @@ export default function SeasonEpisodeList({
     );
   }
 
-  const sortedSeasons = [...seasons].sort((a, b) => {
+  const sortedSeasons = [...seasonsArray].sort((a, b) => {
     if (a.season_number === 0) return 1;
     if (b.season_number === 0) return -1;
     return a.season_number - b.season_number;
@@ -383,7 +385,7 @@ export default function SeasonEpisodeList({
           Seasons & Episodes
         </h2>
         <span className="text-sm text-muted-foreground">
-          {seasons.length} season{seasons.length !== 1 ? 's' : ''}
+          {seasonsArray.length} season{seasonsArray.length !== 1 ? 's' : ''}
         </span>
       </div>
 

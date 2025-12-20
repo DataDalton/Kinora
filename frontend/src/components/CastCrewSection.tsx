@@ -228,7 +228,7 @@ export default function CastCrewSection({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition cursor-pointer ${
                 currentTab === tab.id
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted hover:bg-muted/80 text-muted-foreground'
@@ -243,14 +243,14 @@ export default function CastCrewSection({
         <div className="flex items-center gap-1">
           <button
             onClick={() => scroll('left')}
-            className="p-1.5 hover:bg-muted rounded-lg transition"
+            className="p-1.5 hover:bg-muted rounded-lg transition cursor-pointer"
             aria-label="Scroll left"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
           <button
             onClick={() => scroll('right')}
-            className="p-1.5 hover:bg-muted rounded-lg transition"
+            className="p-1.5 hover:bg-muted rounded-lg transition cursor-pointer"
             aria-label="Scroll right"
           >
             <ChevronRight className="w-5 h-5" />

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
+from pydantic import BaseModel
 import asyncpg
 import os
 import shutil
@@ -14,7 +15,12 @@ from app.services.metadata.tmdb import tmdb_service
 router = APIRouter()
 
 
-@router.get("/", response_model=List[Movie])
+class MovieMonitoringUpdate(BaseModel):
+    monitored: Optional[bool] = None
+    upgradeAllowed: Optional[bool] = None
+
+
+@router.get("/")
 async def get_movies(
     skip: int = 0,
     limit: int = 100,
@@ -23,7 +29,7 @@ async def get_movies(
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
-    Get all movies from library
+    Get all movies from library with their tags
     """
     query = "SELECT * FROM movies"
     if monitored_only:
@@ -31,7 +37,33 @@ async def get_movies(
     query += f" ORDER BY created_at DESC LIMIT {limit} OFFSET {skip}"
 
     rows = await conn.fetch(query)
-    return [Movie(**dict(row)) for row in rows]
+    movies = [dict(row) for row in rows]
+
+    if movies:
+        movie_ids = [m["id"] for m in movies]
+        tags_query = """
+            SELECT mt.media_id, t.id, t.name, t.color
+            FROM media_tags mt
+            JOIN tags t ON t.id = mt.tag_id
+            WHERE mt.media_type = 'movie' AND mt.media_id = ANY($1)
+        """
+        tag_rows = await conn.fetch(tags_query, movie_ids)
+
+        tags_by_movie = {}
+        for row in tag_rows:
+            movie_id = row["media_id"]
+            if movie_id not in tags_by_movie:
+                tags_by_movie[movie_id] = []
+            tags_by_movie[movie_id].append({
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+            })
+
+        for movie in movies:
+            movie["tags"] = tags_by_movie.get(movie["id"], [])
+
+    return {"movies": movies, "total": len(movies)}
 
 
 @router.get("/{movie_id}", response_model=Movie)
@@ -173,8 +205,7 @@ async def delete_movie(
 @router.put("/{movie_id}/monitoring")
 async def update_movie_monitoring(
     movie_id: int,
-    monitored: Optional[bool] = None,
-    upgrade_allowed: Optional[bool] = None,
+    data: MovieMonitoringUpdate,
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
@@ -188,22 +219,21 @@ async def update_movie_monitoring(
             detail="Movie not found",
         )
 
+    # Use exclude_unset to distinguish between "not sent" and "explicitly set to null"
+    sent_fields = data.model_dump(exclude_unset=True)
+
     update_fields = []
     values = []
     param_count = 1
 
-    if monitored is not None:
+    if "monitored" in sent_fields:
         update_fields.append(f"monitored = ${param_count}")
-        values.append(monitored)
+        values.append(data.monitored)
         param_count += 1
 
-    if upgrade_allowed is not None:
+    if "upgradeAllowed" in sent_fields:
         update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(upgrade_allowed)
-        param_count += 1
-    elif "upgrade_allowed" in (await conn.fetchrow("SELECT column_name FROM information_schema.columns WHERE table_name='movies' AND column_name='upgrade_allowed'") or {}):
-        update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(upgrade_allowed)
+        values.append(data.upgradeAllowed)
         param_count += 1
 
     if not update_fields:

@@ -1,11 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
 from datetime import datetime
+from pydantic import BaseModel
 import asyncpg
 import os
 import shutil
 
 from app.core.database import get_db
+
+
+class MusicMonitoringUpdate(BaseModel):
+    monitored: Optional[bool] = None
+    upgradeAllowed: Optional[bool] = None
 
 
 def parse_release_date(date_str: str | None):
@@ -31,7 +37,7 @@ router = APIRouter()
 
 
 # Artist Endpoints
-@router.get("/artists", response_model=List[Artist])
+@router.get("/artists")
 async def get_artists(
     skip: int = 0,
     limit: int = 100,
@@ -40,7 +46,7 @@ async def get_artists(
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
-    Get all artists from library
+    Get all artists from library with their tags
     """
     query = "SELECT * FROM artists"
     if monitored_only:
@@ -48,7 +54,33 @@ async def get_artists(
     query += f" ORDER BY created_at DESC LIMIT {limit} OFFSET {skip}"
 
     rows = await conn.fetch(query)
-    return [Artist(**dict(row)) for row in rows]
+    artists = [dict(row) for row in rows]
+
+    if artists:
+        artist_ids = [a["id"] for a in artists]
+        tags_query = """
+            SELECT mt.media_id, t.id, t.name, t.color
+            FROM media_tags mt
+            JOIN tags t ON t.id = mt.tag_id
+            WHERE mt.media_type = 'artist' AND mt.media_id = ANY($1)
+        """
+        tag_rows = await conn.fetch(tags_query, artist_ids)
+
+        tags_by_artist = {}
+        for row in tag_rows:
+            artist_id = row["media_id"]
+            if artist_id not in tags_by_artist:
+                tags_by_artist[artist_id] = []
+            tags_by_artist[artist_id].append({
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+            })
+
+        for artist in artists:
+            artist["tags"] = tags_by_artist.get(artist["id"], [])
+
+    return artists
 
 
 @router.get("/artists/{artist_id}", response_model=Artist)
@@ -178,7 +210,7 @@ async def delete_artist(
 
 
 # Album Endpoints
-@router.get("/albums", response_model=List[Album])
+@router.get("/albums")
 async def get_albums(
     skip: int = 0,
     limit: int = 100,
@@ -188,7 +220,7 @@ async def get_albums(
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
-    Get all albums from library
+    Get all albums from library with their tags
     """
     query = "SELECT * FROM albums"
     conditions = []
@@ -204,7 +236,33 @@ async def get_albums(
     query += f" ORDER BY release_date DESC LIMIT {limit} OFFSET {skip}"
 
     rows = await conn.fetch(query)
-    return [Album(**dict(row)) for row in rows]
+    albums = [dict(row) for row in rows]
+
+    if albums:
+        album_ids = [a["id"] for a in albums]
+        tags_query = """
+            SELECT mt.media_id, t.id, t.name, t.color
+            FROM media_tags mt
+            JOIN tags t ON t.id = mt.tag_id
+            WHERE mt.media_type = 'album' AND mt.media_id = ANY($1)
+        """
+        tag_rows = await conn.fetch(tags_query, album_ids)
+
+        tags_by_album = {}
+        for row in tag_rows:
+            album_id = row["media_id"]
+            if album_id not in tags_by_album:
+                tags_by_album[album_id] = []
+            tags_by_album[album_id].append({
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+            })
+
+        for album in albums:
+            album["tags"] = tags_by_album.get(album["id"], [])
+
+    return albums
 
 
 @router.get("/albums/{album_id}", response_model=Album)
@@ -1010,8 +1068,7 @@ async def monitor_all_artist_albums(
 @router.put("/artists/{artist_id}/monitoring")
 async def update_artist_monitoring(
     artist_id: int,
-    monitored: Optional[bool] = None,
-    upgrade_allowed: Optional[bool] = None,
+    data: MusicMonitoringUpdate,
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
@@ -1029,14 +1086,14 @@ async def update_artist_monitoring(
     values = []
     param_count = 1
 
-    if monitored is not None:
+    if data.monitored is not None:
         update_fields.append(f"monitored = ${param_count}")
-        values.append(monitored)
+        values.append(data.monitored)
         param_count += 1
 
-    if upgrade_allowed is not None:
+    if data.upgradeAllowed is not None:
         update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(upgrade_allowed)
+        values.append(data.upgradeAllowed)
         param_count += 1
 
     if not update_fields:
@@ -1056,8 +1113,7 @@ async def update_artist_monitoring(
 @router.put("/albums/{album_id}/monitoring")
 async def update_album_monitoring(
     album_id: int,
-    monitored: Optional[bool] = None,
-    upgrade_allowed: Optional[bool] = None,
+    data: MusicMonitoringUpdate,
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
@@ -1075,14 +1131,14 @@ async def update_album_monitoring(
     values = []
     param_count = 1
 
-    if monitored is not None:
+    if data.monitored is not None:
         update_fields.append(f"monitored = ${param_count}")
-        values.append(monitored)
+        values.append(data.monitored)
         param_count += 1
 
-    if upgrade_allowed is not None:
+    if data.upgradeAllowed is not None:
         update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(upgrade_allowed)
+        values.append(data.upgradeAllowed)
         param_count += 1
 
     if not update_fields:

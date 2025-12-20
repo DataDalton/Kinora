@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import {
@@ -47,6 +48,8 @@ export default function MonitoringOptionsDropdown({
   onUpdate,
 }: MonitoringOptionsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
@@ -63,9 +66,21 @@ export default function MonitoringOptionsDropdown({
     },
   });
 
+  const updateButtonRect = () => {
+    if (buttonRef.current) {
+      setButtonRect(buttonRef.current.getBoundingClientRect());
+    }
+  };
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(target) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
@@ -73,6 +88,18 @@ export default function MonitoringOptionsDropdown({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      updateButtonRect();
+      window.addEventListener('scroll', updateButtonRect, true);
+      window.addEventListener('resize', updateButtonRect);
+      return () => {
+        window.removeEventListener('scroll', updateButtonRect, true);
+        window.removeEventListener('resize', updateButtonRect);
+      };
+    }
+  }, [isOpen]);
 
   const handleToggleMonitored = () => {
     updateMonitoringMutation.mutate({ monitored: !currentState.monitored });
@@ -168,12 +195,117 @@ export default function MonitoringOptionsDropdown({
     return 'Off';
   };
 
+  const handleButtonClick = () => {
+    if (!isOpen) {
+      updateButtonRect();
+    }
+    setIsOpen(!isOpen);
+  };
+
+  const getDropdownStyle = (): React.CSSProperties => {
+    if (!buttonRect) return {};
+
+    const spaceBelow = window.innerHeight - buttonRect.bottom - 16;
+
+    return {
+      top: buttonRect.bottom + 8,
+      left: buttonRect.left,
+      maxHeight: Math.max(Math.min(spaceBelow, 400), 150),
+    };
+  };
+
+  const dropdownMenu = isOpen && typeof document !== 'undefined' && buttonRect ? createPortal(
+    <div
+      ref={dropdownRef}
+      className="fixed z-50 w-72 bg-background rounded-lg border border-border shadow-xl overflow-y-auto"
+      style={getDropdownStyle()}
+    >
+      <div className="p-2">
+        <div className="text-xs font-medium text-muted-foreground px-2 py-1 mb-1">
+          Monitoring
+        </div>
+        {mainOptions.map((option) => (
+          <button
+            key={option.id}
+            onClick={() => {
+              option.action();
+            }}
+            className="w-full flex items-start gap-3 px-2 py-2 hover:bg-muted rounded-lg transition text-left cursor-pointer"
+          >
+            <div className="mt-0.5">{option.icon}</div>
+            <div className="flex-1">
+              <p className="text-sm font-medium">{option.label}</p>
+              <p className="text-xs text-muted-foreground">{option.description}</p>
+            </div>
+            {option.active && (
+              <Check className="w-4 h-4 text-primary mt-0.5" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="border-t border-border p-2">
+        <div className="text-xs font-medium text-muted-foreground px-2 py-1 mb-1">
+          Quality Upgrades
+        </div>
+        <button
+          onClick={upgradeOption.action}
+          className="w-full flex items-start gap-3 px-2 py-2 hover:bg-muted rounded-lg transition text-left cursor-pointer"
+        >
+          <div className="mt-0.5">{upgradeOption.icon}</div>
+          <div className="flex-1">
+            <p className="text-sm font-medium">{upgradeOption.label}</p>
+            <p className="text-xs text-muted-foreground">{upgradeOption.description}</p>
+          </div>
+          <div className="flex items-center gap-1 mt-0.5">
+            <span className={`text-xs px-1.5 py-0.5 rounded ${
+              currentState.upgradeAllowed === true ? 'bg-green-500/20 text-green-500' :
+              currentState.upgradeAllowed === false ? 'bg-destructive/20 text-destructive' :
+              'bg-muted text-muted-foreground'
+            }`}>
+              {getUpgradeLabel()}
+            </span>
+          </div>
+        </button>
+      </div>
+
+      {showSeasonOptions && seasonOptions.length > 0 && (
+        <div className="border-t border-border p-2">
+          <div className="text-xs font-medium text-muted-foreground px-2 py-1 mb-1">
+            Season Monitoring
+          </div>
+          {seasonOptions.map((option) => (
+            <button
+              key={option.id}
+              onClick={() => {
+                option.action();
+                setIsOpen(false);
+              }}
+              className="w-full flex items-start gap-3 px-2 py-2 hover:bg-muted rounded-lg transition text-left cursor-pointer"
+            >
+              <div className="mt-0.5">{option.icon}</div>
+              <div className="flex-1">
+                <p className="text-sm font-medium">{option.label}</p>
+                <p className="text-xs text-muted-foreground">{option.description}</p>
+              </div>
+              {option.active && (
+                <Check className="w-4 h-4 text-primary mt-0.5" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>,
+    document.body
+  ) : null;
+
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        ref={buttonRef}
+        onClick={handleButtonClick}
         disabled={updateMonitoringMutation.isPending}
-        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition text-sm font-medium ${
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition text-sm font-medium cursor-pointer ${
           currentState.monitored
             ? 'bg-primary/20 text-primary hover:bg-primary/30'
             : 'bg-muted text-muted-foreground hover:bg-muted/80'
@@ -190,85 +322,7 @@ export default function MonitoringOptionsDropdown({
         <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
-      {isOpen && (
-        <div className="absolute z-20 mt-2 w-72 bg-background rounded-lg border border-border shadow-xl">
-          <div className="p-2">
-            <div className="text-xs font-medium text-muted-foreground px-2 py-1 mb-1">
-              Monitoring
-            </div>
-            {mainOptions.map((option) => (
-              <button
-                key={option.id}
-                onClick={() => {
-                  option.action();
-                }}
-                className="w-full flex items-start gap-3 px-2 py-2 hover:bg-muted rounded-lg transition text-left"
-              >
-                <div className="mt-0.5">{option.icon}</div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{option.label}</p>
-                  <p className="text-xs text-muted-foreground">{option.description}</p>
-                </div>
-                {option.active && (
-                  <Check className="w-4 h-4 text-primary mt-0.5" />
-                )}
-              </button>
-            ))}
-          </div>
-
-          <div className="border-t border-border p-2">
-            <div className="text-xs font-medium text-muted-foreground px-2 py-1 mb-1">
-              Quality Upgrades
-            </div>
-            <button
-              onClick={upgradeOption.action}
-              className="w-full flex items-start gap-3 px-2 py-2 hover:bg-muted rounded-lg transition text-left"
-            >
-              <div className="mt-0.5">{upgradeOption.icon}</div>
-              <div className="flex-1">
-                <p className="text-sm font-medium">{upgradeOption.label}</p>
-                <p className="text-xs text-muted-foreground">{upgradeOption.description}</p>
-              </div>
-              <div className="flex items-center gap-1 mt-0.5">
-                <span className={`text-xs px-1.5 py-0.5 rounded ${
-                  currentState.upgradeAllowed === true ? 'bg-green-500/20 text-green-500' :
-                  currentState.upgradeAllowed === false ? 'bg-destructive/20 text-destructive' :
-                  'bg-muted text-muted-foreground'
-                }`}>
-                  {getUpgradeLabel()}
-                </span>
-              </div>
-            </button>
-          </div>
-
-          {showSeasonOptions && seasonOptions.length > 0 && (
-            <div className="border-t border-border p-2">
-              <div className="text-xs font-medium text-muted-foreground px-2 py-1 mb-1">
-                Season Monitoring
-              </div>
-              {seasonOptions.map((option) => (
-                <button
-                  key={option.id}
-                  onClick={() => {
-                    option.action();
-                    setIsOpen(false);
-                  }}
-                  className="w-full flex items-start gap-3 px-2 py-2 hover:bg-muted rounded-lg transition text-left"
-                >
-                  <div className="mt-0.5">{option.icon}</div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{option.label}</p>
-                    <p className="text-xs text-muted-foreground">{option.description}</p>
-                  </div>
-                  {option.active && (
-                    <Check className="w-4 h-4 text-primary mt-0.5" />
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {dropdownMenu}
     </div>
   );
 }
