@@ -440,6 +440,15 @@ async def init_db():
                 use_hardlinks BOOLEAN DEFAULT TRUE,
                 illegal_char_replacement VARCHAR(5) DEFAULT '_',
                 colon_replacement VARCHAR(5) DEFAULT ' -',
+                -- Torrent validation settings
+                validation_enabled BOOLEAN DEFAULT TRUE,
+                allowed_extensions TEXT[],
+                forbidden_extensions TEXT[] DEFAULT ARRAY['.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.scr', '.com', '.ps1', '.vbs', '.jar']::TEXT[],
+                validation_failure_action VARCHAR(20) DEFAULT 'pause_notify',
+                movie_allowed_extensions TEXT[] DEFAULT ARRAY['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']::TEXT[],
+                show_allowed_extensions TEXT[] DEFAULT ARRAY['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']::TEXT[],
+                anime_allowed_extensions TEXT[] DEFAULT ARRAY['.mkv', '.mp4', '.avi', '.m4v']::TEXT[],
+                music_allowed_extensions TEXT[] DEFAULT ARRAY['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma']::TEXT[],
                 created_at TIMESTAMP DEFAULT NOW() NOT NULL,
                 updated_at TIMESTAMP DEFAULT NOW() NOT NULL
             );
@@ -553,6 +562,31 @@ async def init_db():
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_embed_artwork') THEN
                     ALTER TABLE media_profiles ADD COLUMN music_embed_artwork BOOLEAN DEFAULT TRUE;
+                END IF;
+                -- Torrent validation columns
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'validation_enabled') THEN
+                    ALTER TABLE media_profiles ADD COLUMN validation_enabled BOOLEAN DEFAULT TRUE;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'allowed_extensions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN allowed_extensions TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'forbidden_extensions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN forbidden_extensions TEXT[] DEFAULT ARRAY['.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.scr', '.com', '.ps1', '.vbs', '.jar']::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'validation_failure_action') THEN
+                    ALTER TABLE media_profiles ADD COLUMN validation_failure_action VARCHAR(20) DEFAULT 'pause_notify';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'movie_allowed_extensions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN movie_allowed_extensions TEXT[] DEFAULT ARRAY['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'show_allowed_extensions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN show_allowed_extensions TEXT[] DEFAULT ARRAY['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'anime_allowed_extensions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN anime_allowed_extensions TEXT[] DEFAULT ARRAY['.mkv', '.mp4', '.avi', '.m4v']::TEXT[];
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'media_profiles' AND column_name = 'music_allowed_extensions') THEN
+                    ALTER TABLE media_profiles ADD COLUMN music_allowed_extensions TEXT[] DEFAULT ARRAY['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma']::TEXT[];
                 END IF;
             END $$;
         """)

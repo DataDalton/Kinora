@@ -99,6 +99,15 @@ export interface MediaProfileFormData {
   music_preferred_quality: string[];
   music_embed_lyrics: boolean;
   music_embed_artwork: boolean;
+  // Torrent validation settings
+  validation_enabled: boolean;
+  allowed_extensions: string[];
+  forbidden_extensions: string[];
+  validation_failure_action: 'delete' | 'pause_notify' | 'quarantine';
+  movie_allowed_extensions: string[];
+  show_allowed_extensions: string[];
+  anime_allowed_extensions: string[];
+  music_allowed_extensions: string[];
 }
 
 export interface SectionProps {
@@ -117,7 +126,7 @@ export type NavigationGroup =
   | 'search'
   | 'fileoutput';
 
-export type ProfileTab = 'general' | 'languages';
+export type ProfileTab = 'general' | 'languages' | 'validation';
 export type MoviesTab = 'indexers' | 'quality' | 'naming';
 export type TVShowsTab = 'indexers' | 'quality' | 'naming' | 'options';
 export type AnimeTab = 'indexers' | 'quality' | 'naming' | 'options';

@@ -16,6 +16,7 @@ from app.services.indexers.yts import yts_indexer
 from app.services.indexers.nyaa import NyaaIndexer
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
+from app.services.torrent_validator import validate_and_resume_torrent
 
 
 class SearchEngine:
@@ -255,14 +256,27 @@ class SearchEngine:
                 print("qBittorrent client not configured")
                 return None
 
+            # Add torrent paused with validating tag for pre-download validation
+            validation_tags = (tags or []) + ["validating"]
             torrent_hash = await client.add_torrent(
                 torrent=torrent_source,
                 save_path=save_path,
                 category=category,
-                tags=tags,
+                tags=validation_tags,
+                paused=True,
             )
 
-            print(f"✓ Added to download client: {torrent_hash}")
+            print(f"✓ Added to download client (pending validation): {torrent_hash}")
+
+            # Trigger validation immediately after adding
+            validation_result = await validate_and_resume_torrent(
+                torrent_hash=torrent_hash,
+                client=client,
+                profile=profile,
+                media_type=media_type or "movie",
+            )
+            print(f"Validation result: {validation_result.message}")
+
             return torrent_hash
 
         except Exception as e:
@@ -542,14 +556,27 @@ class SearchEngine:
                 print("qBittorrent client not configured")
                 return None
 
+            # Add torrent paused with validating tag for pre-download validation
+            validation_tags = (tags or []) + ["validating"]
             torrent_hash = await client.add_torrent(
                 torrent=torrent_source,
                 save_path=save_path,
                 category="music",
-                tags=tags,
+                tags=validation_tags,
+                paused=True,
             )
 
-            print(f"✓ Added to download client: {torrent_hash}")
+            print(f"✓ Added to download client (pending validation): {torrent_hash}")
+
+            # Trigger validation immediately after adding
+            validation_result = await validate_and_resume_torrent(
+                torrent_hash=torrent_hash,
+                client=client,
+                profile=profile,
+                media_type="album",
+            )
+            print(f"Validation result: {validation_result.message}")
+
             return torrent_hash
 
         except Exception as e:

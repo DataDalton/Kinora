@@ -47,6 +47,7 @@ const navigationStructure: NavigationItem[] = [
     tabs: [
       { id: 'general', label: 'General' },
       { id: 'languages', label: 'Languages' },
+      { id: 'validation', label: 'Validation' },
     ],
   },
   {

@@ -5,12 +5,14 @@ import asyncpg
 from app.schemas.movie import MovieSearch
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
-from app.core.database import get_db
+from app.core.database import get_db, get_pool
 from app.services.metadata.tmdb import tmdb_service
 from app.services.metadata.anilist import anilist_service
 from app.services.metadata.deezer import deezer_service
 from app.services.automation.search_engine import search_engine
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
+from app.services.media_profile import MediaProfile
+from app.services.torrent_validator import validate_and_resume_torrent
 from app.services.quality_definitions import (
     Resolution,
     Source,
@@ -691,18 +693,68 @@ async def download_release(
                 detail="Download client not configured or unavailable"
             )
 
-        # Add torrent to client
+        # Add torrent paused with validating tag for pre-download validation
+        base_tags = ["nexarr", "validating"]
+        if data.indexer:
+            base_tags.append(data.indexer)
+
         torrent_hash = await client.add_torrent(
             torrent=torrent_source,
             category=data.media_type,
-            tags=[data.indexer] if data.indexer else None,
+            tags=base_tags,
+            paused=True,
         )
 
-        return {
-            "success": True,
-            "hash": torrent_hash,
-            "message": "Download started successfully"
-        }
+        # Get media profile for validation settings
+        profile = None
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Map media type to table name
+            table_map = {
+                "movie": "movies",
+                "show": "shows",
+                "anime": "anime",
+                "album": "albums",
+                "music": "albums",
+            }
+            table_name = table_map.get(data.media_type)
+
+            if table_name and data.media_id:
+                media_row = await conn.fetchrow(
+                    f"SELECT media_profile_id FROM {table_name} WHERE id = $1",
+                    data.media_id
+                )
+                if media_row and media_row.get("media_profile_id"):
+                    profile_row = await conn.fetchrow(
+                        "SELECT * FROM media_profiles WHERE id = $1",
+                        media_row["media_profile_id"]
+                    )
+                    if profile_row:
+                        profile = MediaProfile(**dict(profile_row))
+
+        # Trigger validation immediately after adding
+        if profile:
+            validation_result = await validate_and_resume_torrent(
+                torrent_hash=torrent_hash,
+                client=client,
+                profile=profile,
+                media_type=data.media_type,
+            )
+            return {
+                "success": True,
+                "hash": torrent_hash,
+                "message": f"Download queued: {validation_result.message}"
+            }
+        else:
+            # No profile found, resume without validation
+            await client.remove_tags(torrent_hash, ["validating"])
+            await client.set_tags(torrent_hash, ["validated"])
+            await client.resume_torrent(torrent_hash)
+            return {
+                "success": True,
+                "hash": torrent_hash,
+                "message": "Download started (no profile for validation)"
+            }
 
     except HTTPException:
         raise

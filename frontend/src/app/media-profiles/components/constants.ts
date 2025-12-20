@@ -211,4 +211,13 @@ export const createDefaultFormData = (defaultLanguage: string = 'en'): MediaProf
   music_preferred_quality: ['flac', 'mp3_320', 'mp3_256', 'aac'],
   music_embed_lyrics: true,
   music_embed_artwork: true,
+  // Torrent validation settings
+  validation_enabled: true,
+  allowed_extensions: [],
+  forbidden_extensions: ['.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.scr', '.com', '.ps1', '.vbs', '.jar'],
+  validation_failure_action: 'pause_notify',
+  movie_allowed_extensions: ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts'],
+  show_allowed_extensions: ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts'],
+  anime_allowed_extensions: ['.mkv', '.mp4', '.avi', '.m4v'],
+  music_allowed_extensions: ['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma'],
 });

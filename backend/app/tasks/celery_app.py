@@ -18,6 +18,7 @@ celery_app = Celery(
         "app.tasks.metadata_refresh",
         "app.tasks.transcoding",
         "app.tasks.music_monitor",
+        "app.tasks.validation_monitor",
     ],
 )
 
@@ -100,6 +101,10 @@ celery_app.conf.beat_schedule = {
     "music-new-releases": {
         "task": "app.tasks.music_monitor.check_new_releases",
         "schedule": crontab(hour="*/6"),  # Every 6 hours check for new releases
+    },
+    "validation-monitor": {
+        "task": "app.tasks.validation_monitor.check_validating_torrents",
+        "schedule": 300.0,  # Every 5 minutes - fallback for edge cases (server restarts)
     },
 }
 

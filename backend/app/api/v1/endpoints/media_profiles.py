@@ -122,6 +122,15 @@ class MediaProfileCreate(BaseModel):
     use_hardlinks: Optional[bool] = True
     illegal_char_replacement: Optional[str] = "_"
     colon_replacement: Optional[str] = " -"
+    # Torrent validation settings
+    validation_enabled: Optional[bool] = True
+    allowed_extensions: Optional[List[str]] = []
+    forbidden_extensions: Optional[List[str]] = ['.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.scr', '.com', '.ps1', '.vbs', '.jar']
+    validation_failure_action: Optional[str] = "pause_notify"
+    movie_allowed_extensions: Optional[List[str]] = ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']
+    show_allowed_extensions: Optional[List[str]] = ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']
+    anime_allowed_extensions: Optional[List[str]] = ['.mkv', '.mp4', '.avi', '.m4v']
+    music_allowed_extensions: Optional[List[str]] = ['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma']
 
     @field_validator('languages', 'subtitle_languages')
     @classmethod
@@ -231,6 +240,15 @@ class MediaProfileUpdate(BaseModel):
     use_hardlinks: Optional[bool] = None
     illegal_char_replacement: Optional[str] = None
     colon_replacement: Optional[str] = None
+    # Torrent validation settings
+    validation_enabled: Optional[bool] = None
+    allowed_extensions: Optional[List[str]] = None
+    forbidden_extensions: Optional[List[str]] = None
+    validation_failure_action: Optional[str] = None
+    movie_allowed_extensions: Optional[List[str]] = None
+    show_allowed_extensions: Optional[List[str]] = None
+    anime_allowed_extensions: Optional[List[str]] = None
+    music_allowed_extensions: Optional[List[str]] = None
 
     @field_validator('languages', 'subtitle_languages')
     @classmethod
@@ -340,6 +358,15 @@ class MediaProfileResponse(BaseModel):
     use_hardlinks: Optional[bool]
     illegal_char_replacement: Optional[str]
     colon_replacement: Optional[str]
+    # Torrent validation settings
+    validation_enabled: Optional[bool]
+    allowed_extensions: Optional[List[str]]
+    forbidden_extensions: Optional[List[str]]
+    validation_failure_action: Optional[str]
+    movie_allowed_extensions: Optional[List[str]]
+    show_allowed_extensions: Optional[List[str]]
+    anime_allowed_extensions: Optional[List[str]]
+    music_allowed_extensions: Optional[List[str]]
 
 
 @router.get("/", response_model=List[MediaProfileResponse])
@@ -422,7 +449,10 @@ async def create_media_profile(
             music_track_naming_format, music_multi_disc_format,
             music_preferred_quality, music_embed_lyrics, music_embed_artwork,
             media_server, use_hardlinks,
-            illegal_char_replacement, colon_replacement
+            illegal_char_replacement, colon_replacement,
+            validation_enabled, allowed_extensions, forbidden_extensions,
+            validation_failure_action, movie_allowed_extensions, show_allowed_extensions,
+            anime_allowed_extensions, music_allowed_extensions
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
@@ -432,7 +462,8 @@ async def create_media_profile(
             $41, $42, $43, $44, $45, $46, $47, $48, $49, $50,
             $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
             $61, $62, $63, $64, $65, $66, $67, $68, $69, $70,
-            $71, $72, $73, $74, $75, $76
+            $71, $72, $73, $74, $75, $76, $77, $78, $79, $80,
+            $81, $82, $83, $84
         )
         RETURNING *
         """,
@@ -512,6 +543,14 @@ async def create_media_profile(
         profile.use_hardlinks,
         profile.illegal_char_replacement,
         profile.colon_replacement,
+        profile.validation_enabled,
+        profile.allowed_extensions,
+        profile.forbidden_extensions,
+        profile.validation_failure_action,
+        profile.movie_allowed_extensions,
+        profile.show_allowed_extensions,
+        profile.anime_allowed_extensions,
+        profile.music_allowed_extensions,
     )
 
     return dict(row)

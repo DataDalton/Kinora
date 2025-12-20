@@ -57,6 +57,54 @@ class MediaProfile:
     search_timeout: int = 30
     max_retries: int = 3
     max_results: int = 100
+    # Torrent validation settings
+    validation_enabled: bool = True
+    allowed_extensions: Optional[List[str]] = None
+    forbidden_extensions: Optional[List[str]] = None
+    validation_failure_action: str = "pause_notify"
+    movie_allowed_extensions: Optional[List[str]] = None
+    show_allowed_extensions: Optional[List[str]] = None
+    anime_allowed_extensions: Optional[List[str]] = None
+    music_allowed_extensions: Optional[List[str]] = None
+
+    def get_allowed_extensions_for_type(self, media_type: str) -> List[str]:
+        """
+        Get allowed extensions for a specific media type with fallback defaults.
+
+        Args:
+            media_type: One of 'movie', 'show', 'anime', 'album'
+
+        Returns:
+            List of allowed file extensions (with leading dot)
+        """
+        # Map media type to attribute name
+        type_map = {
+            'movie': 'movie_allowed_extensions',
+            'show': 'show_allowed_extensions',
+            'anime': 'anime_allowed_extensions',
+            'album': 'music_allowed_extensions',
+            'music': 'music_allowed_extensions',
+        }
+
+        attr_name = type_map.get(media_type)
+        if attr_name:
+            type_specific = getattr(self, attr_name, None)
+            if type_specific:
+                return type_specific
+
+        # Fall back to global allowed_extensions
+        if self.allowed_extensions:
+            return self.allowed_extensions
+
+        # Default extensions by media type
+        defaults = {
+            'movie': ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts'],
+            'show': ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts'],
+            'anime': ['.mkv', '.mp4', '.avi', '.m4v'],
+            'album': ['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma'],
+            'music': ['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma'],
+        }
+        return defaults.get(media_type, [])
 
 
 class MediaProfileService:

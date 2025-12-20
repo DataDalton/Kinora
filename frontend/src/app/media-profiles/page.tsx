@@ -108,6 +108,15 @@ interface MediaProfile {
   use_hardlinks?: boolean;
   illegal_char_replacement?: string;
   colon_replacement?: string;
+  // Torrent validation settings
+  validation_enabled?: boolean;
+  allowed_extensions?: string[];
+  forbidden_extensions?: string[];
+  validation_failure_action?: string;
+  movie_allowed_extensions?: string[];
+  show_allowed_extensions?: string[];
+  anime_allowed_extensions?: string[];
+  music_allowed_extensions?: string[];
 }
 
 const LANGUAGES = ISO6391.getAllCodes().map(code => ({
@@ -240,6 +249,15 @@ export default function MediaProfilesPage() {
         use_hardlinks: data.use_hardlinks,
         illegal_char_replacement: data.illegal_char_replacement,
         colon_replacement: data.colon_replacement,
+        // Torrent validation settings
+        validation_enabled: data.validation_enabled,
+        allowed_extensions: data.allowed_extensions,
+        forbidden_extensions: data.forbidden_extensions,
+        validation_failure_action: data.validation_failure_action,
+        movie_allowed_extensions: data.movie_allowed_extensions,
+        show_allowed_extensions: data.show_allowed_extensions,
+        anime_allowed_extensions: data.anime_allowed_extensions,
+        music_allowed_extensions: data.music_allowed_extensions,
       });
       return response.data;
     },
@@ -337,6 +355,15 @@ export default function MediaProfilesPage() {
         use_hardlinks: data.use_hardlinks,
         illegal_char_replacement: data.illegal_char_replacement,
         colon_replacement: data.colon_replacement,
+        // Torrent validation settings
+        validation_enabled: data.validation_enabled,
+        allowed_extensions: data.allowed_extensions,
+        forbidden_extensions: data.forbidden_extensions,
+        validation_failure_action: data.validation_failure_action,
+        movie_allowed_extensions: data.movie_allowed_extensions,
+        show_allowed_extensions: data.show_allowed_extensions,
+        anime_allowed_extensions: data.anime_allowed_extensions,
+        music_allowed_extensions: data.music_allowed_extensions,
       });
       return response.data;
     },
@@ -459,6 +486,15 @@ export default function MediaProfilesPage() {
       use_hardlinks: profile.use_hardlinks ?? true,
       illegal_char_replacement: profile.illegal_char_replacement || '_',
       colon_replacement: profile.colon_replacement || ' -',
+      // Torrent validation settings
+      validation_enabled: profile.validation_enabled ?? true,
+      allowed_extensions: profile.allowed_extensions || [],
+      forbidden_extensions: profile.forbidden_extensions || defaults.forbidden_extensions,
+      validation_failure_action: (profile.validation_failure_action as 'delete' | 'pause_notify' | 'quarantine') || 'pause_notify',
+      movie_allowed_extensions: profile.movie_allowed_extensions || defaults.movie_allowed_extensions,
+      show_allowed_extensions: profile.show_allowed_extensions || defaults.show_allowed_extensions,
+      anime_allowed_extensions: profile.anime_allowed_extensions || defaults.anime_allowed_extensions,
+      music_allowed_extensions: profile.music_allowed_extensions || defaults.music_allowed_extensions,
     });
     setEditingProfile(profile);
     setShowForm(true);
@@ -542,7 +578,7 @@ export default function MediaProfilesPage() {
 
     switch (activeGroup) {
       case 'profile':
-        return <ProfileGroup {...sectionProps} activeTab={activeTab as 'general' | 'languages'} />;
+        return <ProfileGroup {...sectionProps} activeTab={activeTab as 'general' | 'languages' | 'validation'} />;
       case 'movies':
         return <MoviesGroup {...sectionProps} activeTab={activeTab as 'indexers' | 'quality' | 'naming'} />;
       case 'tvshows':

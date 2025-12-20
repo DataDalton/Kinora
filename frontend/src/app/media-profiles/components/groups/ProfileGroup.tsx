@@ -3,6 +3,7 @@
 import ISO6391 from 'iso-639-1';
 import { useState } from 'react';
 import { MediaProfileFormData } from '../types';
+import Validation from '../Profile/Validation';
 
 const LANGUAGES = ISO6391.getAllCodes().map(code => ({
   code,
@@ -13,7 +14,7 @@ const LANGUAGES = ISO6391.getAllCodes().map(code => ({
 interface ProfileGroupProps {
   formData: MediaProfileFormData;
   setFormData: (data: MediaProfileFormData) => void;
-  activeTab: 'general' | 'languages';
+  activeTab: 'general' | 'languages' | 'validation';
   hasAttemptedSubmit?: boolean;
 }
 
@@ -314,6 +315,16 @@ export default function ProfileGroup({
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (activeTab === 'validation') {
+    return (
+      <Validation
+        formData={formData}
+        setFormData={setFormData}
+        hasAttemptedSubmit={hasAttemptedSubmit}
+      />
     );
   }
 

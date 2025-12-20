@@ -208,6 +208,13 @@ class QBittorrentClient(BaseDownloadClient):
         )
         return True
 
+    async def remove_tags(self, hash: str, tags: List[str]) -> bool:
+        """Remove specific tags from a torrent"""
+        await self._request(
+            "POST", "torrents/removeTags", data={"hashes": hash, "tags": ",".join(tags)}
+        )
+        return True
+
     async def add_category(self, name: str, save_path: str) -> bool:
         """Add or update a category"""
         await self._request(

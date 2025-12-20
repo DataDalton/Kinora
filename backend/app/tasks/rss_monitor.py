@@ -5,6 +5,7 @@ from app.core.database import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
+from app.services.torrent_validator import validate_and_resume_torrent
 from app.core.webtransport import webtransport_manager
 
 
@@ -118,10 +119,20 @@ async def check_and_grab_movie(conn, release, movie):
             if not client:
                 return False
 
+            # Add torrent paused with validating tag for pre-download validation
             torrent_hash = await client.add_torrent(
                 torrent=release.magnet,
                 category="movies",
-                tags=["nexarr", f"movie-{movie['id']}"],
+                tags=["nexarr", "validating", f"movie-{movie['id']}"],
+                paused=True,
+            )
+
+            # Trigger validation immediately after adding
+            await validate_and_resume_torrent(
+                torrent_hash=torrent_hash,
+                client=client,
+                profile=profile,
+                media_type="movie",
             )
 
             # Record in download history
@@ -211,10 +222,20 @@ async def check_and_grab_show(conn, release, show):
             if not client:
                 return False
 
+            # Add torrent paused with validating tag for pre-download validation
             torrent_hash = await client.add_torrent(
                 torrent=release.magnet,
                 category="tv",
-                tags=["nexarr", f"show-{show['id']}", f"s{matched_season:02d}e{matched_episode:02d}"],
+                tags=["nexarr", "validating", f"show-{show['id']}", f"s{matched_season:02d}e{matched_episode:02d}"],
+                paused=True,
+            )
+
+            # Trigger validation immediately after adding
+            await validate_and_resume_torrent(
+                torrent_hash=torrent_hash,
+                client=client,
+                profile=profile,
+                media_type="show",
             )
 
             # Record in download history
