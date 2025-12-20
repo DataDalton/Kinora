@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 
-export default function OIDCCallbackPage() {
+function OIDCCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -78,5 +78,27 @@ export default function OIDCCallbackPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <div className="max-w-md w-full bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 p-8">
+        <div className="flex flex-col items-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+          <h2 className="text-xl font-semibold text-white mb-2">Loading...</h2>
+          <p className="text-gray-400 text-center">Please wait</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function OIDCCallbackPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <OIDCCallbackContent />
+    </Suspense>
   );
 }

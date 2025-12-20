@@ -42,7 +42,7 @@ interface Season {
   overview: string | null;
   poster_path: string | null;
   air_date: string | null;
-  episode_count: number;
+  episode_count: number | null;
   monitored: boolean;
 }
 

@@ -34,12 +34,43 @@ interface TorrentResult {
   upload_date: string;
 }
 
+interface IndexerStatus {
+  name: string;
+  status: 'success' | 'error';
+  count?: number;
+  error?: string;
+}
+
+interface SearchResponse {
+  results: TorrentResult[];
+  indexers?: IndexerStatus[];
+}
+
+interface SearchOptions {
+  all_options: {
+    resolutions: string[];
+    sources: string[];
+    codecs: string[];
+    audio_codecs: string[];
+    audio_channels: string[];
+    hdr: string[];
+  };
+  available_indexers: string[];
+  profile: {
+    id: number | null;
+    name: string | null;
+    resolutions: string[];
+    indexers: string[];
+  } | null;
+}
+
 interface InteractiveSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   mediaType: 'movie' | 'show' | 'anime' | 'album';
   mediaId: number;
   mediaTitle: string;
+  searchQuery?: string;
   episodeId?: number;
   episodeInfo?: string;
 }
@@ -72,17 +103,45 @@ export default function InteractiveSearchModal({
   mediaType,
   mediaId,
   mediaTitle,
+  searchQuery: initialSearchQuery,
   episodeId,
   episodeInfo,
 }: InteractiveSearchModalProps) {
   const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState(mediaTitle);
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery || mediaTitle);
   const [sortField, setSortField] = useState<SortField>('seeders');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [qualityFilter, setQualityFilter] = useState<string>('all');
   const [indexerFilter, setIndexerFilter] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [indexerStatus, setIndexerStatus] = useState<IndexerStatus[]>([]);
+  const [selectedIndexers, setSelectedIndexers] = useState<string[]>([]);
+  const [selectedQuality, setSelectedQuality] = useState<string>('all');
+
+  // Fetch available options from backend
+  const { data: searchOptions } = useQuery({
+    queryKey: ['search-options', mediaType, mediaId],
+    queryFn: async () => {
+      const response = await api.get(`/search/options/${mediaType}/${mediaId}`);
+      return response.data as SearchOptions;
+    },
+    enabled: isOpen,
+  });
+
+  // Initialize selected indexers from profile or defaults
+  useEffect(() => {
+    if (searchOptions) {
+      const profileIndexers = searchOptions.profile?.indexers || [];
+      const availableIndexers = searchOptions.available_indexers || [];
+      // Use profile indexers if set, otherwise use all available
+      if (profileIndexers.length > 0) {
+        setSelectedIndexers(profileIndexers.filter((i) => availableIndexers.includes(i)));
+      } else {
+        setSelectedIndexers(availableIndexers);
+      }
+    }
+  }, [searchOptions]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info') => {
     setToast(null);
@@ -106,15 +165,21 @@ export default function InteractiveSearchModal({
   }, [isOpen, onClose]);
 
   const { data: searchResults, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['interactive-search', mediaType, mediaId, searchQuery],
+    queryKey: ['interactive-search', mediaType, mediaId, searchQuery, selectedIndexers, selectedQuality],
     queryFn: async () => {
       const response = await api.post('/search/interactive', {
         query: searchQuery,
         media_type: mediaType,
         media_id: mediaId,
         episode_id: episodeId,
+        indexers: selectedIndexers.length > 0 ? selectedIndexers : null,
+        quality: selectedQuality !== 'all' ? selectedQuality : null,
       });
-      return response.data.results as TorrentResult[];
+      const data = response.data as SearchResponse;
+      if (data.indexers) {
+        setIndexerStatus(data.indexers);
+      }
+      return data.results;
     },
     enabled: false,
   });
@@ -206,12 +271,19 @@ export default function InteractiveSearchModal({
 
   const processedResults = searchResults ? sortResults(filterResults(searchResults)) : [];
 
-  const uniqueQualities = searchResults
-    ? [...new Set(searchResults.map((r) => r.quality))].filter(Boolean)
-    : [];
-  const uniqueIndexers = searchResults
-    ? [...new Set(searchResults.map((r) => r.indexer))].filter(Boolean)
-    : [];
+  // Get quality options from backend (resolutions)
+  const qualityOptions = searchOptions?.all_options?.resolutions ?? [];
+  // Get available indexers from backend
+  const availableIndexers = searchOptions?.available_indexers ?? [];
+
+  // Toggle indexer selection
+  const toggleIndexer = (indexer: string) => {
+    setSelectedIndexers((prev) =>
+      prev.includes(indexer)
+        ? prev.filter((i) => i !== indexer)
+        : [...prev, indexer]
+    );
+  };
 
   if (!isOpen) return null;
 
@@ -271,56 +343,117 @@ export default function InteractiveSearchModal({
           </div>
 
           {showFilters && (
-            <div className="flex flex-wrap gap-4 pt-2">
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-muted-foreground">Quality:</label>
-                <select
-                  value={qualityFilter}
-                  onChange={(e) => setQualityFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-muted border border-border rounded-lg text-sm"
-                >
-                  <option value="all">All</option>
-                  {uniqueQualities.map((q) => (
-                    <option key={q} value={q}>{q}</option>
-                  ))}
-                </select>
+            <div className="space-y-3 pt-2">
+              {/* Search filters - these affect what is searched */}
+              <div className="flex flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-muted-foreground">Quality:</label>
+                  <select
+                    value={selectedQuality}
+                    onChange={(e) => setSelectedQuality(e.target.value)}
+                    className="px-3 py-1.5 bg-muted border border-border rounded-lg text-sm cursor-pointer"
+                  >
+                    <option value="all">All</option>
+                    {qualityOptions.map((q) => (
+                      <option key={q} value={q}>{q}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-muted-foreground">Indexers:</label>
+                  <div className="flex flex-wrap gap-1">
+                    {availableIndexers.map((indexer) => (
+                      <button
+                        key={indexer}
+                        onClick={() => toggleIndexer(indexer)}
+                        className={`px-2 py-1 text-xs rounded transition cursor-pointer ${
+                          selectedIndexers.includes(indexer)
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+                        }`}
+                      >
+                        {indexer}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-muted-foreground">Indexer:</label>
-                <select
-                  value={indexerFilter}
-                  onChange={(e) => setIndexerFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-muted border border-border rounded-lg text-sm"
-                >
-                  <option value="all">All</option>
-                  {uniqueIndexers.map((i) => (
-                    <option key={i} value={i}>{i}</option>
-                  ))}
-                </select>
+              {/* Result sorting and filtering */}
+              <div className="flex flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-muted-foreground">Filter results:</label>
+                  <select
+                    value={qualityFilter}
+                    onChange={(e) => setQualityFilter(e.target.value)}
+                    className="px-3 py-1.5 bg-muted border border-border rounded-lg text-sm cursor-pointer"
+                  >
+                    <option value="all">All qualities</option>
+                    {qualityOptions.map((q) => (
+                      <option key={q} value={q}>{q}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={indexerFilter}
+                    onChange={(e) => setIndexerFilter(e.target.value)}
+                    className="px-3 py-1.5 bg-muted border border-border rounded-lg text-sm cursor-pointer"
+                  >
+                    <option value="all">All indexers</option>
+                    {availableIndexers.map((i) => (
+                      <option key={i} value={i}>{i}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-muted-foreground">Sort by:</label>
+                  <select
+                    value={sortField}
+                    onChange={(e) => setSortField(e.target.value as SortField)}
+                    className="px-3 py-1.5 bg-muted border border-border rounded-lg text-sm cursor-pointer"
+                  >
+                    <option value="seeders">Seeders</option>
+                    <option value="size">Size</option>
+                    <option value="quality">Quality</option>
+                    <option value="upload_date">Date</option>
+                  </select>
+                  <button
+                    onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                    className="p-1.5 bg-muted rounded-lg hover:bg-muted/80 transition cursor-pointer"
+                  >
+                    {sortDirection === 'desc' ? (
+                      <SortDesc className="w-4 h-4" />
+                    ) : (
+                      <SortAsc className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-muted-foreground">Sort by:</label>
-                <select
-                  value={sortField}
-                  onChange={(e) => setSortField(e.target.value as SortField)}
-                  className="px-3 py-1.5 bg-muted border border-border rounded-lg text-sm"
+            </div>
+          )}
+
+          {indexerStatus.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-2">
+              {indexerStatus.map((indexer) => (
+                <div
+                  key={indexer.name}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${
+                    indexer.status === 'success'
+                      ? 'bg-green-500/20 text-green-500'
+                      : 'bg-destructive/20 text-destructive'
+                  }`}
+                  title={indexer.error || `${indexer.count} results`}
                 >
-                  <option value="seeders">Seeders</option>
-                  <option value="size">Size</option>
-                  <option value="quality">Quality</option>
-                  <option value="upload_date">Date</option>
-                </select>
-                <button
-                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-                  className="p-1.5 bg-muted rounded-lg hover:bg-muted/80 transition cursor-pointer"
-                >
-                  {sortDirection === 'desc' ? (
-                    <SortDesc className="w-4 h-4" />
-                  ) : (
-                    <SortAsc className="w-4 h-4" />
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    indexer.status === 'success' ? 'bg-green-500' : 'bg-destructive'
+                  }`} />
+                  {indexer.name}
+                  {indexer.status === 'success' && indexer.count !== undefined && (
+                    <span className="text-muted-foreground">({indexer.count})</span>
                   )}
-                </button>
-              </div>
+                  {indexer.status === 'error' && indexer.error && (
+                    <span className="text-muted-foreground">- {indexer.error}</span>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>

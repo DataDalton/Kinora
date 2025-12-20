@@ -61,7 +61,7 @@ export default function LibraryImportModal({ isOpen, onClose, mediaType }: Libra
       setMatchedFiles(data.matched_files);
       setUnmatchedFiles(data.unmatched_files);
       // Select all matched files by default
-      const allIds = new Set(data.matched_files.map((f: MatchedFile) => f.id));
+      const allIds = new Set<number>(data.matched_files.map((f: MatchedFile) => f.id));
       setSelectedFiles(allIds);
       setStep('review');
     },

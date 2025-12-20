@@ -654,10 +654,10 @@ export default function ArtistDetailPage() {
 
       <DeleteConfirmModal
         isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
+        onCancel={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteConfirm}
         title={artist.name}
-        itemType="artist"
+        itemName="artist"
         hasFiles={artist.has_files}
       />
 

@@ -11,8 +11,6 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
@@ -52,19 +50,18 @@ class Settings(BaseSettings):
     BACKEND_WORKERS: int = 4
     BACKEND_RELOAD: bool = True
 
-    # CORS
-    CORS_ORIGINS: List[str] = []
+    # CORS (comma-separated string, parsed in model_validator)
+    CORS_ORIGINS: str = ""
 
     # Celery (with defaults)
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""
 
-    @field_validator("CORS_ORIGINS", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v):
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+    def get_cors_origins(self) -> List[str]:
+        """Parse CORS_ORIGINS string into a list"""
+        if not self.CORS_ORIGINS:
+            return []
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     @model_validator(mode="after")
     def setup_defaults(self):

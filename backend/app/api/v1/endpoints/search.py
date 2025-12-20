@@ -1,13 +1,48 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, status
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
+import asyncpg
 from app.schemas.movie import MovieSearch
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
+from app.core.database import get_db
 from app.services.metadata.tmdb import tmdb_service
 from app.services.metadata.anilist import anilist_service
 from app.services.metadata.deezer import deezer_service
+from app.services.automation.search_engine import search_engine
+from app.services.download_clients.qbittorrent import get_qbittorrent_client
+from app.services.quality_definitions import (
+    Resolution,
+    Source,
+    Codec,
+    AudioCodec,
+    AudioChannels,
+    HDR,
+)
 
 router = APIRouter()
+
+
+class InteractiveSearchRequest(BaseModel):
+    query: str
+    media_type: str
+    media_id: int
+    episode_id: Optional[int] = None
+    indexers: Optional[List[str]] = None  # Which indexers to search (None = all available)
+    quality: Optional[str] = None  # Quality to append to search query (e.g., "1080p")
+
+
+class DownloadReleaseRequest(BaseModel):
+    torrent_url: Optional[str] = None
+    magnet_link: Optional[str] = None
+    media_type: str
+    media_id: int
+    episode_id: Optional[int] = None
+    indexer: Optional[str] = None
+    indexer_page_url: Optional[str] = None
+    quality: Optional[str] = None
+    size: Optional[int] = None
+    seeders: Optional[int] = None
 
 
 @router.get("/")
@@ -419,3 +454,261 @@ async def search_torrents(
     Search indexers for torrents (placeholder)
     """
     return {"results": [], "indexers_searched": ["1337x", "yts"]}
+
+
+@router.get("/options/{media_type}/{media_id}")
+async def get_search_options(
+    media_type: str,
+    media_id: int,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Get available search filter options and media's current profile settings.
+    Returns all quality definitions and indexers from the search engine.
+    """
+    # All available quality options from definitions
+    all_resolutions = [r.value for r in Resolution]
+    all_sources = [s.value for s in Source]
+    all_codecs = [c.value for c in Codec]
+    all_audio_codecs = [a.value for a in AudioCodec]
+    all_audio_channels = [a.value for a in AudioChannels]
+    all_hdr = [h.value for h in HDR]
+
+    # Get available indexers from the search engine based on media type
+    if media_type == "anime":
+        available_indexers = [idx.name for idx in search_engine.anime_indexers]
+    elif media_type == "album":
+        available_indexers = [idx.name for idx in search_engine.music_indexers]
+    else:
+        available_indexers = [idx.name for idx in search_engine.general_indexers]
+
+    # Get the media item and its profile
+    media_profile = None
+    profile_resolutions = []
+    profile_indexers = []
+
+    try:
+        if media_type == "movie":
+            media = await conn.fetchrow(
+                "SELECT media_profile_id FROM movies WHERE id = $1", media_id
+            )
+        elif media_type == "show":
+            media = await conn.fetchrow(
+                "SELECT media_profile_id FROM shows WHERE id = $1", media_id
+            )
+        elif media_type == "anime":
+            media = await conn.fetchrow(
+                "SELECT media_profile_id FROM anime WHERE id = $1", media_id
+            )
+        elif media_type == "album":
+            media = await conn.fetchrow(
+                "SELECT media_profile_id FROM albums WHERE id = $1", media_id
+            )
+        else:
+            media = None
+
+        if media and media.get("media_profile_id"):
+            profile = await conn.fetchrow(
+                "SELECT * FROM media_profiles WHERE id = $1",
+                media["media_profile_id"]
+            )
+            if profile:
+                media_profile = dict(profile)
+                # Get media-type-specific resolutions or fall back to global
+                res_field = f"{media_type}_resolutions"
+                if media_type == "show":
+                    res_field = "show_resolutions"
+                profile_resolutions = profile.get(res_field) or profile.get("resolutions") or []
+
+                # Get media-type-specific indexers or fall back to global
+                idx_field = f"{media_type}_indexers"
+                profile_indexers = profile.get(idx_field) or profile.get("indexers") or []
+
+    except Exception as e:
+        print(f"Error fetching media profile: {e}")
+
+    return {
+        "all_options": {
+            "resolutions": all_resolutions,
+            "sources": all_sources,
+            "codecs": all_codecs,
+            "audio_codecs": all_audio_codecs,
+            "audio_channels": all_audio_channels,
+            "hdr": all_hdr,
+        },
+        "available_indexers": available_indexers,
+        "profile": {
+            "id": media_profile.get("id") if media_profile else None,
+            "name": media_profile.get("name") if media_profile else None,
+            "resolutions": profile_resolutions,
+            "indexers": profile_indexers,
+        } if media_profile else None,
+    }
+
+
+@router.post("/interactive")
+async def interactive_search(
+    data: InteractiveSearchRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Search indexers for releases matching the query.
+    Respects indexer selection and quality filters.
+    """
+    indexer_status = []
+    all_releases = []
+
+    # Build search query with optional quality filter
+    search_query = data.query
+    if data.quality and data.quality.lower() != "all":
+        search_query = f"{data.query} {data.quality}"
+
+    # Build indexer map from search engine's actual indexers
+    indexer_map = {}
+    for idx in search_engine.general_indexers:
+        indexer_map[idx.name] = (idx, None)
+    for idx in search_engine.anime_indexers:
+        indexer_map[idx.name] = (idx, None)
+    for idx in search_engine.music_indexers:
+        if idx.name not in indexer_map:
+            indexer_map[idx.name] = (idx, "music")
+
+    # Determine default indexers based on media type
+    if data.media_type == "anime":
+        default_indexers = [idx.name for idx in search_engine.anime_indexers]
+    elif data.media_type == "music" or data.media_type == "album":
+        default_indexers = [idx.name for idx in search_engine.music_indexers]
+        # Set music category for music indexers
+        for idx in search_engine.music_indexers:
+            indexer_map[idx.name] = (idx, "music")
+    else:
+        default_indexers = [idx.name for idx in search_engine.general_indexers]
+
+    # Use selected indexers if provided, otherwise use defaults for media type
+    selected_indexers = data.indexers if data.indexers else default_indexers
+
+    # Filter to only valid indexers
+    valid_indexers = [i for i in selected_indexers if i in indexer_map]
+
+    # Search each selected indexer
+    for indexer_name in valid_indexers:
+        indexer, category = indexer_map.get(indexer_name, (None, None))
+        if not indexer:
+            continue
+
+        try:
+            releases = await indexer.search(search_query, category, limit=50)
+            all_releases.extend(releases)
+            indexer_status.append({
+                "name": indexer_name,
+                "status": "success",
+                "count": len(releases),
+            })
+        except Exception as e:
+            error_msg = str(e)
+            # Provide user-friendly error messages
+            if "FlareSolverr" in error_msg or "flaresolverr" in error_msg.lower():
+                error_msg = "FlareSolverr not configured or unavailable"
+            elif "timeout" in error_msg.lower():
+                error_msg = "Request timed out"
+            elif "connection" in error_msg.lower():
+                error_msg = "Connection failed"
+
+            indexer_status.append({
+                "name": indexer_name,
+                "status": "error",
+                "error": error_msg,
+                "count": 0,
+            })
+            print(f"Indexer {indexer_name} error: {e}")
+
+    # Deduplicate by info_hash
+    seen_hashes = set()
+    unique_releases = []
+    for release in all_releases:
+        if release.info_hash and release.info_hash in seen_hashes:
+            continue
+        if release.info_hash:
+            seen_hashes.add(release.info_hash)
+        unique_releases.append(release)
+
+    # Convert TorrentRelease objects to frontend format
+    results = []
+    for release in unique_releases:
+        upload_date_str = ""
+        if release.upload_date:
+            upload_date_str = release.upload_date.isoformat()
+
+        results.append({
+            "title": release.title,
+            "size": release.size or 0,
+            "seeders": release.seeders,
+            "leechers": release.leechers,
+            "quality": release.quality or "Unknown",
+            "source": release.source or "",
+            "indexer": release.indexer,
+            "indexer_page_url": "",
+            "torrent_url": release.torrent_url or "",
+            "magnet_link": release.magnet or "",
+            "info_hash": release.info_hash or "",
+            "upload_date": upload_date_str,
+        })
+
+    # Sort by seeders descending
+    results.sort(key=lambda x: x["seeders"], reverse=True)
+
+    return {
+        "results": results,
+        "indexers": indexer_status,
+    }
+
+
+@router.post("/download-release")
+async def download_release(
+    data: DownloadReleaseRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Download a selected release from search results
+    Sends to qBittorrent download client
+    """
+    try:
+        # Get torrent source (prefer .torrent URL, fallback to magnet)
+        torrent_source = data.torrent_url or data.magnet_link
+
+        if not torrent_source:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No torrent URL or magnet link provided"
+            )
+
+        # Get qBittorrent client
+        client = await get_qbittorrent_client()
+        if not client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Download client not configured or unavailable"
+            )
+
+        # Add torrent to client
+        torrent_hash = await client.add_torrent(
+            torrent=torrent_source,
+            category=data.media_type,
+            tags=[data.indexer] if data.indexer else None,
+        )
+
+        return {
+            "success": True,
+            "hash": torrent_hash,
+            "message": "Download started successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Download release error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start download: {str(e)}"
+        )

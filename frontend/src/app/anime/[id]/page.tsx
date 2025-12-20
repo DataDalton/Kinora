@@ -314,6 +314,7 @@ export default function AnimeDetailPage() {
       const existing = episodeMap.get(epNum);
       return existing || {
         episode_number: epNum,
+        title: null,
         monitored: true,
         has_file: false,
         file_path: null,
@@ -751,10 +752,10 @@ export default function AnimeDetailPage() {
       {/* Modals */}
       <DeleteConfirmModal
         isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
+        onCancel={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteConfirm}
         title={anime.title}
-        itemType="anime"
+        itemName="anime"
         hasFiles={anime.has_file}
       />
 

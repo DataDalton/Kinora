@@ -624,10 +624,10 @@ export default function AlbumDetailPage() {
       {/* Modals */}
       <DeleteConfirmModal
         isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
+        onCancel={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteConfirm}
         title={album.title}
-        itemType="album"
+        itemName="album"
         hasFiles={album.has_file}
       />
 

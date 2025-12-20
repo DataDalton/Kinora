@@ -1,13 +1,13 @@
-FROM node:20-alpine as base
+FROM node:25-alpine AS base
 
 WORKDIR /app
 
 # Install dependencies
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm install
 
 # Development stage
-FROM base as development
+FROM base AS development
 
 # Copy source code
 COPY . .
@@ -19,7 +19,7 @@ EXPOSE 3000
 CMD ["npm", "run", "dev"]
 
 # Production build stage
-FROM base as builder
+FROM base AS builder
 
 # Copy source code
 COPY . .
@@ -36,7 +36,7 @@ ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine as production
+FROM node:25-alpine AS production
 
 WORKDIR /app
 
@@ -44,7 +44,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Install production dependencies only
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # Copy built application
 COPY --from=builder /app/.next ./.next

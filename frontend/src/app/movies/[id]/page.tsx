@@ -618,10 +618,10 @@ export default function MovieDetailPage() {
       {/* Modals */}
       <DeleteConfirmModal
         isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
+        onCancel={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteConfirm}
         title={movie.title}
-        itemType="movie"
+        itemName="movie"
         hasFiles={movie.has_file}
       />
 

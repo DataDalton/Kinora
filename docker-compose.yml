@@ -55,7 +55,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-nexarr}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
@@ -110,7 +110,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-nexarr}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -148,7 +148,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-nexarr}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0

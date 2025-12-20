@@ -1,19 +1,24 @@
-FROM python:3.12-slim as base
+FROM python:3.14-slim AS base
 
-# Build argument for TMDB API key (injected from GitHub Secrets)
-ARG TMDB_API_KEY
-ENV TMDB_API_KEY=${TMDB_API_KEY}
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# Install system dependencies including FFmpeg with GPU support
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
     ffmpeg \
     wget \
-    nvidia-cuda-toolkit \
     util-linux \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Attempt to install NVIDIA CUDA toolkit for GPU transcoding
+# Falls back to software transcoding if unavailable
+RUN apt-get update \
+    && apt-get install -y nvidia-cuda-toolkit 2>/dev/null \
+    || echo "CUDA not available - using software transcoding" \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
@@ -23,19 +28,19 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Development stage
-FROM base as development
+FROM base AS development
 
 # Copy application code
 COPY . .
 
-# Run database migrations and start server with reload
-CMD ["sh", "-c", "alembic upgrade head && granian --interface asgi --host 0.0.0.0 --port 8000 --reload app.main:app"]
+# Start server with reload
+CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--reload", "app.main:app"]
 
 # Production stage
-FROM base as production
+FROM base AS production
 
 # Copy application code
 COPY . .
 
-# Run database migrations and start server
-CMD ["sh", "-c", "alembic upgrade head && granian --interface asgi --host 0.0.0.0 --port 8000 --workers 4 app.main:app"]
+# Start server
+CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "app.main:app"]

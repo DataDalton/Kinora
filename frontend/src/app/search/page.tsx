@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -30,6 +30,7 @@ interface SearchResult {
   name?: string;
   overview: string;
   poster_path: string | null;
+  backdrop_path: string | null;
   release_date?: string;
   first_air_date?: string;
   vote_average: number;
@@ -56,7 +57,7 @@ interface TorrentResult {
   indexer: string;
 }
 
-export default function SearchPage() {
+function SearchContent() {
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(searchParams.get('query') || searchParams.get('q') || '');
   const debouncedQuery = useDebounce(query, 500);
@@ -506,5 +507,36 @@ export default function SearchPage() {
       />
       </div>
     </div>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen">
+      <PageHeader
+        title="Search"
+        description="Search and add new media to your library"
+        gradientFrom="emerald-600/10"
+        gradientVia="green-600/10"
+        gradientTo="teal-600/10"
+      />
+      <div className="container mx-auto px-6 py-8">
+        <div className="animate-pulse">
+          <div className="flex gap-4 mb-8">
+            <div className="h-12 bg-muted rounded-lg w-36"></div>
+            <div className="h-12 bg-muted rounded-lg flex-1"></div>
+            <div className="h-12 bg-muted rounded-lg w-24"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <SearchContent />
+    </Suspense>
   );
 }

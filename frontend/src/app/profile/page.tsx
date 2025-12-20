@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { User, Shield, Key } from "lucide-react";
+import { User, Shield } from "lucide-react";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
@@ -18,7 +18,7 @@ interface UserData {
   created_at: string;
 }
 
-export default function ProfilePage() {
+function ProfileContent() {
   const searchParams = useSearchParams();
   const initialSection = searchParams?.get('section') === '2fa' ? '2fa' : 'account';
   const [selectedSection, setSelectedSection] = useState<ProfileSection>(initialSection);
@@ -149,5 +149,32 @@ export default function ProfilePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="animate-pulse">
+        <div className="h-8 bg-muted rounded w-48 mb-4"></div>
+        <div className="h-4 bg-muted rounded w-64 mb-6"></div>
+        <div className="grid grid-cols-12 gap-6">
+          <div className="col-span-12 lg:col-span-3">
+            <div className="bg-card border border-border rounded-lg p-4 h-32"></div>
+          </div>
+          <div className="col-span-12 lg:col-span-9">
+            <div className="bg-card border border-border rounded-lg p-6 h-64"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <ProfileContent />
+    </Suspense>
   );
 }

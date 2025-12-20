@@ -63,31 +63,26 @@ class LeetxIndexer(BaseIndexer):
         """
         releases = []
 
-        try:
-            category_path = self.categories.get(category, "") if category else ""
-            search_url = f"{self.current_url}/search/{query.replace(' ', '+')}/{category_path}/1/"
+        category_path = self.categories.get(category, "") if category else ""
+        search_url = f"{self.current_url}/search/{query.replace(' ', '+')}/{category_path}/1/"
 
-            html = await self._fetch_html(search_url)
-            soup = BeautifulSoup(html, "lxml")
+        html = await self._fetch_html(search_url)
+        soup = BeautifulSoup(html, "lxml")
 
-            table = soup.find("table", class_="table-list")
-            if not table:
-                return releases
+        table = soup.find("table", class_="table-list")
+        if not table:
+            return releases
 
-            rows = table.find_all("tr")[1:]  # Skip header row
+        rows = table.find_all("tr")[1:]  # Skip header row
 
-            for row in rows[:limit]:
-                try:
-                    release = await self._parse_search_result(row, category)
-                    if release:
-                        releases.append(release)
-                except Exception as e:
-                    print(f"Error parsing row: {e}")
-                    continue
-
-        except Exception as e:
-            print(f"Error searching 1337x: {e}")
-            await self._try_alternative_url()
+        for row in rows[:limit]:
+            try:
+                release = await self._parse_search_result(row, category)
+                if release:
+                    releases.append(release)
+            except Exception as e:
+                print(f"Error parsing row: {e}")
+                continue
 
         return releases
 

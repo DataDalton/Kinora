@@ -602,10 +602,10 @@ export default function ShowDetailPage() {
       {/* Modals */}
       <DeleteConfirmModal
         isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
+        onCancel={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteConfirm}
         title={show.title}
-        itemType="show"
+        itemName="show"
         hasFiles={!!show.root_folder_path}
       />
 
