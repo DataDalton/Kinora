@@ -1,8 +1,8 @@
-import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from app.core.cache import cache_get, cache_set
+from app.core.http_client import get_http_client
 
 
 class DeezerService:
@@ -15,7 +15,7 @@ class DeezerService:
 
     async def _request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Make a request to Deezer API with caching
+        Make a request to Deezer API with caching using shared HTTP client
         """
         if params is None:
             params = {}
@@ -25,16 +25,16 @@ class DeezerService:
         if cached:
             return cached
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(f"{self.BASE_URL}/{endpoint}", params=params)
-            response.raise_for_status()
-            data = response.json()
+        client = await get_http_client()
+        response = await client.get(f"{self.BASE_URL}/{endpoint}", params=params)
+        response.raise_for_status()
+        data = response.json()
 
-            if "error" in data:
-                raise ValueError(f"Deezer API error: {data['error'].get('message', 'Unknown error')}")
+        if "error" in data:
+            raise ValueError(f"Deezer API error: {data['error'].get('message', 'Unknown error')}")
 
-            await cache_set(cache_key, data, expire=3600)  # Cache for 1 hour
-            return data
+        await cache_set(cache_key, data, expire=3600)
+        return data
 
     async def search_artist(self, query: str, limit: int = 25) -> List[Dict[str, Any]]:
         """

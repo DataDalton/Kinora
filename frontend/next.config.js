@@ -14,6 +14,15 @@ const nextConfig = {
   experimental: {
     // Enable Turbopack filesystem caching for faster compile times across restarts
     turbopackFileSystemCacheForDev: true,
+    // Partial Prerendering: combines static shell with streaming dynamic content
+    ppr: true,
+    // Client router cache control
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
+    // Faster builds by optimizing barrel file imports
+    optimizePackageImports: ['lucide-react'],
   },
 
   images: {

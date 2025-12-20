@@ -1,9 +1,9 @@
 from typing import List, Optional
 from datetime import datetime
-import httpx
 
 from app.services.indexers.base import BaseIndexer, TorrentRelease
 from app.core.config import settings
+from app.core.http_client import get_http_client
 
 
 class YTSIndexer(BaseIndexer):
@@ -41,26 +41,26 @@ class YTSIndexer(BaseIndexer):
         releases = []
 
         try:
-            async with httpx.AsyncClient(timeout=settings.INDEXER_REQUEST_TIMEOUT) as client:
-                response = await client.get(
-                    f"{self.current_api_url}/list_movies.json",
-                    params={
-                        "query_term": query,
-                        "limit": min(limit, 50),
-                        "sort_by": "seeds",
-                        "order_by": "desc",
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
+            client = await get_http_client()
+            response = await client.get(
+                f"{self.current_api_url}/list_movies.json",
+                params={
+                    "query_term": query,
+                    "limit": min(limit, 50),
+                    "sort_by": "seeds",
+                    "order_by": "desc",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                if data.get("status") != "ok":
-                    return releases
+            if data.get("status") != "ok":
+                return releases
 
-                movies = data.get("data", {}).get("movies", [])
+            movies = data.get("data", {}).get("movies", [])
 
-                for movie in movies:
-                    releases.extend(self._parse_movie(movie))
+            for movie in movies:
+                releases.extend(self._parse_movie(movie))
 
         except Exception as e:
             print(f"Error searching YTS: {e}")
@@ -143,25 +143,25 @@ class YTSIndexer(BaseIndexer):
         releases = []
 
         try:
-            async with httpx.AsyncClient(timeout=settings.INDEXER_REQUEST_TIMEOUT) as client:
-                response = await client.get(
-                    f"{self.current_api_url}/list_movies.json",
-                    params={
-                        "limit": 50,
-                        "sort_by": "date_added",
-                        "order_by": "desc",
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
+            client = await get_http_client()
+            response = await client.get(
+                f"{self.current_api_url}/list_movies.json",
+                params={
+                    "limit": 50,
+                    "sort_by": "date_added",
+                    "order_by": "desc",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                if data.get("status") != "ok":
-                    return releases
+            if data.get("status") != "ok":
+                return releases
 
-                movies = data.get("data", {}).get("movies", [])
+            movies = data.get("data", {}).get("movies", [])
 
-                for movie in movies:
-                    releases.extend(self._parse_movie(movie))
+            for movie in movies:
+                releases.extend(self._parse_movie(movie))
 
         except Exception as e:
             print(f"Error fetching RSS from YTS: {e}")
@@ -173,10 +173,10 @@ class YTSIndexer(BaseIndexer):
         Test if YTS API is reachable
         """
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{self.current_api_url}/list_movies.json?limit=1")
-                data = response.json()
-                return data.get("status") == "ok"
+            client = await get_http_client()
+            response = await client.get(f"{self.current_api_url}/list_movies.json?limit=1")
+            data = response.json()
+            return data.get("status") == "ok"
         except Exception:
             return await self._try_alternative_url()
 
@@ -184,16 +184,16 @@ class YTSIndexer(BaseIndexer):
         """
         Try alternative YTS URLs if main is down
         """
+        client = await get_http_client()
         for alt_url in self.alternative_urls:
             try:
                 alt_api_url = alt_url + "/api/v2"
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(f"{alt_api_url}/list_movies.json?limit=1")
-                    data = response.json()
-                    if data.get("status") == "ok":
-                        self.current_url = alt_url
-                        self.current_api_url = alt_api_url
-                        return True
+                response = await client.get(f"{alt_api_url}/list_movies.json?limit=1")
+                data = response.json()
+                if data.get("status") == "ok":
+                    self.current_url = alt_url
+                    self.current_api_url = alt_api_url
+                    return True
             except Exception:
                 continue
         return False

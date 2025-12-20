@@ -1,10 +1,10 @@
 from typing import List, Optional
 from datetime import datetime
 import re
-import httpx
 from bs4 import BeautifulSoup
 
 from app.services.indexers.base import BaseIndexer, TorrentRelease
+from app.core.http_client import get_http_client
 
 
 class NyaaIndexer(BaseIndexer):
@@ -31,12 +31,7 @@ class NyaaIndexer(BaseIndexer):
     }
 
     def __init__(self):
-        self.session = httpx.AsyncClient(
-            timeout=30.0,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            },
-        )
+        pass
 
     async def search(
         self,
@@ -57,10 +52,11 @@ class NyaaIndexer(BaseIndexer):
 
         torrents = []
         current_url = self.base_url
+        client = await get_http_client()
 
         for url in [self.base_url] + self.alternative_urls:
             try:
-                response = await self.session.get(f"{url}/", params=params)
+                response = await client.get(f"{url}/", params=params)
                 if response.status_code == 200:
                     current_url = url
                     break
@@ -95,10 +91,11 @@ class NyaaIndexer(BaseIndexer):
 
         torrents = []
         current_url = self.base_url
+        client = await get_http_client()
 
         for url in [self.base_url] + self.alternative_urls:
             try:
-                response = await self.session.get(f"{url}/", params=params)
+                response = await client.get(f"{url}/", params=params)
                 if response.status_code == 200:
                     current_url = url
                     break
@@ -124,9 +121,10 @@ class NyaaIndexer(BaseIndexer):
         """
         Test if Nyaa is reachable
         """
+        client = await get_http_client()
         for url in [self.base_url] + self.alternative_urls:
             try:
-                response = await self.session.get(f"{url}/", timeout=10.0)
+                response = await client.get(f"{url}/", timeout=10.0)
                 if response.status_code == 200:
                     return True
             except Exception:
@@ -378,8 +376,3 @@ class NyaaIndexer(BaseIndexer):
         except Exception:
             return None
 
-    async def close(self):
-        """
-        Close the HTTP session
-        """
-        await self.session.aclose()

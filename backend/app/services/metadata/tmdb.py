@@ -1,4 +1,3 @@
-import httpx
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -6,6 +5,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.core.cache import cache_get, cache_set
 from app.core.database import get_pool
+from app.core.http_client import get_http_client
 
 
 class TMDBService:
@@ -50,7 +50,7 @@ class TMDBService:
 
     async def _request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Make a request to TMDB API with caching
+        Make a request to TMDB API with caching using shared HTTP client
         """
         if params is None:
             params = {}
@@ -63,13 +63,13 @@ class TMDBService:
         if cached:
             return cached
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.BASE_URL}/{endpoint}", params=params)
-            response.raise_for_status()
-            data = response.json()
+        client = await get_http_client()
+        response = await client.get(f"{self.BASE_URL}/{endpoint}", params=params)
+        response.raise_for_status()
+        data = response.json()
 
-            await cache_set(cache_key, data, expire=3600)  # Cache for 1 hour
-            return data
+        await cache_set(cache_key, data, expire=3600)
+        return data
 
     async def search_movie(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """

@@ -1,8 +1,8 @@
-import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from app.core.cache import cache_get, cache_set
+from app.core.http_client import get_http_client
 
 
 class AnilistService:
@@ -14,7 +14,7 @@ class AnilistService:
 
     async def _query(self, query: str, variables: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Execute a GraphQL query against Anilist API with caching
+        Execute a GraphQL query against Anilist API with caching using shared HTTP client
         """
         if variables is None:
             variables = {}
@@ -24,20 +24,20 @@ class AnilistService:
         if cached:
             return cached
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self.API_URL,
-                json={"query": query, "variables": variables},
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = await get_http_client()
+        response = await client.post(
+            self.API_URL,
+            json={"query": query, "variables": variables},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        response.raise_for_status()
+        data = response.json()
 
-            if "errors" in data:
-                raise Exception(f"Anilist API error: {data['errors']}")
+        if "errors" in data:
+            raise Exception(f"Anilist API error: {data['errors']}")
 
-            await cache_set(cache_key, data["data"], expire=3600)
-            return data["data"]
+        await cache_set(cache_key, data["data"], expire=3600)
+        return data["data"]
 
     async def search_anime(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
