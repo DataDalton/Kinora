@@ -11,9 +11,6 @@ const nextConfig = {
     rules: {},
   },
 
-  // Partial Prerendering: combines static shell with streaming dynamic content
-  cacheComponents: true,
-
   experimental: {
     // Enable Turbopack filesystem caching for faster compile times across restarts
     turbopackFileSystemCacheForDev: true,
