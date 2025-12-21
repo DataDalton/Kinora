@@ -11,11 +11,12 @@ const nextConfig = {
     rules: {},
   },
 
+  // Partial Prerendering: combines static shell with streaming dynamic content
+  cacheComponents: true,
+
   experimental: {
     // Enable Turbopack filesystem caching for faster compile times across restarts
     turbopackFileSystemCacheForDev: true,
-    // Partial Prerendering: combines static shell with streaming dynamic content
-    ppr: true,
     // Client router cache control
     staleTimes: {
       dynamic: 30,
