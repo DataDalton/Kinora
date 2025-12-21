@@ -1,52 +1,91 @@
-import httpx
-from typing import Optional
+from curl_cffi.requests import AsyncSession, Response
+from typing import Optional, Any
 
-# Global shared HTTP client with connection pooling
-_client: Optional[httpx.AsyncClient] = None
+# Global shared HTTP client
+_client: Optional[AsyncSession] = None
 
-# Default headers for all requests
+# Default headers for API requests
 DEFAULT_HEADERS = {
-    "User-Agent": "Nexarr/1.0 (Media Management Platform)",
+    "User-Agent": "Nexarr/1.0",
     "Accept": "application/json",
-    "Accept-Encoding": "gzip, deflate, br",
 }
 
+# HTTP/3 with automatic fallback to HTTP/2 and HTTP/1.1
+HTTP_VERSION = "v3"
 
-async def get_http_client() -> httpx.AsyncClient:
+
+async def get_http_client() -> AsyncSession:
     """
-    Get shared HTTP client with connection pooling.
-    HTTP/3 is automatically negotiated when httpx[http3] is installed.
-    HTTP/2 is enabled as fallback. Connection reuse across requests.
+    Get shared async HTTP client with connection pooling.
+    Uses HTTP/3 by default with automatic fallback to HTTP/2.
     """
     global _client
 
     if _client is None:
-        _client = httpx.AsyncClient(
-            http2=True,
-            limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=30,
-                keepalive_expiry=60.0,
-            ),
-            timeout=httpx.Timeout(
-                connect=10.0,
-                read=30.0,
-                write=30.0,
-                pool=10.0,
-            ),
-            follow_redirects=True,
+        _client = AsyncSession(
             headers=DEFAULT_HEADERS,
+            timeout=30.0,
+            allow_redirects=True,
+            max_redirects=10,
+            max_clients=100,
         )
 
     return _client
 
 
 async def close_http_client():
-    """
-    Close the shared HTTP client. Call on application shutdown.
-    """
+    """Close the shared HTTP client. Call on application shutdown."""
     global _client
 
     if _client is not None:
-        await _client.aclose()
+        await _client.close()
         _client = None
+
+
+async def http_get(url: str, **kwargs: Any) -> Response:
+    """HTTP GET with HTTP/3 priority."""
+    client = await get_http_client()
+    kwargs.setdefault("http_version", HTTP_VERSION)
+    return await client.get(url, **kwargs)
+
+
+async def http_post(url: str, **kwargs: Any) -> Response:
+    """HTTP POST with HTTP/3 priority."""
+    client = await get_http_client()
+    kwargs.setdefault("http_version", HTTP_VERSION)
+    return await client.post(url, **kwargs)
+
+
+async def http_put(url: str, **kwargs: Any) -> Response:
+    """HTTP PUT with HTTP/3 priority."""
+    client = await get_http_client()
+    kwargs.setdefault("http_version", HTTP_VERSION)
+    return await client.put(url, **kwargs)
+
+
+async def http_patch(url: str, **kwargs: Any) -> Response:
+    """HTTP PATCH with HTTP/3 priority."""
+    client = await get_http_client()
+    kwargs.setdefault("http_version", HTTP_VERSION)
+    return await client.patch(url, **kwargs)
+
+
+async def http_delete(url: str, **kwargs: Any) -> Response:
+    """HTTP DELETE with HTTP/3 priority."""
+    client = await get_http_client()
+    kwargs.setdefault("http_version", HTTP_VERSION)
+    return await client.delete(url, **kwargs)
+
+
+async def http_head(url: str, **kwargs: Any) -> Response:
+    """HTTP HEAD with HTTP/3 priority."""
+    client = await get_http_client()
+    kwargs.setdefault("http_version", HTTP_VERSION)
+    return await client.head(url, **kwargs)
+
+
+async def http_request(method: str, url: str, **kwargs: Any) -> Response:
+    """Generic HTTP request with HTTP/3 priority."""
+    client = await get_http_client()
+    kwargs.setdefault("http_version", HTTP_VERSION)
+    return await client.request(method, url, **kwargs)

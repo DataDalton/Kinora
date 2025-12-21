@@ -1,36 +1,22 @@
 const { execSync } = require('child_process');
-const fs = require('fs');
 const path = require('path');
 
-const isWindows = process.platform === 'win32';
 const backendDir = path.join(__dirname, '..', 'backend');
-const venvDir = path.join(backendDir, 'venv');
 
-console.log('Setting up backend...');
+console.log('Setting up backend with uv...');
 
-if (!fs.existsSync(venvDir)) {
-  console.log('Creating Python virtual environment...');
-  try {
-    const pythonCmd = isWindows ? 'python' : 'python3';
-    execSync(`${pythonCmd} -m venv "${venvDir}"`, {
-      cwd: backendDir,
-      stdio: 'inherit'
-    });
-    console.log('Virtual environment created');
-  } catch (error) {
-    console.error('Failed to create virtual environment');
-    console.error(error.message);
-    process.exit(1);
-  }
+try {
+  // Check if uv is installed
+  execSync('uv --version', { stdio: 'pipe' });
+} catch (error) {
+  console.error('uv is not installed. Install it with: pip install uv');
+  console.error('Or visit: https://docs.astral.sh/uv/getting-started/installation/');
+  process.exit(1);
 }
 
 console.log('Installing Python dependencies...');
 try {
-  const pipCmd = isWindows
-    ? `"${path.join(venvDir, 'Scripts', 'pip.exe')}"`
-    : `"${path.join(venvDir, 'bin', 'pip')}"`;
-
-  execSync(`${pipCmd} install -r requirements.txt`, {
+  execSync('uv sync --all-extras', {
     cwd: backendDir,
     stdio: 'inherit'
   });

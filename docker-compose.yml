@@ -100,7 +100,7 @@ services:
       context: ./backend
       dockerfile: ../docker/backend.Dockerfile
     container_name: nexarr-celery-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info
+    command: uv run celery -A app.tasks.celery_app worker --loglevel=info
     environment:
       APP_NAME: Nexarr
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production-please}
@@ -138,7 +138,7 @@ services:
       context: ./backend
       dockerfile: ../docker/backend.Dockerfile
     container_name: nexarr-celery-beat
-    command: celery -A app.tasks.celery_app beat --loglevel=info
+    command: uv run celery -A app.tasks.celery_app beat --loglevel=info
     environment:
       APP_NAME: Nexarr
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production-please}

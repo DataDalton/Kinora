@@ -1,4 +1,3 @@
-import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -8,6 +7,7 @@ from app.services.download_clients.base import (
     TorrentState,
 )
 from app.core.config import settings
+from app.core.http_client import http_get, http_post
 
 
 class QBittorrentClient(BaseDownloadClient):
@@ -42,17 +42,16 @@ class QBittorrentClient(BaseDownloadClient):
 
     async def _login(self) -> bool:
         """Authenticate with qBittorrent"""
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/auth/login",
-                data={"username": self.username, "password": self.password},
-            )
+        response = await http_post(
+            f"{self.base_url}/auth/login",
+            data={"username": self.username, "password": self.password},
+        )
 
-            if response.text == "Ok.":
-                self._cookie = response.cookies.get("SID")
-                return True
+        if response.text == "Ok.":
+            self._cookie = response.cookies.get("SID")
+            return True
 
-            return False
+        return False
 
     async def _request(
         self,
@@ -67,32 +66,31 @@ class QBittorrentClient(BaseDownloadClient):
 
         cookies = {"SID": self._cookie} if self._cookie else None
 
-        async with httpx.AsyncClient() as client:
-            if method == "GET":
-                response = await client.get(
-                    f"{self.base_url}/{endpoint}", params=data, cookies=cookies
-                )
-            else:
-                response = await client.post(
-                    f"{self.base_url}/{endpoint}",
-                    data=data,
-                    files=files,
-                    cookies=cookies,
-                )
+        if method == "GET":
+            response = await http_get(
+                f"{self.base_url}/{endpoint}", params=data, cookies=cookies
+            )
+        else:
+            response = await http_post(
+                f"{self.base_url}/{endpoint}",
+                data=data,
+                files=files,
+                cookies=cookies,
+            )
 
-            if response.status_code == 403:
-                await self._login()
-                return await self._request(method, endpoint, data, files)
+        if response.status_code == 403:
+            await self._login()
+            return await self._request(method, endpoint, data, files)
 
-            response.raise_for_status()
+        response.raise_for_status()
 
-            if response.text:
-                try:
-                    return response.json()
-                except Exception:
-                    return response.text
+        if response.text:
+            try:
+                return response.json()
+            except Exception:
+                return response.text
 
-            return None
+        return None
 
     async def test_connection(self) -> bool:
         """Test if qBittorrent is reachable"""

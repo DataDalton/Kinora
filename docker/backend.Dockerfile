@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies and uv
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
@@ -12,7 +12,12 @@ RUN apt-get update && apt-get install -y \
     wget \
     util-linux \
     gnupg \
+    curl \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && rm -rf /var/lib/apt/lists/*
+
+# Add uv to PATH
+ENV PATH="/root/.local/bin:$PATH"
 
 # Attempt to install NVIDIA CUDA toolkit for GPU transcoding
 # Falls back to software transcoding if unavailable
@@ -21,11 +26,11 @@ RUN apt-get update \
     || echo "CUDA not available - using software transcoding" \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with uv
+RUN uv sync --frozen --no-dev
 
 # Development stage
 FROM base AS development
@@ -34,7 +39,7 @@ FROM base AS development
 COPY . .
 
 # Start server with reload and HTTP/2
-CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--reload", "--http", "2", "app.main:app"]
+CMD ["uv", "run", "granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--reload", "--http", "2", "app.main:app"]
 
 # Production stage
 FROM base AS production
@@ -43,4 +48,4 @@ FROM base AS production
 COPY . .
 
 # Start server with HTTP/2, backpressure handling, and worker respawning
-CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--http", "2", "--backpressure", "1024", "--respawn-failed-workers", "app.main:app"]
+CMD ["uv", "run", "granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--http", "2", "--backpressure", "1024", "--respawn-failed-workers", "app.main:app"]

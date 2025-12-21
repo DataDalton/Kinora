@@ -3,7 +3,7 @@ from datetime import datetime
 
 from app.services.indexers.base import BaseIndexer, TorrentRelease
 from app.core.config import settings
-from app.core.http_client import get_http_client
+from app.core.http_client import http_get
 
 
 class YTSIndexer(BaseIndexer):
@@ -41,8 +41,7 @@ class YTSIndexer(BaseIndexer):
         releases = []
 
         try:
-            client = await get_http_client()
-            response = await client.get(
+            response = await http_get(
                 f"{self.current_api_url}/list_movies.json",
                 params={
                     "query_term": query,
@@ -143,8 +142,7 @@ class YTSIndexer(BaseIndexer):
         releases = []
 
         try:
-            client = await get_http_client()
-            response = await client.get(
+            response = await http_get(
                 f"{self.current_api_url}/list_movies.json",
                 params={
                     "limit": 50,
@@ -173,8 +171,7 @@ class YTSIndexer(BaseIndexer):
         Test if YTS API is reachable
         """
         try:
-            client = await get_http_client()
-            response = await client.get(f"{self.current_api_url}/list_movies.json?limit=1")
+            response = await http_get(f"{self.current_api_url}/list_movies.json?limit=1")
             data = response.json()
             return data.get("status") == "ok"
         except Exception:
@@ -184,11 +181,10 @@ class YTSIndexer(BaseIndexer):
         """
         Try alternative YTS URLs if main is down
         """
-        client = await get_http_client()
         for alt_url in self.alternative_urls:
             try:
                 alt_api_url = alt_url + "/api/v2"
-                response = await client.get(f"{alt_api_url}/list_movies.json?limit=1")
+                response = await http_get(f"{alt_api_url}/list_movies.json?limit=1")
                 data = response.json()
                 if data.get("status") == "ok":
                     self.current_url = alt_url

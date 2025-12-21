@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from app.core.cache import cache_get, cache_set
-from app.core.http_client import get_http_client
+from app.core.http_client import http_post
 
 
 class AnilistService:
@@ -24,8 +24,7 @@ class AnilistService:
         if cached:
             return cached
 
-        client = await get_http_client()
-        response = await client.post(
+        response = await http_post(
             self.API_URL,
             json={"query": query, "variables": variables},
             headers={"Content-Type": "application/json", "Accept": "application/json"},

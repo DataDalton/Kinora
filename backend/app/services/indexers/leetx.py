@@ -1,11 +1,11 @@
 from typing import List, Optional
 from datetime import datetime
 from bs4 import BeautifulSoup
-import httpx
 
 from app.services.indexers.base import BaseIndexer, TorrentRelease
 from app.services.cloudflare.flaresolverr import flaresolverr
 from app.core.config import settings
+from app.core.http_client import http_get
 
 
 class LeetxIndexer(BaseIndexer):
@@ -47,10 +47,9 @@ class LeetxIndexer(BaseIndexer):
             except Exception as e:
                 raise Exception(f"Failed to bypass Cloudflare for {url}: {str(e)}")
         else:
-            async with httpx.AsyncClient(timeout=settings.INDEXER_REQUEST_TIMEOUT) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                return response.text
+            response = await http_get(url, timeout=settings.INDEXER_REQUEST_TIMEOUT)
+            response.raise_for_status()
+            return response.text
 
     async def search(
         self,

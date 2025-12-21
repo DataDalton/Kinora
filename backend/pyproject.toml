@@ -1,6 +1,82 @@
+[project]
+name = "nexarr-backend"
+version = "1.0.0"
+description = "Nexarr media automation backend"
+requires-python = ">=3.14"
+dependencies = [
+    # Web Framework
+    "fastapi>=0.126.0",
+    "granian[reload]>=2.6.0",
+
+    # Database
+    "asyncpg>=0.31.0",
+
+    # Redis & Caching
+    "redis>=7.1.0",
+    "hiredis>=3.3.0",
+
+    # Celery
+    "celery>=5.6.0",
+    "flower>=2.0.1",
+
+    # Authentication & Security
+    "python-jose[cryptography]>=3.5.0",
+    "passlib[argon2]>=1.7.4",
+    "argon2-cffi>=25.1.0",
+    "python-multipart>=0.0.21",
+    "bcrypt>=5.0.0",
+    "pyotp>=2.9.0",
+    "webauthn>=2.7.0",
+    "qrcode>=8.2",
+
+    # Validation
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "email-validator>=2.3.0",
+
+    # HTTP Client (HTTP/3 + DNS-over-HTTPS support)
+    "curl_cffi>=0.14.0",
+
+    # JSON Serialization
+    "orjson>=3.11.5",
+
+    # HTML Parsing
+    "beautifulsoup4>=4.14.3",
+    "lxml>=6.0.2",
+
+    # Subtitles
+    "subliminal>=2.5.0",
+    "babelfish>=0.6.1",
+
+    # Language Codes
+    "python-iso639>=2025.11.16",
+
+    # Torrent Client
+    "qbittorrent-api>=2025.11.1",
+
+    # External APIs
+    "tmdbv3api>=1.9.0",
+
+    # Utilities
+    "python-dotenv>=1.2.1",
+    "python-dateutil>=2.9.0.post0",
+    "pytz>=2025.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "black>=25.12.0",
+    "isort>=7.0.0",
+    "flake8>=7.3.0",
+    "mypy>=1.19.1",
+]
+
 [tool.black]
 line-length = 100
-target-version = ['py312']
+target-version = ['py314']
 include = '\.pyi?$'
 
 [tool.isort]
@@ -13,7 +89,7 @@ use_parentheses = true
 ensure_newline_before_comments = true
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

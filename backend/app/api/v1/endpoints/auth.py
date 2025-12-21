@@ -3,7 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import asyncpg
-import httpx
+from curl_cffi.requests.errors import RequestsError
 import json
 
 from app.core.database import get_db
@@ -785,7 +785,7 @@ async def oidc_callback(
 
         return Token(access_token=access_token, refresh_token=refresh_token)
 
-    except httpx.HTTPError as e:
+    except RequestsError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to exchange code for tokens: {str(e)}",

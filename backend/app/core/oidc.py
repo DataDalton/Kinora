@@ -1,8 +1,9 @@
 from typing import Optional, Dict, Any
-import httpx
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
 import secrets
+
+from app.core.http_client import http_get, http_post
 
 
 class OIDCProvider:
@@ -38,12 +39,11 @@ class OIDCProvider:
 
         discovery_url = f"{self.provider_url}/.well-known/openid-configuration"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(discovery_url, timeout=10)
-            response.raise_for_status()
-            self._discovery_cache = response.json()
-            self._cache_time = datetime.utcnow()
-            return self._discovery_cache
+        response = await http_get(discovery_url, timeout=10)
+        response.raise_for_status()
+        self._discovery_cache = response.json()
+        self._cache_time = datetime.utcnow()
+        return self._discovery_cache
 
     async def get_jwks(self) -> Dict[str, Any]:
         """
@@ -60,11 +60,10 @@ class OIDCProvider:
         if not jwks_uri:
             raise ValueError("OIDC provider discovery document missing jwks_uri")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(jwks_uri, timeout=10)
-            response.raise_for_status()
-            self._jwks_cache = response.json()
-            return self._jwks_cache
+        response = await http_get(jwks_uri, timeout=10)
+        response.raise_for_status()
+        self._jwks_cache = response.json()
+        return self._jwks_cache
 
     def generate_authorization_url(self, state: Optional[str] = None) -> tuple[str, str]:
         """
@@ -112,10 +111,9 @@ class OIDCProvider:
             "client_secret": self.client_secret,
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(token_endpoint, data=data, timeout=10)
-            response.raise_for_status()
-            return response.json()
+        response = await http_post(token_endpoint, data=data, timeout=10)
+        response.raise_for_status()
+        return response.json()
 
     async def verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
         """
@@ -166,14 +164,13 @@ class OIDCProvider:
             if not userinfo_endpoint:
                 return None
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    userinfo_endpoint,
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    timeout=10,
-                )
-                response.raise_for_status()
-                return response.json()
+            response = await http_get(
+                userinfo_endpoint,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()
 
         except Exception:
             return None

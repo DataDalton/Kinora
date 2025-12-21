@@ -5,7 +5,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.core.cache import cache_get, cache_set
 from app.core.database import get_pool
-from app.core.http_client import get_http_client
+from app.core.http_client import http_get
 
 
 class TMDBService:
@@ -63,8 +63,7 @@ class TMDBService:
         if cached:
             return cached
 
-        client = await get_http_client()
-        response = await client.get(f"{self.BASE_URL}/{endpoint}", params=params)
+        response = await http_get(f"{self.BASE_URL}/{endpoint}", params=params)
         response.raise_for_status()
         data = response.json()
 

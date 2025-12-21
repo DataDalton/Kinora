@@ -221,17 +221,18 @@ async def setup_tmdb(
         )
 
     # Test the API key
-    import httpx
+    from app.core.http_client import http_get
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.themoviedb.org/3/configuration?api_key={config.api_key}"
+        response = await http_get(
+            f"https://api.themoviedb.org/3/configuration?api_key={config.api_key}"
+        )
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid TMDB API key"
             )
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid TMDB API key"
-                )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

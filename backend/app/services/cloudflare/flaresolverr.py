@@ -1,9 +1,9 @@
-import httpx
 import uuid
 import logging
 from typing import Dict, Any, Optional, List
 from app.core.config import settings
 from app.services.cloudflare.base import BaseCloudflareBypass
+from app.core.http_client import http_get, http_post
 
 logger = logging.getLogger(__name__)
 
@@ -42,22 +42,22 @@ class FlareSolverrBypass(BaseCloudflareBypass):
         """
         new_session_id = session_id or f"nexarr-{uuid.uuid4().hex[:8]}"
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.api_url}/v1",
-                json={
-                    "cmd": "sessions.create",
-                    "session": new_session_id,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await http_post(
+            f"{self.api_url}/v1",
+            json={
+                "cmd": "sessions.create",
+                "session": new_session_id,
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-            if data.get("status") != "ok":
-                raise Exception(f"FlareSolverr session create error: {data.get('message')}")
+        if data.get("status") != "ok":
+            raise Exception(f"FlareSolverr session create error: {data.get('message')}")
 
-            logger.info(f"Created FlareSolverr session: {new_session_id}")
-            return new_session_id
+        logger.info(f"Created FlareSolverr session: {new_session_id}")
+        return new_session_id
 
     async def destroy_session(self, session_id: Optional[str] = None) -> bool:
         """
@@ -68,23 +68,23 @@ class FlareSolverrBypass(BaseCloudflareBypass):
             return False
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{self.api_url}/v1",
-                    json={
-                        "cmd": "sessions.destroy",
-                        "session": target_session,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = await http_post(
+                f"{self.api_url}/v1",
+                json={
+                    "cmd": "sessions.destroy",
+                    "session": target_session,
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                if data.get("status") == "ok":
-                    logger.info(f"Destroyed FlareSolverr session: {target_session}")
-                    if target_session == self.session_id:
-                        self.session_id = None
-                    return True
-                return False
+            if data.get("status") == "ok":
+                logger.info(f"Destroyed FlareSolverr session: {target_session}")
+                if target_session == self.session_id:
+                    self.session_id = None
+                return True
+            return False
         except Exception as e:
             logger.warning(f"Failed to destroy session {target_session}: {e}")
             return False
@@ -94,17 +94,17 @@ class FlareSolverrBypass(BaseCloudflareBypass):
         List all active FlareSolverr sessions.
         """
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{self.api_url}/v1",
-                    json={"cmd": "sessions.list"},
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = await http_post(
+                f"{self.api_url}/v1",
+                json={"cmd": "sessions.list"},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                if data.get("status") == "ok":
-                    return data.get("sessions", [])
-                return []
+            if data.get("status") == "ok":
+                return data.get("sessions", [])
+            return []
         except Exception as e:
             logger.warning(f"Failed to list sessions: {e}")
             return []
@@ -141,15 +141,18 @@ class FlareSolverrBypass(BaseCloudflareBypass):
             except Exception as e:
                 logger.warning(f"Failed to create session, proceeding without: {e}")
 
-        async with httpx.AsyncClient(timeout=max_timeout / 1000 + 10) as client:
-            response = await client.post(f"{self.api_url}/v1", json=payload)
-            response.raise_for_status()
-            data = response.json()
+        response = await http_post(
+            f"{self.api_url}/v1",
+            json=payload,
+            timeout=max_timeout / 1000 + 10,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-            if data.get("status") != "ok":
-                raise Exception(f"FlareSolverr error: {data.get('message')}")
+        if data.get("status") != "ok":
+            raise Exception(f"FlareSolverr error: {data.get('message')}")
 
-            return data
+        return data
 
     async def post(
         self,
@@ -186,24 +189,26 @@ class FlareSolverrBypass(BaseCloudflareBypass):
             except Exception as e:
                 logger.warning(f"Failed to create session, proceeding without: {e}")
 
-        async with httpx.AsyncClient(timeout=max_timeout / 1000 + 10) as client:
-            response = await client.post(f"{self.api_url}/v1", json=payload)
-            response.raise_for_status()
-            data = response.json()
+        response = await http_post(
+            f"{self.api_url}/v1",
+            json=payload,
+            timeout=max_timeout / 1000 + 10,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-            if data.get("status") != "ok":
-                raise Exception(f"FlareSolverr error: {data.get('message')}")
+        if data.get("status") != "ok":
+            raise Exception(f"FlareSolverr error: {data.get('message')}")
 
-            return data
+        return data
 
     async def test_connection(self) -> bool:
         """
         Test if FlareSolverr is reachable and working.
         """
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{self.api_url}/")
-                return response.status_code == 200
+            response = await http_get(f"{self.api_url}/", timeout=5.0)
+            return response.status_code == 200
         except Exception:
             return False
 
