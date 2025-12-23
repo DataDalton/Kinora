@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel, field_validator
 import asyncpg
 
-from app.core.database import get_db
+from app.db import get_db
 from app.api.v1.endpoints.auth import get_current_user
 
 try:

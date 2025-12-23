@@ -1,7 +1,6 @@
-import asyncio
 from datetime import datetime
-from app.tasks.celery_app import celery_app
-from app.core.database import get_pool
+from app.tasks.celery_app import celery_app, runAsync
+from app.db import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile
 
@@ -12,7 +11,7 @@ def search_wanted_media():
     Search for all wanted/missing media across indexers
     Automatically selects and grabs best matches
     """
-    return asyncio.run(async_search_wanted_media())
+    return runAsync(async_search_wanted_media())
 
 
 async def async_search_wanted_media():

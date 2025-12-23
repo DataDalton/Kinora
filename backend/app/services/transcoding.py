@@ -8,7 +8,7 @@ from typing import Dict, Optional, List, Callable, Any
 import asyncpg
 from datetime import datetime
 
-from app.core.database import get_pool
+from app.db import get_pool
 
 
 class HardwareAccelerationService:

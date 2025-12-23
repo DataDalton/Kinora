@@ -5,7 +5,7 @@ import shutil
 from datetime import datetime
 
 from app.tasks.celery_app import celery_app
-from app.core.database import get_pool
+from app.db import get_pool
 from app.core.webtransport import webtransport_manager
 from app.services.transcoding import ffmpeg_service
 

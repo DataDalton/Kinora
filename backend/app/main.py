@@ -2,21 +2,19 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import ORJSONResponse, JSONResponse
 
 from app.core.config import settings
-from app.core.database import init_db, close_pool
+from app.db import init_pool, close_pool
 from app.core.http_client import close_http_client
 from app.api.v1.router import api_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan handler for startup and shutdown events
-    """
-    # Startup: Initialize database and connection pool
-    await init_db()
+    """Application lifespan handler for startup and shutdown events."""
+    # Initialize database connection pool (connects to PgBouncer)
+    await init_pool()
     yield
     # Shutdown: Close database connection pool and HTTP client
     await close_pool()
@@ -53,9 +51,7 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health_check():
-    """
-    Health check endpoint
-    """
+    """Health check endpoint."""
     return JSONResponse(
         content={
             "status": "healthy",
@@ -68,9 +64,7 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    """
-    Root endpoint
-    """
+    """Root endpoint."""
     return JSONResponse(
         content={
             "message": f"Welcome to {settings.APP_NAME}",

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -14,6 +14,7 @@ import FileQualityInfo from '@/components/FileQualityInfo';
 import TagsEditor from '@/components/TagsEditor';
 import {
   Play,
+  Pause,
   Download,
   Music2,
   Clock,
@@ -27,6 +28,7 @@ import {
   ExternalLink,
   Upload,
   User,
+  Volume2,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -51,6 +53,7 @@ interface Album {
   file_size: number | null;
   record_type: string | null;
   upc: string | null;
+  explicit_lyrics: boolean | null;
 }
 
 interface Track {
@@ -90,6 +93,9 @@ export default function AlbumDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
   const [showManualImport, setShowManualImport] = useState(false);
+  const [volume, setVolume] = useState(0.7);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const { data: album, isLoading: albumLoading } = useQuery({
@@ -208,29 +214,86 @@ export default function AlbumDetailPage() {
   };
 
   const getTrackNumber = (track: Track) => {
+    if (!track.track_position) return '-';
     const hasMultipleDiscs = tracks && tracks.some(t => t.disk_number > 1);
     if (hasMultipleDiscs) {
-      return `${track.disk_number}-${track.track_position}`;
+      return `${track.disk_number || 1}-${track.track_position}`;
     }
     return track.track_position.toString();
   };
 
-  const handlePlayPreview = (track: Track) => {
+  const resetPlayback = () => {
+    setCurrentTime(0);
+    setDuration(0);
+  };
+
+  const handlePlayPreview = async (track: Track) => {
     if (!track.preview) return;
 
     if (currentlyPlaying === track.id) {
       audioRef.current?.pause();
+      resetPlayback();
       setCurrentlyPlaying(null);
     } else {
       if (audioRef.current) {
         audioRef.current.pause();
       }
+      resetPlayback();
+
+      // Create audio without crossOrigin to avoid CORS issues with Deezer CDN
       const audio = new Audio(track.preview);
-      audio.addEventListener('ended', () => setCurrentlyPlaying(null));
-      audio.play();
-      audioRef.current = audio;
-      setCurrentlyPlaying(track.id);
+      audio.volume = volume;
+
+      // Track time updates for progress bar
+      audio.addEventListener('timeupdate', () => {
+        setCurrentTime(audio.currentTime);
+        setDuration(audio.duration || 30);
+      });
+      audio.addEventListener('loadedmetadata', () => {
+        setDuration(audio.duration || 30);
+      });
+      audio.addEventListener('ended', () => {
+        resetPlayback();
+        setCurrentlyPlaying(null);
+      });
+      audio.addEventListener('error', () => {
+        resetPlayback();
+        setCurrentlyPlaying(null);
+        console.error('Failed to load audio preview');
+      });
+
+      try {
+        await audio.play();
+        audioRef.current = audio;
+        setCurrentlyPlaying(track.id);
+      } catch (err) {
+        console.error('Failed to play preview:', err);
+        resetPlayback();
+        setCurrentlyPlaying(null);
+      }
     }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+    };
+  }, []);
+
+  const handleVolumeChange = (newVolume: number) => {
+    setVolume(newVolume);
+    if (audioRef.current) {
+      audioRef.current.volume = newVolume;
+    }
+  };
+
+  const formatPlaybackTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
   };
 
   const handleDeleteConfirm = (deleteFiles: boolean) => {
@@ -327,7 +390,14 @@ export default function AlbumDetailPage() {
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <h2 className="text-2xl font-bold mb-2">{album.title}</h2>
+                  <div className="flex items-center gap-2 mb-2">
+                    <h2 className="text-2xl font-bold">{album.title}</h2>
+                    {album.explicit_lyrics && (
+                      <span className="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-400 border border-red-500/50 font-bold">
+                        EXPLICIT
+                      </span>
+                    )}
+                  </div>
                   {album.artist_id ? (
                     <Link
                       href={`/music/artist/${album.artist_id}`}
@@ -392,7 +462,7 @@ export default function AlbumDetailPage() {
                 <div className="space-y-2">
                   <button
                     onClick={() => setShowInteractiveSearch(true)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
                   >
                     <Search className="w-5 h-5" />
                     Interactive Search
@@ -401,7 +471,7 @@ export default function AlbumDetailPage() {
                   <button
                     onClick={() => searchDownloadMutation.mutate()}
                     disabled={searchDownloadMutation.isPending || album.status === 'downloading'}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium cursor-pointer"
                   >
                     <Download className="w-5 h-5" />
                     {searchDownloadMutation.isPending ? 'Searching...' : 'Auto Search & Download'}
@@ -409,7 +479,7 @@ export default function AlbumDetailPage() {
 
                   <button
                     onClick={() => setShowManualImport(true)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer"
                   >
                     <Upload className="w-5 h-5" />
                     Manual Import
@@ -419,14 +489,14 @@ export default function AlbumDetailPage() {
                     <button
                       onClick={() => refreshMetadataMutation.mutate()}
                       disabled={refreshMetadataMutation.isPending}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium disabled:opacity-50"
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                     >
                       <RefreshCw className={`w-5 h-5 ${refreshMetadataMutation.isPending ? 'animate-spin' : ''}`} />
                       Refresh
                     </button>
                     <button
                       onClick={() => setShowDeleteModal(true)}
-                      className="flex items-center justify-center gap-2 px-4 py-3 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium"
+                      className="flex items-center justify-center gap-2 px-4 py-3 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
                     >
                       <Trash2 className="w-5 h-5" />
                     </button>
@@ -441,7 +511,7 @@ export default function AlbumDetailPage() {
                       href={`https://www.deezer.com/album/${album.deezer_id}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+                      className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
                     >
                       <img src="https://www.deezer.com/favicon.ico" alt="Deezer" className="w-4 h-4" />
                       View on Deezer
@@ -488,7 +558,7 @@ export default function AlbumDetailPage() {
                     <button
                       onClick={() => addTracksMutation.mutate()}
                       disabled={addTracksMutation.isPending}
-                      className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
+                      className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium cursor-pointer"
                     >
                       <Download className="w-4 h-4" />
                       {addTracksMutation.isPending ? 'Fetching...' : 'Fetch Tracks from Deezer'}
@@ -508,7 +578,7 @@ export default function AlbumDetailPage() {
                   <button
                     onClick={() => addTracksMutation.mutate()}
                     disabled={addTracksMutation.isPending}
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium cursor-pointer"
                   >
                     <Download className="w-5 h-5" />
                     {addTracksMutation.isPending ? 'Fetching from Deezer...' : 'Fetch Tracks from Deezer'}
@@ -567,14 +637,18 @@ export default function AlbumDetailPage() {
                             {track.preview ? (
                               <button
                                 onClick={() => handlePlayPreview(track)}
-                                className={`p-2 rounded-full transition ${
+                                className={`p-2 rounded-full transition cursor-pointer ${
                                   currentlyPlaying === track.id
                                     ? 'bg-primary text-primary-foreground'
                                     : 'bg-accent hover:bg-primary hover:text-primary-foreground'
                                 }`}
-                                title="Play 30s preview"
+                                title={currentlyPlaying === track.id ? 'Pause preview' : 'Play 30s preview'}
                               >
-                                <Play className="w-4 h-4" />
+                                {currentlyPlaying === track.id ? (
+                                  <Pause className="w-4 h-4" />
+                                ) : (
+                                  <Play className="w-4 h-4" />
+                                )}
                               </button>
                             ) : (
                               <span className="text-xs text-muted-foreground">N/A</span>
@@ -598,7 +672,25 @@ export default function AlbumDetailPage() {
               )}
 
               {tracks && tracks.length > 0 && (
-                <div className="px-6 py-4 bg-accent/30 border-t border-border">
+                <div className="px-6 py-4 bg-accent/30 border-t border-border space-y-3">
+                  {/* Audio Progress - only shown when playing */}
+                  {currentlyPlaying && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground font-mono w-10">
+                        {formatPlaybackTime(currentTime)}
+                      </span>
+                      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-100"
+                          style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground font-mono w-10 text-right">
+                        {formatPlaybackTime(duration)}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-4">
                       <span className="text-muted-foreground">
@@ -610,8 +702,23 @@ export default function AlbumDetailPage() {
                         {formatTotalDuration(tracks.reduce((sum, t) => sum + (t.duration || 0), 0))}
                       </span>
                     </div>
-                    <div className="text-muted-foreground">
-                      {tracks.filter(t => t.has_file).length} / {tracks.length} downloaded
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Volume2 className="w-4 h-4 text-muted-foreground" />
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={volume}
+                          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                          className="w-20 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+                          title={`Volume: ${Math.round(volume * 100)}%`}
+                        />
+                      </div>
+                      <div className="text-muted-foreground">
+                        {tracks.filter(t => t.has_file).length} / {tracks.length} downloaded
+                      </div>
                     </div>
                   </div>
                 </div>

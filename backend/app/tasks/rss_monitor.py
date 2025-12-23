@@ -1,7 +1,6 @@
-import asyncio
 from datetime import datetime
-from app.tasks.celery_app import celery_app
-from app.core.database import get_pool
+from app.tasks.celery_app import celery_app, runAsync
+from app.db import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
@@ -15,7 +14,7 @@ def monitor_rss_feeds():
     Monitor RSS feeds from all enabled indexers
     Checks for new releases and auto-grabs matching wanted media
     """
-    return asyncio.run(async_monitor_rss_feeds())
+    return runAsync(async_monitor_rss_feeds())
 
 
 async def async_monitor_rss_feeds():

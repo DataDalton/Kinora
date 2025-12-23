@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel
 import asyncpg
 import os
 import shutil
-import json
 
-from app.core.database import get_db
+from app.db import get_db
+from app.db.repositories import MovieRepository
 from app.schemas.movie import Movie, MovieCreate, MovieUpdate
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
@@ -20,6 +20,12 @@ class MovieMonitoringUpdate(BaseModel):
     upgradeAllowed: Optional[bool] = None
 
 
+class MovieAddRequest(BaseModel):
+    tmdb_id: int
+    monitored: bool = True
+    media_profile_id: Optional[int] = None
+
+
 @router.get("/")
 async def get_movies(
     skip: int = 0,
@@ -28,112 +34,58 @@ async def get_movies(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get all movies from library with their tags
-    """
-    query = "SELECT * FROM movies"
-    if monitored_only:
-        query += " WHERE monitored = TRUE"
-    query += f" ORDER BY created_at DESC LIMIT {limit} OFFSET {skip}"
-
-    rows = await conn.fetch(query)
-    movies = [dict(row) for row in rows]
-
-    if movies:
-        movie_ids = [m["id"] for m in movies]
-        tags_query = """
-            SELECT mt.media_id, t.id, t.name, t.color
-            FROM media_tags mt
-            JOIN tags t ON t.id = mt.tag_id
-            WHERE mt.media_type = 'movie' AND mt.media_id = ANY($1)
-        """
-        tag_rows = await conn.fetch(tags_query, movie_ids)
-
-        tags_by_movie = {}
-        for row in tag_rows:
-            movie_id = row["media_id"]
-            if movie_id not in tags_by_movie:
-                tags_by_movie[movie_id] = []
-            tags_by_movie[movie_id].append({
-                "id": row["id"],
-                "name": row["name"],
-                "color": row["color"],
-            })
-
-        for movie in movies:
-            movie["tags"] = tags_by_movie.get(movie["id"], [])
-
-    return {"movies": movies, "total": len(movies)}
+    """Get all movies from library with their tags (single query with JSON aggregation)."""
+    repo = MovieRepository(conn)
+    return await repo.listWithTags(limit=limit, offset=skip, monitoredOnly=monitored_only)
 
 
-@router.get("/{movie_id}", response_model=Movie)
+@router.get("/{movie_id}")
 async def get_movie(
     movie_id: int,
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get a specific movie by ID
-    """
-    row = await conn.fetchrow("SELECT * FROM movies WHERE id = $1", movie_id)
+    """Get a specific movie by ID with its tags."""
+    repo = MovieRepository(conn)
+    movie = await repo.getWithTags(movie_id)
 
-    if not row:
+    if not movie:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found",
         )
 
-    return Movie(**dict(row))
+    return movie
 
 
-@router.post("/", response_model=Movie, status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def add_movie(
-    movie_data: MovieCreate,
+    movie_data: MovieAddRequest,
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Add a movie to library
-    """
-    # Check if movie already exists by TMDB ID
-    if movie_data.tmdb_id:
-        existing = await conn.fetchrow(
-            "SELECT id FROM movies WHERE tmdb_id = $1", movie_data.tmdb_id
-        )
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Movie already exists in library",
-            )
+    """Add a movie to library by fetching metadata from TMDB."""
+    repo = MovieRepository(conn)
 
-    row = await conn.fetchrow(
-        """
-        INSERT INTO movies (
-            title, original_title, overview, poster_path, backdrop_path,
-            release_date, genres, rating, vote_count, popularity,
-            tmdb_id, imdb_id, monitored, media_profile_id, root_folder_path
+    if await repo.existsByTmdbId(movie_data.tmdb_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Movie already exists in library",
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        RETURNING *
-        """,
-        movie_data.title,
-        movie_data.original_title,
-        movie_data.overview,
-        movie_data.poster_path,
-        movie_data.backdrop_path,
-        movie_data.release_date,
-        movie_data.genres,
-        movie_data.rating,
-        movie_data.vote_count,
-        movie_data.popularity,
-        movie_data.tmdb_id,
-        movie_data.imdb_id,
-        movie_data.monitored,
-        movie_data.media_profile_id,
-        movie_data.root_folder_path,
-    )
 
-    return Movie(**dict(row))
+    # Fetch metadata from TMDB
+    metadata = await tmdb_service.get_movie(movie_data.tmdb_id)
+    parsedData = tmdb_service.parse_movie_data(metadata)
+
+    movieData = {
+        **parsedData,
+        "status": "wanted",
+        "monitored": movie_data.monitored,
+        "media_profile_id": movie_data.media_profile_id,
+        "has_file": False,
+    }
+
+    return await repo.create(movieData)
 
 
 @router.put("/{movie_id}", response_model=Movie)
@@ -143,43 +95,24 @@ async def update_movie(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Update a movie in library
-    """
-    # Check if movie exists
-    existing = await conn.fetchrow("SELECT id FROM movies WHERE id = $1", movie_id)
-    if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Movie not found",
-        )
+    """Update a movie in library."""
+    repo = MovieRepository(conn)
 
-    # Build update query dynamically
-    update_fields = []
-    values = []
-    param_count = 1
-
-    for field, value in movie_data.model_dump(exclude_unset=True).items():
-        update_fields.append(f"{field} = ${param_count}")
-        values.append(value)
-        param_count += 1
-
-    if not update_fields:
+    updateData = movie_data.model_dump(exclude_unset=True)
+    if not updateData:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
 
-    values.append(movie_id)
-    query = f"""
-        UPDATE movies
-        SET {', '.join(update_fields)}, updated_at = NOW()
-        WHERE id = ${param_count}
-        RETURNING *
-    """
+    movie = await repo.update(movie_id, updateData)
+    if not movie:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Movie not found",
+        )
 
-    row = await conn.fetchrow(query, *values)
-    return Movie(**dict(row))
+    return movie
 
 
 @router.delete("/{movie_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -188,12 +121,11 @@ async def delete_movie(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Remove a movie from library
-    """
-    result = await conn.execute("DELETE FROM movies WHERE id = $1", movie_id)
+    """Remove a movie from library."""
+    repo = MovieRepository(conn)
+    deleted = await repo.delete(movie_id)
 
-    if result == "DELETE 0":
+    if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found",
@@ -209,46 +141,32 @@ async def update_movie_monitoring(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Update movie monitoring settings
-    """
-    movie = await conn.fetchrow("SELECT * FROM movies WHERE id = $1", movie_id)
-    if not movie:
+    """Update movie monitoring settings."""
+    sentFields = data.model_dump(exclude_unset=True)
+    updateData = {}
+
+    if "monitored" in sentFields:
+        updateData["monitored"] = data.monitored
+    if "upgradeAllowed" in sentFields:
+        updateData["upgrade_allowed"] = data.upgradeAllowed
+
+    if not updateData:
+        return {"message": "No updates provided"}
+
+    # Update with raw SQL and return dict (like shows do) to avoid Pydantic validation
+    setClause = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updateData.keys()))
+    row = await conn.fetchrow(
+        f"UPDATE movies SET {setClause}, updated_at = NOW() WHERE id = $1 RETURNING *",
+        movie_id, *updateData.values()
+    )
+
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found",
         )
 
-    # Use exclude_unset to distinguish between "not sent" and "explicitly set to null"
-    sent_fields = data.model_dump(exclude_unset=True)
-
-    update_fields = []
-    values = []
-    param_count = 1
-
-    if "monitored" in sent_fields:
-        update_fields.append(f"monitored = ${param_count}")
-        values.append(data.monitored)
-        param_count += 1
-
-    if "upgradeAllowed" in sent_fields:
-        update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(data.upgradeAllowed)
-        param_count += 1
-
-    if not update_fields:
-        return {"message": "No updates provided"}
-
-    values.append(movie_id)
-    query = f"""
-        UPDATE movies
-        SET {', '.join(update_fields)}, updated_at = NOW()
-        WHERE id = ${param_count}
-        RETURNING *
-    """
-
-    row = await conn.fetchrow(query, *values)
-    return Movie(**dict(row))
+    return dict(row)
 
 
 @router.delete("/{movie_id}/delete")
@@ -258,45 +176,42 @@ async def delete_movie_with_files(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Delete a movie from library with option to delete files from disk
-    """
-    movie = await conn.fetchrow("SELECT * FROM movies WHERE id = $1", movie_id)
+    """Delete a movie from library with option to delete files from disk."""
+    repo = MovieRepository(conn)
+    movie = await repo.getById(movie_id)
+
     if not movie:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found",
         )
 
-    files_deleted = []
+    filesDeleted = []
     errors = []
 
-    if delete_files and movie["file_path"]:
-        file_path = movie["file_path"]
+    if delete_files and movie.file_path:
+        filePath = movie.file_path
         try:
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-                files_deleted.append(file_path)
-                parent_dir = os.path.dirname(file_path)
-                if parent_dir and os.path.isdir(parent_dir):
-                    remaining = os.listdir(parent_dir)
+            if os.path.isfile(filePath):
+                os.remove(filePath)
+                filesDeleted.append(filePath)
+                parentDir = os.path.dirname(filePath)
+                if parentDir and os.path.isdir(parentDir):
+                    remaining = os.listdir(parentDir)
                     if not remaining or all(f.endswith(('.nfo', '.jpg', '.png', '.srt', '.sub')) for f in remaining):
-                        shutil.rmtree(parent_dir)
-                        files_deleted.append(parent_dir)
-            elif os.path.isdir(file_path):
-                shutil.rmtree(file_path)
-                files_deleted.append(file_path)
+                        shutil.rmtree(parentDir)
+                        filesDeleted.append(parentDir)
+            elif os.path.isdir(filePath):
+                shutil.rmtree(filePath)
+                filesDeleted.append(filePath)
         except Exception as e:
-            errors.append(f"Failed to delete {file_path}: {str(e)}")
+            errors.append(f"Failed to delete {filePath}: {str(e)}")
 
-    await conn.execute("DELETE FROM download_history WHERE media_type = 'movie' AND media_id = $1", movie_id)
-    await conn.execute("DELETE FROM blocklist WHERE media_type = 'movie' AND media_id = $1", movie_id)
-    await conn.execute("DELETE FROM media_tags WHERE media_type = 'movie' AND media_id = $1", movie_id)
-    await conn.execute("DELETE FROM movies WHERE id = $1", movie_id)
+    await repo.deleteWithRelations(movie_id)
 
     return {
         "message": "Movie deleted successfully",
-        "files_deleted": files_deleted,
+        "files_deleted": filesDeleted,
         "errors": errors,
     }
 
@@ -307,59 +222,26 @@ async def refresh_movie_metadata(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Refresh movie metadata from TMDB
-    """
-    movie = await conn.fetchrow("SELECT * FROM movies WHERE id = $1", movie_id)
+    """Refresh movie metadata from TMDB."""
+    repo = MovieRepository(conn)
+    movie = await repo.getById(movie_id)
+
     if not movie:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found",
         )
 
-    if not movie["tmdb_id"]:
+    if not movie.tmdb_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Movie has no TMDB ID, cannot refresh metadata",
         )
 
     try:
-        tmdb_data = await tmdb_service.get_movie(movie["tmdb_id"])
-        parsed_data = tmdb_service.parse_movie_data(tmdb_data)
-
-        await conn.execute(
-            """
-            UPDATE movies SET
-                title = $1, original_title = $2, overview = $3, poster_path = $4,
-                backdrop_path = $5, release_date = $6, genres = $7, rating = $8,
-                vote_count = $9, popularity = $10, imdb_id = $11, runtime = $12,
-                budget = $13, revenue = $14, tagline = $15, production_companies = $16,
-                collection_id = $17, collection_name = $18, updated_at = NOW()
-            WHERE id = $19
-            """,
-            parsed_data["title"],
-            parsed_data["original_title"],
-            parsed_data["overview"],
-            parsed_data["poster_path"],
-            parsed_data["backdrop_path"],
-            parsed_data["release_date"],
-            parsed_data["genres"],
-            parsed_data["rating"],
-            parsed_data["vote_count"],
-            parsed_data["popularity"],
-            parsed_data["imdb_id"],
-            parsed_data["runtime"],
-            parsed_data["budget"],
-            parsed_data["revenue"],
-            parsed_data["tagline"],
-            parsed_data["production_companies"],
-            parsed_data["collection_id"],
-            parsed_data["collection_name"],
-            movie_id,
-        )
-
-        updated_movie = await conn.fetchrow("SELECT * FROM movies WHERE id = $1", movie_id)
-        return Movie(**dict(updated_movie))
+        tmdbData = await tmdb_service.get_movie(movie.tmdb_id)
+        parsedData = tmdb_service.parse_movie_data(tmdbData)
+        return await repo.refreshMetadata(movie_id, parsedData)
 
     except Exception as e:
         raise HTTPException(
@@ -374,45 +256,34 @@ async def rescan_movie_files(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Rescan movie files on disk and update database
-    """
-    movie = await conn.fetchrow("SELECT * FROM movies WHERE id = $1", movie_id)
+    """Rescan movie files on disk and update database."""
+    repo = MovieRepository(conn)
+    movie = await repo.getById(movie_id)
+
     if not movie:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found",
         )
 
-    file_path = movie["file_path"]
-    has_file = False
-    file_size = None
+    filePath = movie.file_path
+    hasFile = False
+    fileSize = None
 
-    if file_path and os.path.exists(file_path):
-        if os.path.isfile(file_path):
-            has_file = True
-            file_size = os.path.getsize(file_path)
-        elif os.path.isdir(file_path):
-            video_extensions = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v')
-            for f in os.listdir(file_path):
-                if f.lower().endswith(video_extensions):
-                    has_file = True
-                    full_path = os.path.join(file_path, f)
-                    file_size = os.path.getsize(full_path)
+    if filePath and os.path.exists(filePath):
+        if os.path.isfile(filePath):
+            hasFile = True
+            fileSize = os.path.getsize(filePath)
+        elif os.path.isdir(filePath):
+            videoExtensions = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v')
+            for f in os.listdir(filePath):
+                if f.lower().endswith(videoExtensions):
+                    hasFile = True
+                    fullPath = os.path.join(filePath, f)
+                    fileSize = os.path.getsize(fullPath)
                     break
 
-    await conn.execute(
-        """
-        UPDATE movies SET has_file = $1, file_size = $2, updated_at = NOW()
-        WHERE id = $3
-        """,
-        has_file,
-        file_size,
-        movie_id,
-    )
-
-    updated_movie = await conn.fetchrow("SELECT * FROM movies WHERE id = $1", movie_id)
-    return Movie(**dict(updated_movie))
+    return await repo.updateFileInfo(movie_id, hasFile, fileSize=fileSize)
 
 
 @router.get("/{movie_id}/credits")
@@ -421,22 +292,22 @@ async def get_movie_credits(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get movie cast and crew from TMDB
-    """
-    movie = await conn.fetchrow("SELECT tmdb_id, metadata FROM movies WHERE id = $1", movie_id)
+    """Get movie cast and crew from TMDB."""
+    repo = MovieRepository(conn)
+    movie = await repo.getById(movie_id)
+
     if not movie:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found",
         )
 
-    if not movie["tmdb_id"]:
+    if not movie.tmdb_id:
         return {"cast": [], "crew": []}
 
     try:
-        tmdb_data = await tmdb_service.get_movie(movie["tmdb_id"])
-        credits = tmdb_data.get("credits", {})
+        tmdbData = await tmdb_service.get_movie(movie.tmdb_id)
+        credits = tmdbData.get("credits", {})
 
         cast = [
             {
@@ -449,6 +320,7 @@ async def get_movie_credits(
             for person in credits.get("cast", [])[:20]
         ]
 
+        crewJobs = ["Director", "Writer", "Screenplay", "Producer", "Executive Producer", "Cinematography", "Original Music Composer"]
         crew = [
             {
                 "id": person.get("id"),
@@ -458,7 +330,7 @@ async def get_movie_credits(
                 "profile_path": person.get("profile_path"),
             }
             for person in credits.get("crew", [])
-            if person.get("job") in ["Director", "Writer", "Screenplay", "Producer", "Executive Producer", "Cinematography", "Original Music Composer"]
+            if person.get("job") in crewJobs
         ]
 
         return {"cast": cast, "crew": crew}

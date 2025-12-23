@@ -3,7 +3,7 @@ from typing import List, Optional
 from datetime import datetime
 import asyncpg
 
-from app.core.database import get_db
+from app.db import get_db
 from app.schemas.history import DownloadHistory, DownloadHistoryCreate, DownloadHistoryUpdate, DownloadHistoryStats
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User

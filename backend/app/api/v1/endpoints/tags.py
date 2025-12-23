@@ -2,12 +2,24 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 import asyncpg
 
-from app.core.database import get_db
+from app.db import get_db
+from app.db.repositories import TagRepository, MediaTagRepository
 from app.schemas.tags import Tag, TagCreate, TagUpdate, MediaTagCreate, MediaTagResponse, BulkTagUpdate
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
 
 router = APIRouter()
+
+VALID_MEDIA_TYPES = ["movie", "show", "anime", "album", "artist"]
+
+
+def validateMediaType(mediaType: str) -> None:
+    """Validate media type is allowed."""
+    if mediaType not in VALID_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid media type. Must be one of: {', '.join(VALID_MEDIA_TYPES)}",
+        )
 
 
 @router.get("/", response_model=List[Tag])
@@ -15,11 +27,10 @@ async def get_tags(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get all tags
-    """
-    rows = await conn.fetch("SELECT * FROM tags ORDER BY name ASC")
-    return [Tag(**dict(row)) for row in rows]
+    """Get all tags."""
+    repo = TagRepository(conn)
+    rows = await repo.list()
+    return [Tag(**row) for row in rows]
 
 
 @router.get("/{tag_id}", response_model=Tag)
@@ -28,18 +39,17 @@ async def get_tag(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get a specific tag by ID
-    """
-    row = await conn.fetchrow("SELECT * FROM tags WHERE id = $1", tag_id)
+    """Get a specific tag by ID."""
+    repo = TagRepository(conn)
+    tag = await repo.getById(tag_id)
 
-    if not row:
+    if not tag:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tag not found",
         )
 
-    return Tag(**dict(row))
+    return Tag(**tag)
 
 
 @router.post("/", response_model=Tag, status_code=status.HTTP_201_CREATED)
@@ -48,9 +58,10 @@ async def create_tag(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Create a new tag
-    """
+    """Create a new tag."""
+    repo = TagRepository(conn)
+
+    # Check for duplicate name (case-insensitive)
     existing = await conn.fetchrow(
         "SELECT id FROM tags WHERE LOWER(name) = LOWER($1)", tag_data.name
     )
@@ -60,17 +71,8 @@ async def create_tag(
             detail="Tag with this name already exists",
         )
 
-    row = await conn.fetchrow(
-        """
-        INSERT INTO tags (name, color)
-        VALUES ($1, $2)
-        RETURNING *
-        """,
-        tag_data.name,
-        tag_data.color,
-    )
-
-    return Tag(**dict(row))
+    tag = await repo.create(tag_data.name, tag_data.color)
+    return Tag(**tag)
 
 
 @router.put("/{tag_id}", response_model=Tag)
@@ -80,54 +82,31 @@ async def update_tag(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Update a tag
-    """
-    existing = await conn.fetchrow("SELECT * FROM tags WHERE id = $1", tag_id)
+    """Update a tag."""
+    repo = TagRepository(conn)
+
+    existing = await repo.getById(tag_id)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tag not found",
         )
 
+    # Check for name conflict if name is being changed
     if tag_data.name:
-        name_exists = await conn.fetchrow(
+        nameExists = await conn.fetchrow(
             "SELECT id FROM tags WHERE LOWER(name) = LOWER($1) AND id != $2",
             tag_data.name,
             tag_id,
         )
-        if name_exists:
+        if nameExists:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tag with this name already exists",
             )
 
-    update_fields = []
-    values = []
-    param_count = 1
-
-    if tag_data.name is not None:
-        update_fields.append(f"name = ${param_count}")
-        values.append(tag_data.name)
-        param_count += 1
-
-    if tag_data.color is not None:
-        update_fields.append(f"color = ${param_count}")
-        values.append(tag_data.color)
-        param_count += 1
-
-    if not update_fields:
-        return Tag(**dict(existing))
-
-    values.append(tag_id)
-    query = f"""
-        UPDATE tags SET {", ".join(update_fields)}
-        WHERE id = ${param_count}
-        RETURNING *
-    """
-
-    row = await conn.fetchrow(query, *values)
-    return Tag(**dict(row))
+    updated = await repo.update(tag_id, tag_data.name, tag_data.color)
+    return Tag(**updated)
 
 
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -136,17 +115,17 @@ async def delete_tag(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Delete a tag (also removes from all media items)
-    """
-    existing = await conn.fetchrow("SELECT id FROM tags WHERE id = $1", tag_id)
+    """Delete a tag (also removes from all media items via cascade)."""
+    repo = TagRepository(conn)
+
+    existing = await repo.getById(tag_id)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tag not found",
         )
 
-    await conn.execute("DELETE FROM tags WHERE id = $1", tag_id)
+    await repo.delete(tag_id)
     return None
 
 
@@ -157,27 +136,12 @@ async def get_media_tags(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get all tags for a specific media item
-    """
-    valid_types = ["movie", "show", "anime", "album", "artist"]
-    if media_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media type. Must be one of: {', '.join(valid_types)}",
-        )
+    """Get all tags for a specific media item."""
+    validateMediaType(media_type)
 
-    rows = await conn.fetch(
-        """
-        SELECT t.* FROM tags t
-        INNER JOIN media_tags mt ON t.id = mt.tag_id
-        WHERE mt.media_type = $1 AND mt.media_id = $2
-        ORDER BY t.name ASC
-        """,
-        media_type,
-        media_id,
-    )
-    return [Tag(**dict(row)) for row in rows]
+    repo = MediaTagRepository(conn)
+    rows = await repo.getTagsForMedia(media_type, media_id)
+    return [Tag(**row) for row in rows]
 
 
 @router.post("/media/{media_type}/{media_id}", response_model=List[Tag])
@@ -188,53 +152,25 @@ async def set_media_tags(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Set tags for a media item (replaces existing tags)
-    """
-    valid_types = ["movie", "show", "anime", "album", "artist"]
-    if media_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media type. Must be one of: {', '.join(valid_types)}",
-        )
+    """Set tags for a media item (replaces existing tags)."""
+    validateMediaType(media_type)
 
-    async with conn.transaction():
-        await conn.execute(
-            "DELETE FROM media_tags WHERE media_type = $1 AND media_id = $2",
-            media_type,
-            media_id,
-        )
+    tagRepo = TagRepository(conn)
+    mediaTagRepo = MediaTagRepository(conn)
 
-        for tag_id in tag_data.tag_ids:
-            tag_exists = await conn.fetchrow("SELECT id FROM tags WHERE id = $1", tag_id)
-            if not tag_exists:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Tag with id {tag_id} not found",
-                )
-
-            await conn.execute(
-                """
-                INSERT INTO media_tags (tag_id, media_type, media_id)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (tag_id, media_type, media_id) DO NOTHING
-                """,
-                tag_id,
-                media_type,
-                media_id,
+    # Validate all tags exist
+    for tagId in tag_data.tag_ids:
+        if not await tagRepo.getById(tagId):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tag with id {tagId} not found",
             )
 
-    rows = await conn.fetch(
-        """
-        SELECT t.* FROM tags t
-        INNER JOIN media_tags mt ON t.id = mt.tag_id
-        WHERE mt.media_type = $1 AND mt.media_id = $2
-        ORDER BY t.name ASC
-        """,
-        media_type,
-        media_id,
-    )
-    return [Tag(**dict(row)) for row in rows]
+    async with conn.transaction():
+        await mediaTagRepo.setTags(media_type, media_id, tag_data.tag_ids)
+
+    rows = await mediaTagRepo.getTagsForMedia(media_type, media_id)
+    return [Tag(**row) for row in rows]
 
 
 @router.post("/media/{media_type}/{media_id}/add/{tag_id}", response_model=List[Tag])
@@ -245,45 +181,21 @@ async def add_tag_to_media(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Add a single tag to a media item
-    """
-    valid_types = ["movie", "show", "anime", "album", "artist"]
-    if media_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media type. Must be one of: {', '.join(valid_types)}",
-        )
+    """Add a single tag to a media item."""
+    validateMediaType(media_type)
 
-    tag_exists = await conn.fetchrow("SELECT id FROM tags WHERE id = $1", tag_id)
-    if not tag_exists:
+    tagRepo = TagRepository(conn)
+    mediaTagRepo = MediaTagRepository(conn)
+
+    if not await tagRepo.getById(tag_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tag not found",
         )
 
-    await conn.execute(
-        """
-        INSERT INTO media_tags (tag_id, media_type, media_id)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (tag_id, media_type, media_id) DO NOTHING
-        """,
-        tag_id,
-        media_type,
-        media_id,
-    )
-
-    rows = await conn.fetch(
-        """
-        SELECT t.* FROM tags t
-        INNER JOIN media_tags mt ON t.id = mt.tag_id
-        WHERE mt.media_type = $1 AND mt.media_id = $2
-        ORDER BY t.name ASC
-        """,
-        media_type,
-        media_id,
-    )
-    return [Tag(**dict(row)) for row in rows]
+    await mediaTagRepo.addTag(media_type, media_id, tag_id)
+    rows = await mediaTagRepo.getTagsForMedia(media_type, media_id)
+    return [Tag(**row) for row in rows]
 
 
 @router.delete("/media/{media_type}/{media_id}/remove/{tag_id}", response_model=List[Tag])
@@ -294,37 +206,13 @@ async def remove_tag_from_media(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Remove a single tag from a media item
-    """
-    valid_types = ["movie", "show", "anime", "album", "artist"]
-    if media_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media type. Must be one of: {', '.join(valid_types)}",
-        )
+    """Remove a single tag from a media item."""
+    validateMediaType(media_type)
 
-    await conn.execute(
-        """
-        DELETE FROM media_tags
-        WHERE tag_id = $1 AND media_type = $2 AND media_id = $3
-        """,
-        tag_id,
-        media_type,
-        media_id,
-    )
-
-    rows = await conn.fetch(
-        """
-        SELECT t.* FROM tags t
-        INNER JOIN media_tags mt ON t.id = mt.tag_id
-        WHERE mt.media_type = $1 AND mt.media_id = $2
-        ORDER BY t.name ASC
-        """,
-        media_type,
-        media_id,
-    )
-    return [Tag(**dict(row)) for row in rows]
+    mediaTagRepo = MediaTagRepository(conn)
+    await mediaTagRepo.removeTag(media_type, media_id, tag_id)
+    rows = await mediaTagRepo.getTagsForMedia(media_type, media_id)
+    return [Tag(**row) for row in rows]
 
 
 @router.delete("/media/{media_type}/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -334,21 +222,11 @@ async def clear_media_tags(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Remove all tags from a media item
-    """
-    valid_types = ["movie", "show", "anime", "album", "artist"]
-    if media_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media type. Must be one of: {', '.join(valid_types)}",
-        )
+    """Remove all tags from a media item."""
+    validateMediaType(media_type)
 
-    await conn.execute(
-        "DELETE FROM media_tags WHERE media_type = $1 AND media_id = $2",
-        media_type,
-        media_id,
-    )
+    repo = MediaTagRepository(conn)
+    await repo.removeAllFromMedia(media_type, media_id)
     return None
 
 
@@ -359,15 +237,8 @@ async def bulk_update_tags(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Bulk add/remove tags from multiple media items
-    """
-    valid_types = ["movie", "show", "anime", "album", "artist"]
-    if media_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media type. Must be one of: {', '.join(valid_types)}",
-        )
+    """Bulk add/remove tags from multiple media items using batch operations."""
+    validateMediaType(media_type)
 
     if not bulk_data.add_tags and not bulk_data.remove_tags:
         raise HTTPException(
@@ -375,50 +246,35 @@ async def bulk_update_tags(
             detail="Must specify at least one tag to add or remove",
         )
 
-    added_count = 0
-    removed_count = 0
+    tagRepo = TagRepository(conn)
+    mediaTagRepo = MediaTagRepository(conn)
+
+    # Validate tags to add exist
+    for tagId in bulk_data.add_tags:
+        if not await tagRepo.getById(tagId):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tag with id {tagId} not found",
+            )
+
+    addedCount = 0
+    removedCount = 0
 
     async with conn.transaction():
-        for tag_id in bulk_data.remove_tags:
-            for media_id in bulk_data.media_ids:
-                result = await conn.execute(
-                    """
-                    DELETE FROM media_tags
-                    WHERE tag_id = $1 AND media_type = $2 AND media_id = $3
-                    """,
-                    tag_id,
-                    media_type,
-                    media_id,
-                )
-                if result == "DELETE 1":
-                    removed_count += 1
+        # Batch remove operations (single query per tag instead of N queries)
+        for tagId in bulk_data.remove_tags:
+            removed = await mediaTagRepo.removeTagsBatch(media_type, bulk_data.media_ids, tagId)
+            removedCount += removed
 
-        for tag_id in bulk_data.add_tags:
-            tag_exists = await conn.fetchrow("SELECT id FROM tags WHERE id = $1", tag_id)
-            if not tag_exists:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Tag with id {tag_id} not found",
-                )
-
-            for media_id in bulk_data.media_ids:
-                result = await conn.execute(
-                    """
-                    INSERT INTO media_tags (tag_id, media_type, media_id)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (tag_id, media_type, media_id) DO NOTHING
-                    """,
-                    tag_id,
-                    media_type,
-                    media_id,
-                )
-                if result == "INSERT 0 1":
-                    added_count += 1
+        # Batch add operations (single query per tag instead of N queries)
+        for tagId in bulk_data.add_tags:
+            added = await mediaTagRepo.addTagsBatch(media_type, bulk_data.media_ids, tagId)
+            addedCount += added
 
     return {
         "success": True,
-        "added": added_count,
-        "removed": removed_count,
+        "added": addedCount,
+        "removed": removedCount,
         "media_count": len(bulk_data.media_ids),
     }
 
@@ -430,22 +286,9 @@ async def get_media_by_tag(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get all media IDs that have a specific tag
-    """
-    valid_types = ["movie", "show", "anime", "album", "artist"]
-    if media_type not in valid_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media type. Must be one of: {', '.join(valid_types)}",
-        )
+    """Get all media IDs that have a specific tag."""
+    validateMediaType(media_type)
 
-    rows = await conn.fetch(
-        """
-        SELECT media_id FROM media_tags
-        WHERE media_type = $1 AND tag_id = $2
-        """,
-        media_type,
-        tag_id,
-    )
+    repo = MediaTagRepository(conn)
+    rows = await repo.getMediaForTag(tag_id, media_type)
     return [row["media_id"] for row in rows]

@@ -9,16 +9,17 @@
   "scripts": {
     "preinstall": "node scripts/check-docker.js",
     "postinstall": "node scripts/setup-backend.js",
-    "dev": "npm run docker:dev && npm run dev:all",
+    "dev": "npm run docker:dev && npm run db:migrate && npm run dev:all",
+    "db:migrate": "cd backend && alembic upgrade head",
     "dev:all": "concurrently -n \"backend,celery-worker,celery-beat,frontend\" -c \"cyan,magenta,yellow,green\" \"npm run dev:backend\" \"npm run dev:celery-worker\" \"npm run dev:celery-beat\" \"npm run dev:frontend\"",
     "dev:backend": "cd backend && python -m granian --interface asgi --host 0.0.0.0 --port 8000 --reload app.main:app",
     "dev:celery-worker": "cd backend && python -m celery -A app.tasks.celery_app worker --loglevel=info --pool=solo",
     "dev:celery-beat": "cd backend && python -m celery -A app.tasks.celery_app beat --loglevel=info",
     "dev:frontend": "cd frontend && npm run dev",
-    "docker:dev": "docker-compose up -d postgres redis flaresolverr",
+    "docker:dev": "docker-compose up -d postgres pgbouncer redis flaresolverr",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
-    "docker:reset": "docker-compose down -v && docker-compose up -d postgres redis flaresolverr",
+    "docker:reset": "docker-compose down -v && docker-compose up -d postgres pgbouncer redis flaresolverr",
     "clean": "npm run docker:down && rm -rf frontend/node_modules frontend/.next backend/venv backend/__pycache__"
   },
   "devDependencies": {

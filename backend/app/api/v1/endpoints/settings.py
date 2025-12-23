@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 import base64
 import hashlib
 
-from app.core.database import get_db
+from app.db import get_db
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.config import settings as app_config
 

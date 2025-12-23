@@ -29,6 +29,7 @@ class ArtistUpdate(BaseModel):
 
     name: Optional[str] = Field(None, max_length=255)
     monitored: Optional[bool] = None
+    upgrade_allowed: Optional[bool] = None
     root_folder_path: Optional[str] = None
 
 
@@ -40,6 +41,7 @@ class Artist(ArtistBase):
     nb_album: Optional[int] = None
     nb_fan: Optional[int] = None
     has_files: bool = False
+    upgrade_allowed: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
 
@@ -82,6 +84,8 @@ class AlbumCreate(AlbumBase):
 
     nb_tracks: Optional[int] = None
     artist_name: Optional[str] = None
+    explicit_lyrics: Optional[bool] = False
+    record_type: Optional[str] = None
 
 
 class AlbumUpdate(BaseModel):
@@ -103,7 +107,7 @@ class Album(AlbumBase):
     nb_tracks: Optional[int] = None
     duration: Optional[int] = None
     label: Optional[str] = None
-    explicit_lyrics: bool = False
+    explicit_lyrics: Optional[bool] = False
     record_type: Optional[str] = None
     artist_name: Optional[str] = None
     has_file: bool = False
@@ -129,7 +133,7 @@ class AlbumSearch(BaseModel):
     cover_xl: Optional[str] = None
     release_date: Optional[str] = None
     nb_tracks: Optional[int] = None
-    explicit_lyrics: bool = False
+    explicit_lyrics: Optional[bool] = False
     record_type: Optional[str] = None
     artist: Optional[Dict[str, Any]] = None
     genres: Optional[List[Dict[str, Any]]] = None
@@ -145,12 +149,13 @@ class TrackBase(BaseModel):
     deezer_id: Optional[int] = None
     album_id: Optional[int] = None
     isrc: Optional[str] = None
+    monitored: bool = True
 
 
 class TrackCreate(TrackBase):
     """Schema for creating a track"""
 
-    explicit_lyrics: bool = False
+    explicit_lyrics: Optional[bool] = False
     preview: Optional[str] = None
     artist_name: Optional[str] = None
     album_title: Optional[str] = None
@@ -161,19 +166,27 @@ class TrackUpdate(BaseModel):
     """Schema for updating a track"""
 
     title: Optional[str] = Field(None, max_length=255)
+    monitored: Optional[bool] = None
+    upgrade_allowed: Optional[bool] = None
 
 
 class Track(TrackBase):
     """Schema for track response"""
 
     id: int
-    explicit_lyrics: bool = False
+    explicit_lyrics: Optional[bool] = False
     preview: Optional[str] = None
     artist_name: Optional[str] = None
     album_title: Optional[str] = None
+    album_cover: Optional[str] = None
+    album_cover_medium: Optional[str] = None
+    album_cover_big: Optional[str] = None
+    album_cover_xl: Optional[str] = None
+    album_release_date: Optional[datetime] = None
     has_file: bool = False
     file_path: Optional[str] = None
     file_size: Optional[int] = None
+    upgrade_allowed: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
 
@@ -189,7 +202,7 @@ class TrackSearch(BaseModel):
     duration: Optional[int] = None
     track_position: Optional[int] = None
     disk_number: Optional[int] = None
-    explicit_lyrics: bool = False
+    explicit_lyrics: Optional[bool] = False
     preview: Optional[str] = None
     artist: Optional[Dict[str, Any]] = None
     album: Optional[Dict[str, Any]] = None

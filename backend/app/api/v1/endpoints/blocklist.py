@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
 import asyncpg
 
-from app.core.database import get_db
+from app.db import get_db
 from app.schemas.blocklist import BlocklistEntry, BlocklistCreate, BulkBlocklistCreate, BlocklistCheck, BlocklistCheckResult
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User

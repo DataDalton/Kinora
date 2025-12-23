@@ -1,11 +1,28 @@
 import json
+import base64
+import hashlib
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from cryptography.fernet import Fernet
 
 from app.core.config import settings
 from app.core.cache import cache_get, cache_set
-from app.core.database import get_pool
+from app.db import get_pool
 from app.core.http_client import http_get
+
+
+def getEncryptionKey() -> bytes:
+    """Generate encryption key from SECRET_KEY for decrypting settings"""
+    return base64.urlsafe_b64encode(hashlib.sha256(settings.SECRET_KEY.encode()).digest())
+
+
+def decryptValue(encryptedValue: str) -> str:
+    """Decrypt a sensitive value from the database"""
+    try:
+        f = Fernet(getEncryptionKey())
+        return f.decrypt(encryptedValue.encode()).decode()
+    except Exception:
+        return ""
 
 
 class TMDBService:
@@ -31,13 +48,17 @@ class TMDBService:
             pool = await get_pool()
             async with pool.acquire() as conn:
                 row = await conn.fetchrow("""
-                    SELECT value FROM settings WHERE key = 'tmdb_api_key'
+                    SELECT value, is_encrypted FROM app_settings WHERE key = 'tmdb_api_key'
                 """)
                 if row and row["value"]:
-                    self.api_key = row["value"]
-                    return self.api_key
-        except Exception:
-            pass
+                    value = row["value"]
+                    if row["is_encrypted"]:
+                        value = decryptValue(value)
+                    if value:
+                        self.api_key = value
+                        return self.api_key
+        except Exception as e:
+            print(f"Error fetching TMDB API key from database: {e}")
 
         if settings.TMDB_API_KEY:
             self.api_key = settings.TMDB_API_KEY
@@ -209,19 +230,19 @@ class TMDBService:
             return ""
         return f"{self.IMAGE_BASE_URL}/{size}{path}"
 
-    def _parse_genres(self, genres: list) -> str:
+    def _parse_genres(self, genres: list) -> list:
         """
-        Extract genre names from TMDB genres list and serialize to JSON string
-        Returns a JSON string for JSONB storage
+        Extract genre names from TMDB genres list.
+        Returns a list for JSONB storage (asyncpg handles serialization).
         """
         if not genres:
-            return json.dumps([])
-        genre_names = [g.get("name") for g in genres if g.get("name")]
-        return json.dumps(genre_names)
+            return []
+        return [g.get("name") for g in genres if g.get("name")]
 
     def parse_movie_data(self, tmdb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Parse TMDB movie data into our database format
+        Parse TMDB movie data into our database format.
+        Returns native Python types for JSONB fields (asyncpg handles serialization).
         """
         return {
             "title": tmdb_data.get("title"),
@@ -237,19 +258,18 @@ class TMDBService:
             "tmdb_id": tmdb_data.get("id"),
             "imdb_id": tmdb_data.get("imdb_id") or tmdb_data.get("external_ids", {}).get("imdb_id"),
             "runtime": tmdb_data.get("runtime"),
-            "budget": tmdb_data.get("budget"),
-            "revenue": tmdb_data.get("revenue"),
             "tagline": tmdb_data.get("tagline"),
-            "production_companies": json.dumps(tmdb_data.get("production_companies", [])),
-            "production_countries": json.dumps(tmdb_data.get("production_countries", [])),
-            "spoken_languages": json.dumps(tmdb_data.get("spoken_languages", [])),
+            "production_companies": tmdb_data.get("production_companies", []),
+            "production_countries": tmdb_data.get("production_countries", []),
+            "spoken_languages": tmdb_data.get("spoken_languages", []),
             "collection_id": tmdb_data.get("belongs_to_collection", {}).get("id") if tmdb_data.get("belongs_to_collection") else None,
             "collection_name": tmdb_data.get("belongs_to_collection", {}).get("name") if tmdb_data.get("belongs_to_collection") else None,
         }
 
     def parse_tv_data(self, tmdb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Parse TMDB TV show data into our database format
+        Parse TMDB TV show data into our database format.
+        Returns native Python types for JSONB fields (asyncpg handles serialization).
         """
         return {
             "title": tmdb_data.get("name"),
@@ -267,9 +287,9 @@ class TMDBService:
             "tvdb_id": tmdb_data.get("external_ids", {}).get("tvdb_id"),
             "number_of_seasons": tmdb_data.get("number_of_seasons"),
             "number_of_episodes": tmdb_data.get("number_of_episodes"),
-            "episode_run_time": json.dumps(tmdb_data.get("episode_run_time", [])),
-            "networks": json.dumps(tmdb_data.get("networks", [])),
-            "production_companies": json.dumps(tmdb_data.get("production_companies", [])),
+            "episode_run_time": tmdb_data.get("episode_run_time", []),
+            "networks": tmdb_data.get("networks", []),
+            "production_companies": tmdb_data.get("production_companies", []),
             "first_air_date": self._parse_date(tmdb_data.get("first_air_date")),
             "last_air_date": self._parse_date(tmdb_data.get("last_air_date")),
             "in_production": tmdb_data.get("in_production", False),

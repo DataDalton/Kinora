@@ -1,8 +1,7 @@
-import asyncio
 import os
 from datetime import datetime
-from app.tasks.celery_app import celery_app
-from app.core.database import get_pool
+from app.tasks.celery_app import celery_app, runAsync
+from app.db import get_pool
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.download_clients.base import TorrentState
 from app.core.webtransport import webtransport_manager
@@ -16,7 +15,7 @@ def check_downloads():
     Monitor download client for active downloads
     Updates progress and triggers post-processing when complete
     """
-    return asyncio.run(async_check_downloads())
+    return runAsync(async_check_downloads())
 
 
 async def async_check_downloads():

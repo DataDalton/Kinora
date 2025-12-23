@@ -45,11 +45,32 @@ interface Album {
   status: string;
   monitored: boolean;
   has_file: boolean;
+  explicit_lyrics: boolean | null;
   tags?: Tag[];
 }
 
+interface Track {
+  id: number;
+  title: string;
+  duration: number;
+  track_position: number;
+  disk_number: number;
+  deezer_id: number;
+  album_id: number;
+  isrc: string | null;
+  explicit_lyrics: boolean;
+  preview: string | null;
+  artist_name: string;
+  album_title: string;
+  album_cover: string | null;
+  album_cover_medium: string | null;
+  album_cover_big: string | null;
+  album_cover_xl: string | null;
+  has_file: boolean;
+}
+
 export default function MusicPage() {
-  const [view, setView] = useState<'artists' | 'albums'>('artists');
+  const [view, setView] = useState<'artists' | 'albums' | 'tracks'>('artists');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showImportModal, setShowImportModal] = useState(false);
@@ -73,12 +94,31 @@ export default function MusicPage() {
     },
   });
 
+  const { data: tracksData, isLoading: tracksLoading } = useQuery({
+    queryKey: ['tracks'],
+    queryFn: async () => {
+      const response = await api.get('/music/tracks');
+      return response.data as Track[];
+    },
+  });
+
   const getPictureUrl = (artist: Artist) => {
     return artist.picture_xl || artist.picture_big || artist.picture_medium || artist.picture || '/placeholder-poster.jpg';
   };
 
   const getCoverUrl = (album: Album) => {
     return album.cover_xl || album.cover_big || album.cover_medium || album.cover || '/placeholder-poster.jpg';
+  };
+
+  const getTrackCoverUrl = (track: Track) => {
+    return track.album_cover_xl || track.album_cover_big || track.album_cover_medium || track.album_cover || null;
+  };
+
+  const formatDuration = (seconds: number) => {
+    if (!seconds) return '--:--';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
   };
 
   const getStatusBadge = (status: string, hasFile: boolean) => {
@@ -124,8 +164,21 @@ export default function MusicPage() {
     return true;
   }) || [];
 
-  const isLoading = view === 'artists' ? artistsLoading : albumsLoading;
-  const items = view === 'artists' ? filteredArtists : filteredAlbums;
+  const filteredTracks = tracksData?.filter((track: Track) => {
+    const matchesSearch = track.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      track.artist_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      track.album_title?.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'wanted') return !track.has_file;
+    if (statusFilter === 'downloading') return false;
+
+    return true;
+  }) || [];
+
+  const isLoading = view === 'artists' ? artistsLoading : view === 'albums' ? albumsLoading : tracksLoading;
+  const items = view === 'artists' ? filteredArtists : view === 'albums' ? filteredAlbums : filteredTracks;
 
   const handleToggleSelection = (itemId: number) => {
     setSelectedIds(prev =>
@@ -138,8 +191,10 @@ export default function MusicPage() {
   const handleSelectAll = () => {
     if (view === 'artists') {
       setSelectedIds(filteredArtists.map((a: Artist) => a.id));
-    } else {
+    } else if (view === 'albums') {
       setSelectedIds(filteredAlbums.map((a: Album) => a.id));
+    } else {
+      setSelectedIds(filteredTracks.map((t: Track) => t.id));
     }
   };
 
@@ -159,13 +214,14 @@ export default function MusicPage() {
     setSelectedIds([]);
     queryClient.invalidateQueries({ queryKey: ['artists'] });
     queryClient.invalidateQueries({ queryKey: ['albums'] });
+    queryClient.invalidateQueries({ queryKey: ['tracks'] });
   };
 
   const handleSelectByTag = (ids: number[]) => {
     setSelectedIds(ids);
   };
 
-  const handleViewChange = (newView: 'artists' | 'albums') => {
+  const handleViewChange = (newView: 'artists' | 'albums' | 'tracks') => {
     setView(newView);
     setSelectedIds([]);
     setIsSelectionMode(false);
@@ -237,6 +293,17 @@ export default function MusicPage() {
               Albums
               {albumsData && <span className="text-xs opacity-75">({filteredAlbums.length})</span>}
             </button>
+            <button
+              onClick={() => handleViewChange('tracks')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition cursor-pointer ${
+                view === 'tracks'
+                  ? 'bg-primary text-primary-foreground shadow-lg'
+                  : 'bg-card text-foreground hover:bg-accent'
+              }`}
+            >
+              Tracks
+              {tracksData && <span className="text-xs opacity-75">({filteredTracks.length})</span>}
+            </button>
           </div>
 
           {/* Divider */}
@@ -280,7 +347,7 @@ export default function MusicPage() {
         {/* Bulk Selection Toolbar */}
         <div className="mb-6">
           <BulkSelectionToolbar
-            mediaType={view === 'artists' ? 'artist' : 'album'}
+            mediaType={view === 'artists' ? 'artist' : view === 'albums' ? 'album' : 'track'}
             selectedIds={selectedIds}
             totalCount={items.length}
             onSelectAll={handleSelectAll}
@@ -304,7 +371,7 @@ export default function MusicPage() {
               className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium"
             >
               <Plus className="w-5 h-5" />
-              Add Your First {view === 'artists' ? 'Artist' : 'Album'}
+              Add Your First {view === 'artists' ? 'Artist' : view === 'albums' ? 'Album' : 'Track'}
             </Link>
           </div>
         ) : (
@@ -409,7 +476,7 @@ export default function MusicPage() {
                   );
                 })}
               </div>
-            ) : (
+            ) : view === 'albums' ? (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 {filteredAlbums.map((album: Album) => {
                   const isSelected = selectedIds.includes(album.id);
@@ -464,9 +531,16 @@ export default function MusicPage() {
                         )}
                       </div>
                       <div className="p-3">
-                        <h3 className="font-semibold text-sm truncate" title={album.title}>
-                          {album.title}
-                        </h3>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-semibold text-sm truncate flex-1" title={album.title}>
+                            {album.title}
+                          </h3>
+                          {album.explicit_lyrics && (
+                            <div className="px-1.5 py-0.5 text-xs rounded bg-red-500/20 text-red-400 border border-red-500/50 font-bold shrink-0">
+                              E
+                            </div>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground truncate mt-1" title={album.artist_name}>
                           {album.artist_name}
                         </p>
@@ -508,7 +582,97 @@ export default function MusicPage() {
                   );
                 })}
               </div>
-            )}
+            ) : view === 'tracks' ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {filteredTracks.map((track: Track) => {
+                  const isSelected = selectedIds.includes(track.id);
+                  const CardWrapper = isSelectionMode ? 'div' : Link;
+                  const cardProps = isSelectionMode
+                    ? {
+                        onClick: () => handleToggleSelection(track.id),
+                      }
+                    : {
+                        href: `/music/track/${track.id}`,
+                      };
+
+                  return (
+                    <CardWrapper
+                      key={track.id}
+                      {...(cardProps as any)}
+                      className={`bg-card text-card-foreground rounded-lg shadow border-2 overflow-hidden hover:shadow-lg transition cursor-pointer ${
+                        isSelected
+                          ? 'border-primary ring-2 ring-primary/50'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="relative aspect-square">
+                        {getTrackCoverUrl(track) ? (
+                          <img
+                            src={getTrackCoverUrl(track)!}
+                            alt={track.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-accent/50 flex items-center justify-center">
+                            <Music2 className="w-16 h-16 text-muted-foreground/50" />
+                          </div>
+                        )}
+                        {isSelectionMode && (
+                          <div className="absolute top-2 left-2">
+                            <div
+                              className={`w-6 h-6 rounded border-2 flex items-center justify-center transition ${
+                                isSelected
+                                  ? 'bg-primary border-primary'
+                                  : 'bg-black/50 border-white/50'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-4 h-4 text-white" />}
+                            </div>
+                          </div>
+                        )}
+                        {isSelectionMode && (
+                          <div className="absolute inset-0 bg-black/20 pointer-events-none" />
+                        )}
+                      </div>
+                      <div className="p-3">
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-semibold text-sm truncate flex-1" title={track.title}>
+                            {track.title}
+                          </h3>
+                          {track.explicit_lyrics && (
+                            <div className="px-1.5 py-0.5 text-xs rounded bg-red-500/20 text-red-400 border border-red-500/50 font-bold shrink-0">
+                              E
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-1" title={track.artist_name}>
+                          {track.artist_name}
+                        </p>
+                        {track.album_title && track.album_title !== track.title && (
+                          <p className="text-xs text-muted-foreground truncate" title={track.album_title}>
+                            {track.album_title}
+                          </p>
+                        )}
+                        <div className="flex justify-between items-center mt-2">
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {formatDuration(track.duration)}
+                          </span>
+                          {track.has_file ? (
+                            <span className="px-2 py-1 text-xs rounded bg-green-500/20 text-green-400 border border-green-500/50 font-medium">
+                              Downloaded
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 text-xs rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 font-medium">
+                              Wanted
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </CardWrapper>
+                  );
+                })}
+              </div>
+            ) : null}
           </>
         )}
       </div>

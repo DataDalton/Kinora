@@ -5,6 +5,20 @@ import asyncpg
 
 from app.core.config import settings
 
+
+# Persistent event loop for Celery tasks - avoids creating/destroying loops
+_celeryLoop: asyncio.AbstractEventLoop | None = None
+
+
+def runAsync(coro):
+    """Run async code in Celery tasks using a persistent event loop."""
+    global _celeryLoop
+    if _celeryLoop is None or _celeryLoop.is_closed():
+        _celeryLoop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_celeryLoop)
+    return _celeryLoop.run_until_complete(coro)
+
+
 # Initialize Celery app
 celery_app = Celery(
     "nexarr",

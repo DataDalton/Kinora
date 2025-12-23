@@ -1,6 +1,19 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import json
+
+
+def parseJsonField(value):
+    """Parse a field that might be a JSON string or already a list/dict."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+    return value
 
 
 class MovieBase(BaseModel):
@@ -12,7 +25,7 @@ class MovieBase(BaseModel):
     poster_path: Optional[str] = None
     backdrop_path: Optional[str] = None
     release_date: Optional[datetime] = None
-    genres: Optional[List[Dict[str, Any]]] = None
+    genres: Optional[List[str]] = None
     rating: Optional[float] = None
     vote_count: Optional[int] = None
     popularity: Optional[float] = None
@@ -45,8 +58,6 @@ class Movie(MovieBase):
     id: int
     status: str
     runtime: Optional[int] = None
-    budget: Optional[int] = None
-    revenue: Optional[int] = None
     tagline: Optional[str] = None
     production_companies: Optional[List[Dict[str, Any]]] = None
     collection_id: Optional[int] = None
@@ -60,6 +71,12 @@ class Movie(MovieBase):
     upgrade_allowed: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("genres", "production_companies", mode="before")
+    @classmethod
+    def parseJsonFields(cls, value):
+        """Handle JSON string fields from database for backwards compatibility."""
+        return parseJsonField(value)
 
     class Config:
         from_attributes = True
@@ -75,7 +92,7 @@ class MovieSearch(BaseModel):
     poster_path: Optional[str] = None
     backdrop_path: Optional[str] = None
     release_date: Optional[str] = None
-    genres: Optional[List[Dict[str, Any]]] = None
+    genres: Optional[List[str]] = None
     rating: Optional[float] = None
     vote_count: Optional[int] = None
     popularity: Optional[float] = None

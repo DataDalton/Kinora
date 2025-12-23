@@ -26,7 +26,6 @@ import {
   Calendar,
   Star,
   Film,
-  DollarSign,
   Folder,
   ScanLine,
 } from 'lucide-react';
@@ -54,8 +53,6 @@ interface Movie {
   codec: string | null;
   resolution: string | null;
   runtime: number | null;
-  budget: number | null;
-  revenue: number | null;
   tagline: string | null;
   tmdb_id: number | null;
   imdb_id: string | null;
@@ -190,16 +187,6 @@ export default function MovieDetailPage() {
       return `${hours}h ${mins}m`;
     }
     return `${mins}m`;
-  };
-
-  const formatMoney = (amount: number | null) => {
-    if (!amount || amount === 0) return 'N/A';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    }).format(amount);
   };
 
   const formatFileSize = (bytes: number | null) => {
@@ -397,32 +384,14 @@ export default function MovieDetailPage() {
                         Rating
                       </span>
                       <span className="font-medium">
-                        {movie.rating ? `${movie.rating.toFixed(1)} / 10` : 'N/A'}
-                        {movie.vote_count && (
+                        {movie.rating > 0 ? `${movie.rating.toFixed(1)} / 10` : 'N/A'}
+                        {movie.vote_count > 0 && (
                           <span className="text-xs text-muted-foreground ml-1">
                             ({movie.vote_count.toLocaleString()} votes)
                           </span>
                         )}
                       </span>
                     </div>
-                    {movie.budget && movie.budget > 0 && (
-                      <div className="flex justify-between items-center">
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                          <DollarSign className="w-4 h-4" />
-                          Budget
-                        </span>
-                        <span className="font-medium">{formatMoney(movie.budget)}</span>
-                      </div>
-                    )}
-                    {movie.revenue && movie.revenue > 0 && (
-                      <div className="flex justify-between items-center">
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                          <DollarSign className="w-4 h-4" />
-                          Revenue
-                        </span>
-                        <span className="font-medium">{formatMoney(movie.revenue)}</span>
-                      </div>
-                    )}
                     <div className="flex justify-between items-center pt-2 border-t border-border">
                       <span className="text-muted-foreground">Status</span>
                       {getStatusBadge(movie.status, movie.has_file)}

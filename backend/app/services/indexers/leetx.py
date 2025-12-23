@@ -93,9 +93,11 @@ class LeetxIndexer(BaseIndexer):
         if len(cols) < 5:
             return None
 
-        # Title and link
+        # Title and link - 1337x has two links in name column: category icon and torrent name
         name_col = cols[0]
-        link = name_col.find("a", href=True)
+        links = name_col.find_all("a", href=True)
+        # Get the second link (torrent name) if available, otherwise use the first
+        link = links[1] if len(links) > 1 else (links[0] if links else None)
         if not link:
             return None
 

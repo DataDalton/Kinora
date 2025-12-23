@@ -6,6 +6,16 @@ import Link from 'next/link';
 import PageHeader from '@/components/PageHeader';
 import { Film, Tv, Sparkles, Music2 } from 'lucide-react';
 
+interface RecentItem {
+  id: number;
+  title: string;
+  poster_path: string | null;
+  cover_xl?: string | null;
+  picture_xl?: string | null;
+  created_at: string;
+  mediaType: 'movie' | 'show' | 'anime' | 'album';
+}
+
 export default function HomePage() {
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -19,9 +29,9 @@ export default function HomePage() {
         ]);
 
         return {
-          moviesCount: movies.data.movies?.length || 0,
-          showsCount: shows.data.shows?.length || 0,
-          animeCount: anime.data.anime?.length || 0,
+          moviesCount: movies.data.total || movies.data.movies?.length || 0,
+          showsCount: shows.data.total || shows.data.shows?.length || 0,
+          animeCount: anime.data.total || anime.data.anime?.length || 0,
           musicCount: artists.data?.length || 0,
         };
       } catch (error) {
@@ -30,21 +40,63 @@ export default function HomePage() {
     },
   });
 
-  const { data: recentMovies } = useQuery({
-    queryKey: ['recent-movies'],
+  const { data: recentItems } = useQuery({
+    queryKey: ['recent-all'],
     queryFn: async () => {
       try {
-        const response = await api.get('/movies', { params: { limit: 6, page: 1 } });
-        return response.data.movies || [];
+        const [movies, shows, anime, albums] = await Promise.all([
+          api.get('/movies', { params: { limit: 6, page: 1 } }).catch(() => ({ data: { movies: [] } })),
+          api.get('/shows', { params: { limit: 6, page: 1 } }).catch(() => ({ data: { shows: [] } })),
+          api.get('/anime', { params: { limit: 6, page: 1 } }).catch(() => ({ data: { anime: [] } })),
+          api.get('/music/albums').catch(() => ({ data: [] })),
+        ]);
+
+        const allItems: RecentItem[] = [
+          ...(movies.data.movies || []).map((m: any) => ({ ...m, mediaType: 'movie' as const })),
+          ...(shows.data.shows || []).map((s: any) => ({ ...s, mediaType: 'show' as const })),
+          ...(anime.data.anime || []).map((a: any) => ({ ...a, mediaType: 'anime' as const })),
+          ...(albums.data || []).map((a: any) => ({ ...a, title: a.title || a.name, mediaType: 'album' as const })),
+        ];
+
+        // Sort by created_at descending and take first 12
+        return allItems
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 12);
       } catch (error) {
         return [];
       }
     },
   });
 
-  const getPosterUrl = (path: string | null) => {
-    if (!path) return '/placeholder-poster.jpg';
-    return `https://image.tmdb.org/t/p/w500${path}`;
+  const getPosterUrl = (item: RecentItem) => {
+    if (item.mediaType === 'album') {
+      return item.cover_xl || item.picture_xl || '/placeholder-poster.jpg';
+    }
+    if (!item.poster_path) return '/placeholder-poster.jpg';
+    if (item.mediaType === 'anime') {
+      return item.poster_path;
+    }
+    return `https://image.tmdb.org/t/p/w500${item.poster_path}`;
+  };
+
+  const getMediaIcon = (mediaType: string) => {
+    switch (mediaType) {
+      case 'movie': return <Film className="w-3 h-3" />;
+      case 'show': return <Tv className="w-3 h-3" />;
+      case 'anime': return <Sparkles className="w-3 h-3" />;
+      case 'album': return <Music2 className="w-3 h-3" />;
+      default: return null;
+    }
+  };
+
+  const getMediaLink = (item: RecentItem) => {
+    switch (item.mediaType) {
+      case 'movie': return `/movies/${item.id}`;
+      case 'show': return `/shows/${item.id}`;
+      case 'anime': return `/anime/${item.id}`;
+      case 'album': return `/music/albums/${item.id}`;
+      default: return '#';
+    }
   };
 
   return (
@@ -101,32 +153,36 @@ export default function HomePage() {
         </Link>
       </div>
 
-      {recentMovies && recentMovies.length > 0 && (
+      {recentItems && recentItems.length > 0 && (
         <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold">Recently Added</h2>
-            <Link href="/movies" className="text-primary hover:underline">
-              View All Movies
-            </Link>
-          </div>
+          <h2 className="text-2xl font-bold mb-4">Recently Added</h2>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-            {recentMovies.map((movie: any) => (
-              <div key={movie.id} className="bg-card/50 rounded-lg overflow-hidden border border-border hover:shadow-lg hover:border-primary/50 transition">
-                <img
-                  src={getPosterUrl(movie.poster_path)}
-                  alt={movie.title}
-                  className="w-full aspect-[2/3] object-cover"
-                />
-                <div className="p-2">
-                  <p className="text-sm font-medium truncate">{movie.title}</p>
+            {recentItems.map((item) => (
+              <Link
+                key={`${item.mediaType}-${item.id}`}
+                href={getMediaLink(item)}
+                className="bg-card/50 rounded-lg overflow-hidden border border-border hover:shadow-lg hover:border-primary/50 transition"
+              >
+                <div className="relative">
+                  <img
+                    src={getPosterUrl(item)}
+                    alt={item.title}
+                    className="w-full aspect-2/3 object-cover"
+                  />
+                  <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-background/80 rounded text-xs flex items-center gap-1">
+                    {getMediaIcon(item.mediaType)}
+                  </div>
                 </div>
-              </div>
+                <div className="p-2">
+                  <p className="text-sm font-medium truncate">{item.title}</p>
+                </div>
+              </Link>
             ))}
           </div>
         </div>
       )}
 
-      {(!recentMovies || recentMovies.length === 0) && (
+      {(!recentItems || recentItems.length === 0) && (
         <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-12 text-center">
           <h2 className="text-2xl font-bold mb-4">Welcome to Nexarr!</h2>
           <p className="text-muted-foreground mb-6">

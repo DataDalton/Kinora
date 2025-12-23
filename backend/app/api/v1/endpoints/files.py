@@ -5,7 +5,7 @@ import asyncpg
 import os
 import shutil
 
-from app.core.database import get_db
+from app.db import get_db
 from app.schemas.files import MediaFiles, FileInfo, RenameFileRequest, ManualImportRequest, DeleteFilesRequest, FileOperationResult
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User

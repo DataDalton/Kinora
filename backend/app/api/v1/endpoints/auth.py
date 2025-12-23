@@ -6,7 +6,7 @@ import asyncpg
 from curl_cffi.requests.errors import RequestsError
 import json
 
-from app.core.database import get_db
+from app.db import get_db
 from app.core.security import (
     verify_password,
     get_password_hash,
@@ -123,8 +123,8 @@ async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get
 
     user_row = await conn.fetchrow(
         """
-        INSERT INTO users (username, hashed_password, role)
-        VALUES ($1, $2, $3)
+        INSERT INTO users (username, hashed_password, is_active, role)
+        VALUES ($1, $2, TRUE, $3)
         RETURNING *
         """,
         user_data.username,

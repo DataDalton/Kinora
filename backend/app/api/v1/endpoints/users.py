@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 import asyncpg
 
-from app.core.database import get_db
+from app.db import get_db
 from app.core.security import get_password_hash
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User, UserAdminCreate, UserAdminUpdate, UserPasswordReset

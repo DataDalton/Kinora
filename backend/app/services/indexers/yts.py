@@ -13,10 +13,10 @@ class YTSIndexer(BaseIndexer):
     """
 
     name = "YTS"
-    base_url = "https://yts.mx"
-    api_url = "https://yts.mx/api/v2"
+    base_url = "https://yts.lt"
+    api_url = "https://yts.lt/api/v2"
     alternative_urls = [
-        "https://yts.lt",
+        "https://yts.mx",
         "https://yts.am",
         "https://yts.ag",
     ]

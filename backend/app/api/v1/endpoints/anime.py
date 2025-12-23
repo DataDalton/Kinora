@@ -4,9 +4,9 @@ from pydantic import BaseModel
 import asyncpg
 import os
 import shutil
-import json
 
-from app.core.database import get_db
+from app.db import get_db
+from app.db.repositories import AnimeRepository, AnimeEpisodeRepository
 from app.api.v1.endpoints.auth import get_current_user
 from app.services.metadata.anilist import anilist_service
 
@@ -35,60 +35,49 @@ async def get_anime(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Get all anime from library with pagination, filtering, and tags
-    """
+    """Get all anime from library with pagination, filtering, and tags (single query)."""
     offset = (page - 1) * limit
 
-    query = "SELECT * FROM anime WHERE 1=1"
+    # Build WHERE clause
+    conditions = []
     params = []
-    param_count = 1
+    paramCount = 1
 
     if status:
-        query += f" AND status = ${param_count}"
+        conditions.append(f"a.status = ${paramCount}")
         params.append(status)
-        param_count += 1
+        paramCount += 1
 
     if monitored is not None:
-        query += f" AND monitored = ${param_count}"
+        conditions.append(f"a.monitored = ${paramCount}")
         params.append(monitored)
-        param_count += 1
+        paramCount += 1
 
-    query += f" ORDER BY title LIMIT ${param_count} OFFSET ${param_count + 1}"
+    whereClause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    # Single query with JSON aggregation for tags
+    query = f"""
+        SELECT a.*,
+               COALESCE(
+                   json_agg(
+                       json_build_object('id', t.id, 'name', t.name, 'color', t.color)
+                   ) FILTER (WHERE t.id IS NOT NULL),
+                   '[]'::json
+               ) as tags
+        FROM anime a
+        LEFT JOIN media_tags mt ON a.id = mt.media_id AND mt.media_type = 'anime'
+        LEFT JOIN tags t ON mt.tag_id = t.id
+        {whereClause}
+        GROUP BY a.id
+        ORDER BY a.title
+        LIMIT ${paramCount} OFFSET ${paramCount + 1}
+    """
     params.extend([limit, offset])
 
     rows = await conn.fetch(query, *params)
-    anime_list = [dict(row) for row in rows]
+    animeList = [dict(row) for row in rows]
 
-    if anime_list:
-        anime_ids = [a["id"] for a in anime_list]
-        tags_query = """
-            SELECT mt.media_id, t.id, t.name, t.color
-            FROM media_tags mt
-            JOIN tags t ON t.id = mt.tag_id
-            WHERE mt.media_type = 'anime' AND mt.media_id = ANY($1)
-        """
-        tag_rows = await conn.fetch(tags_query, anime_ids)
-
-        tags_by_anime = {}
-        for row in tag_rows:
-            anime_id = row["media_id"]
-            if anime_id not in tags_by_anime:
-                tags_by_anime[anime_id] = []
-            tags_by_anime[anime_id].append({
-                "id": row["id"],
-                "name": row["name"],
-                "color": row["color"],
-            })
-
-        for anime in anime_list:
-            anime["tags"] = tags_by_anime.get(anime["id"], [])
-
-    return {
-        "anime": anime_list,
-        "page": page,
-        "limit": limit,
-    }
+    return {"anime": animeList, "page": page, "limit": limit}
 
 
 @router.get("/{anime_id}")
@@ -97,18 +86,17 @@ async def get_anime_by_id(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Get a specific anime by ID
-    """
-    row = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
+    """Get a specific anime by ID."""
+    repo = AnimeRepository(conn)
+    anime = await repo.getById(anime_id)
 
-    if not row:
+    if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Anime with id {anime_id} not found",
         )
 
-    return dict(row)
+    return anime
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
@@ -117,68 +105,29 @@ async def add_anime(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Add an anime to library
-    """
-    existing = await conn.fetchrow(
-        "SELECT id FROM anime WHERE anilist_id = $1",
-        anime_data.anilist_id
-    )
+    """Add an anime to library."""
+    repo = AnimeRepository(conn)
 
-    if existing:
+    if await repo.existsByAnilistId(anime_data.anilist_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Anime already exists in library",
         )
 
     metadata = await anilist_service.get_anime(anime_data.anilist_id)
-    parsed_data = anilist_service.parse_anime_data(metadata)
+    parsedData = anilist_service.parse_anime_data(metadata)
 
-    row = await conn.fetchrow(
-        """
-        INSERT INTO anime (
-            title, original_title, overview, poster_path, backdrop_path,
-            release_date, genres, rating, popularity,
-            status, anilist_id, mal_id, monitored,
-            media_profile_id, episodes, duration, season_year,
-            season_period, format, source, studios, is_adult,
-            absolute_numbering, has_file, episode_monitoring
-        )
-        VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-            $11, $12, $13, $14, $15, $16, $17, $18,
-            $19, $20, $21, $22, $23, $24, $25
-        )
-        RETURNING *
-        """,
-        parsed_data["title"],
-        parsed_data["original_title"],
-        parsed_data["overview"],
-        parsed_data["poster_path"],
-        parsed_data["backdrop_path"],
-        parsed_data["release_date"],
-        parsed_data["genres"],
-        parsed_data["rating"],
-        parsed_data["popularity"],
-        "wanted",
-        parsed_data["anilist_id"],
-        parsed_data["mal_id"],
-        anime_data.monitored,
-        anime_data.media_profile_id,
-        parsed_data["episodes"],
-        parsed_data["duration"],
-        parsed_data["season_year"],
-        parsed_data["season_period"],
-        parsed_data["format"],
-        parsed_data["source"],
-        parsed_data["studios"],
-        parsed_data["is_adult"],
-        True,
-        False,
-        anime_data.episode_monitoring,
-    )
+    animeData = {
+        **parsedData,
+        "status": "wanted",
+        "monitored": anime_data.monitored,
+        "media_profile_id": anime_data.media_profile_id,
+        "absolute_numbering": True,
+        "has_file": False,
+        "episode_monitoring": anime_data.episode_monitoring,
+    }
 
-    return dict(row)
+    return await repo.create(animeData)
 
 
 @router.put("/{anime_id}")
@@ -188,38 +137,17 @@ async def update_anime(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Update anime in library
-    """
-    existing = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
+    """Update anime in library."""
+    repo = AnimeRepository(conn)
+    anime = await repo.update(anime_id, updates)
 
-    if not existing:
+    if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Anime with id {anime_id} not found",
         )
 
-    update_fields = []
-    update_values = []
-    param_count = 1
-
-    for field, value in updates.items():
-        update_fields.append(f"{field} = ${param_count}")
-        update_values.append(value)
-        param_count += 1
-
-    update_fields.append("updated_at = NOW()")
-    update_values.append(anime_id)
-
-    query = f"""
-        UPDATE anime
-        SET {', '.join(update_fields)}
-        WHERE id = ${param_count}
-        RETURNING *
-    """
-
-    row = await conn.fetchrow(query, *update_values)
-    return dict(row)
+    return anime
 
 
 @router.delete("/{anime_id}")
@@ -228,12 +156,11 @@ async def delete_anime(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Remove anime from library
-    """
-    result = await conn.execute("DELETE FROM anime WHERE id = $1", anime_id)
+    """Remove anime from library."""
+    repo = AnimeRepository(conn)
+    deleted = await repo.delete(anime_id)
 
-    if result == "DELETE 0":
+    if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Anime with id {anime_id} not found",
@@ -249,51 +176,37 @@ async def update_anime_monitoring(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Update anime monitoring settings
-    """
-    anime = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
+    """Update anime monitoring settings. Cascades monitored status to all episodes."""
+    repo = AnimeRepository(conn)
+
+    sentFields = data.model_dump(exclude_unset=True)
+    updateData = {}
+
+    if "monitored" in sentFields:
+        updateData["monitored"] = data.monitored
+    if "upgradeAllowed" in sentFields:
+        updateData["upgrade_allowed"] = data.upgradeAllowed
+    if "episodeMonitoring" in sentFields:
+        updateData["episode_monitoring"] = data.episodeMonitoring
+
+    if not updateData:
+        return {"message": "No updates provided"}
+
+    anime = await repo.update(anime_id, updateData)
     if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anime not found",
         )
 
-    # Use exclude_unset to distinguish between "not sent" and "explicitly set to null"
-    sent_fields = data.model_dump(exclude_unset=True)
+    # Cascade monitored status to all episodes
+    if "monitored" in sentFields:
+        await conn.execute(
+            "UPDATE anime_episodes SET monitored = $2, updated_at = NOW() WHERE anime_id = $1",
+            anime_id, data.monitored
+        )
 
-    update_fields = []
-    values = []
-    param_count = 1
-
-    if "monitored" in sent_fields:
-        update_fields.append(f"monitored = ${param_count}")
-        values.append(data.monitored)
-        param_count += 1
-
-    if "upgradeAllowed" in sent_fields:
-        update_fields.append(f"upgrade_allowed = ${param_count}")
-        values.append(data.upgradeAllowed)
-        param_count += 1
-
-    if "episodeMonitoring" in sent_fields:
-        update_fields.append(f"episode_monitoring = ${param_count}")
-        values.append(data.episodeMonitoring)
-        param_count += 1
-
-    if not update_fields:
-        return {"message": "No updates provided"}
-
-    values.append(anime_id)
-    query = f"""
-        UPDATE anime
-        SET {', '.join(update_fields)}, updated_at = NOW()
-        WHERE id = ${param_count}
-        RETURNING *
-    """
-
-    row = await conn.fetchrow(query, *values)
-    return dict(row)
+    return anime
 
 
 @router.delete("/{anime_id}/delete")
@@ -303,37 +216,35 @@ async def delete_anime_with_files(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Delete anime from library with option to delete files from disk
-    """
-    anime = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
+    """Delete anime from library with option to delete files from disk."""
+    repo = AnimeRepository(conn)
+    anime = await repo.getById(anime_id)
+
     if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anime not found",
         )
 
-    files_deleted = []
+    filesDeleted = []
     errors = []
 
     if delete_files and anime.get("root_folder_path"):
-        folder_path = anime["root_folder_path"]
+        folderPath = anime["root_folder_path"]
         try:
-            if os.path.isdir(folder_path):
-                shutil.rmtree(folder_path)
-                files_deleted.append(folder_path)
+            if os.path.isdir(folderPath):
+                shutil.rmtree(folderPath)
+                filesDeleted.append(folderPath)
         except Exception as e:
-            errors.append(f"Failed to delete {folder_path}: {str(e)}")
+            errors.append(f"Failed to delete {folderPath}: {str(e)}")
 
+    # Delete episodes first, then use repo for relations
     await conn.execute("DELETE FROM anime_episodes WHERE anime_id = $1", anime_id)
-    await conn.execute("DELETE FROM download_history WHERE media_type = 'anime' AND media_id = $1", anime_id)
-    await conn.execute("DELETE FROM blocklist WHERE media_type = 'anime' AND media_id = $1", anime_id)
-    await conn.execute("DELETE FROM media_tags WHERE media_type = 'anime' AND media_id = $1", anime_id)
-    await conn.execute("DELETE FROM anime WHERE id = $1", anime_id)
+    await repo.deleteWithRelations(anime_id)
 
     return {
         "message": "Anime deleted successfully",
-        "files_deleted": files_deleted,
+        "files_deleted": filesDeleted,
         "errors": errors,
     }
 
@@ -344,62 +255,26 @@ async def refresh_anime_metadata(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Refresh anime metadata from AniList
-    """
-    anime = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
+    """Refresh anime metadata from AniList."""
+    repo = AnimeRepository(conn)
+    anime = await repo.getById(anime_id)
+
     if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anime not found",
         )
 
-    if not anime["anilist_id"]:
+    if not anime.get("anilist_id"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Anime has no AniList ID, cannot refresh metadata",
         )
 
     try:
-        anilist_data = await anilist_service.get_anime(anime["anilist_id"])
-        parsed_data = anilist_service.parse_anime_data(anilist_data)
-
-        genres_json = json.dumps(parsed_data["genres"]) if parsed_data["genres"] else None
-        studios_json = json.dumps(parsed_data["studios"]) if parsed_data["studios"] else None
-
-        await conn.execute(
-            """
-            UPDATE anime SET
-                title = $1, original_title = $2, overview = $3, poster_path = $4,
-                backdrop_path = $5, release_date = $6, genres = $7, rating = $8,
-                popularity = $9, mal_id = $10, episodes = $11, duration = $12,
-                season_year = $13, season_period = $14, format = $15, source = $16,
-                studios = $17, is_adult = $18, updated_at = NOW()
-            WHERE id = $19
-            """,
-            parsed_data["title"],
-            parsed_data["original_title"],
-            parsed_data["overview"],
-            parsed_data["poster_path"],
-            parsed_data["backdrop_path"],
-            parsed_data["release_date"],
-            genres_json,
-            parsed_data["rating"],
-            parsed_data["popularity"],
-            parsed_data["mal_id"],
-            parsed_data["episodes"],
-            parsed_data["duration"],
-            parsed_data["season_year"],
-            parsed_data["season_period"],
-            parsed_data["format"],
-            parsed_data["source"],
-            studios_json,
-            parsed_data["is_adult"],
-            anime_id,
-        )
-
-        updated = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
-        return dict(updated)
+        anilistData = await anilist_service.get_anime(anime["anilist_id"])
+        parsedData = anilist_service.parse_anime_data(anilistData)
+        return await repo.update(anime_id, parsedData)
 
     except Exception as e:
         raise HTTPException(
@@ -414,39 +289,30 @@ async def rescan_anime_files(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Rescan anime files on disk and update database
-    """
-    anime = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
+    """Rescan anime files on disk and update database."""
+    repo = AnimeRepository(conn)
+    anime = await repo.getById(anime_id)
+
     if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anime not found",
         )
 
-    folder_path = anime.get("root_folder_path")
-    has_file = False
-    file_count = 0
+    folderPath = anime.get("root_folder_path")
+    hasFile = False
+    fileCount = 0
 
-    if folder_path and os.path.isdir(folder_path):
-        video_extensions = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v')
-        for root, dirs, files in os.walk(folder_path):
+    if folderPath and os.path.isdir(folderPath):
+        videoExtensions = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v')
+        for root, dirs, files in os.walk(folderPath):
             for f in files:
-                if f.lower().endswith(video_extensions):
-                    has_file = True
-                    file_count += 1
+                if f.lower().endswith(videoExtensions):
+                    hasFile = True
+                    fileCount += 1
 
-    await conn.execute(
-        """
-        UPDATE anime SET has_file = $1, updated_at = NOW()
-        WHERE id = $2
-        """,
-        has_file,
-        anime_id,
-    )
-
-    updated = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
-    return {**dict(updated), "files_found": file_count}
+    updated = await repo.update(anime_id, {"has_file": hasFile})
+    return {**updated, "files_found": fileCount}
 
 
 @router.get("/{anime_id}/credits")
@@ -455,21 +321,21 @@ async def get_anime_credits(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Get anime characters and staff from AniList
-    """
-    anime = await conn.fetchrow("SELECT anilist_id FROM anime WHERE id = $1", anime_id)
+    """Get anime characters and staff from AniList."""
+    repo = AnimeRepository(conn)
+    anime = await repo.getById(anime_id)
+
     if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anime not found",
         )
 
-    if not anime["anilist_id"]:
+    if not anime.get("anilist_id"):
         return {"characters": [], "staff": []}
 
     try:
-        anilist_data = await anilist_service.get_anime(anime["anilist_id"])
+        anilistData = await anilist_service.get_anime(anime["anilist_id"])
 
         characters = [
             {
@@ -477,7 +343,7 @@ async def get_anime_credits(
                 "name": char.get("name", {}).get("full"),
                 "image": char.get("image", {}).get("large"),
             }
-            for char in anilist_data.get("characters", {}).get("nodes", [])
+            for char in anilistData.get("characters", {}).get("nodes", [])
         ]
 
         staff = [
@@ -486,12 +352,12 @@ async def get_anime_credits(
                 "name": person.get("name", {}).get("full"),
                 "role": ", ".join(person.get("primaryOccupations", [])) if person.get("primaryOccupations") else "Staff",
             }
-            for person in anilist_data.get("staff", {}).get("nodes", [])
+            for person in anilistData.get("staff", {}).get("nodes", [])
         ]
 
         studios = [
             studio.get("name")
-            for studio in anilist_data.get("studios", {}).get("nodes", [])
+            for studio in anilistData.get("studios", {}).get("nodes", [])
         ]
 
         return {"characters": characters, "staff": staff, "studios": studios}
@@ -506,28 +372,22 @@ async def get_anime_episodes(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Get episodes for an anime
-    """
-    anime = await conn.fetchrow("SELECT * FROM anime WHERE id = $1", anime_id)
+    """Get episodes for an anime."""
+    animeRepo = AnimeRepository(conn)
+    episodeRepo = AnimeEpisodeRepository(conn)
+
+    anime = await animeRepo.getById(anime_id)
     if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anime not found",
         )
 
-    episodes = await conn.fetch(
-        """
-        SELECT * FROM anime_episodes
-        WHERE anime_id = $1
-        ORDER BY episode_number
-        """,
-        anime_id,
-    )
+    episodes = await episodeRepo.getByAnimeId(anime_id)
 
     return {
-        "episodes": [dict(ep) for ep in episodes],
-        "total_episodes": anime["episodes"],
+        "episodes": episodes,
+        "total_episodes": anime.get("episodes"),
         "absolute_numbering": anime.get("absolute_numbering", True),
     }
 
@@ -540,41 +400,28 @@ async def update_anime_episode(
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Update a specific episode's monitoring status
-    """
-    anime = await conn.fetchrow("SELECT id FROM anime WHERE id = $1", anime_id)
+    """Update a specific episode's monitoring status."""
+    animeRepo = AnimeRepository(conn)
+    episodeRepo = AnimeEpisodeRepository(conn)
+
+    anime = await animeRepo.getById(anime_id)
     if not anime:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anime not found",
         )
 
-    episode = await conn.fetchrow(
-        "SELECT * FROM anime_episodes WHERE anime_id = $1 AND episode_number = $2",
-        anime_id, episode_number
-    )
+    episode = await episodeRepo.getByAnimeAndNumber(anime_id, episode_number)
 
     if not episode:
-        await conn.execute(
-            """
-            INSERT INTO anime_episodes (anime_id, episode_number, monitored)
-            VALUES ($1, $2, $3)
-            """,
-            anime_id, episode_number, monitored if monitored is not None else True
-        )
-    else:
-        if monitored is not None:
-            await conn.execute(
-                """
-                UPDATE anime_episodes SET monitored = $1, updated_at = NOW()
-                WHERE anime_id = $2 AND episode_number = $3
-                """,
-                monitored, anime_id, episode_number
-            )
+        # Create new episode entry
+        return await episodeRepo.upsert(anime_id, episode_number, {
+            "monitored": monitored if monitored is not None else True
+        })
+    elif monitored is not None:
+        # Update existing episode
+        return await episodeRepo.upsert(anime_id, episode_number, {
+            "monitored": monitored
+        })
 
-    updated = await conn.fetchrow(
-        "SELECT * FROM anime_episodes WHERE anime_id = $1 AND episode_number = $2",
-        anime_id, episode_number
-    )
-    return dict(updated) if updated else {"anime_id": anime_id, "episode_number": episode_number, "monitored": monitored}
+    return episode

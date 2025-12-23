@@ -178,7 +178,7 @@ export default function TagsEditor({
               <button
                 onClick={() => handleRemoveTag(tag.id)}
                 disabled={removeTagMutation.isPending}
-                className="p-0.5 rounded-full hover:bg-black/20 transition"
+                className="p-0.5 rounded-full hover:bg-black/20 transition cursor-pointer"
                 title="Remove tag"
               >
                 <X className="w-3 h-3" />
@@ -193,7 +193,7 @@ export default function TagsEditor({
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+          className="flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           Add Tag
@@ -221,7 +221,7 @@ export default function TagsEditor({
                         key={tag.id}
                         onClick={() => handleAddTag(tag.id)}
                         disabled={addTagMutation.isPending}
-                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted transition text-left text-sm"
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted transition text-left text-sm cursor-pointer"
                       >
                         <span
                           className="w-3 h-3 rounded-full flex-shrink-0"
@@ -243,7 +243,7 @@ export default function TagsEditor({
                       setIsCreating(true);
                       setNewTagName(searchQuery);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted rounded-lg transition text-sm text-primary"
+                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted rounded-lg transition text-sm text-primary cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     Create new tag
@@ -285,7 +285,7 @@ export default function TagsEditor({
                       <button
                         key={color}
                         onClick={() => setNewTagColor(color)}
-                        className={`w-6 h-6 rounded-full transition-transform ${
+                        className={`w-6 h-6 rounded-full transition-transform cursor-pointer ${
                           newTagColor === color ? 'scale-110 ring-2 ring-offset-2 ring-offset-background ring-primary' : ''
                         }`}
                         style={{ backgroundColor: color }}
@@ -304,14 +304,14 @@ export default function TagsEditor({
                       setIsCreating(false);
                       setNewTagName('');
                     }}
-                    className="px-3 py-1.5 text-sm hover:bg-muted rounded-lg transition"
+                    className="px-3 py-1.5 text-sm hover:bg-muted rounded-lg transition cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleCreateTag}
                     disabled={!newTagName.trim() || createTagMutation.isPending}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm rounded-lg hover:bg-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm rounded-lg hover:bg-primary/90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {createTagMutation.isPending ? (
                       <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />

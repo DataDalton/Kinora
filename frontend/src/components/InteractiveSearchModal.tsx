@@ -16,6 +16,7 @@ import {
   SortAsc,
   SortDesc,
   ChevronDown,
+  User,
 } from 'lucide-react';
 import Toast from './Toast';
 
@@ -32,6 +33,7 @@ interface TorrentResult {
   magnet_link: string;
   info_hash: string;
   upload_date: string;
+  uploader: string;
 }
 
 interface IndexerStatus {
@@ -505,6 +507,12 @@ export default function InteractiveSearchModal({
                           <Clock className="w-3.5 h-3.5" />
                           {result.indexer}
                         </span>
+                        {result.uploader && (
+                          <span className="flex items-center gap-1">
+                            <User className="w-3.5 h-3.5" />
+                            {result.uploader}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

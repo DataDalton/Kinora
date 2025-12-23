@@ -284,7 +284,7 @@ async def get_qbittorrent_client():
         return qbittorrent_client
 
     try:
-        from app.core.database import get_pool
+        from app.db import get_pool
         from app.api.v1.endpoints.setup import decrypt_value
 
         pool = await get_pool()

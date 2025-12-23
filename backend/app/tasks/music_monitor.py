@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
-from app.tasks.celery_app import celery_app
-from app.core.database import get_pool
+from app.tasks.celery_app import celery_app, runAsync
+from app.db import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile
 from app.services.metadata.deezer import deezer_service
@@ -23,7 +23,7 @@ def search_wanted_music():
     Search for all wanted/missing music albums across indexers
     Automatically selects and grabs best matches
     """
-    return asyncio.run(async_search_wanted_music())
+    return runAsync(async_search_wanted_music())
 
 
 @celery_app.task(name="app.tasks.music_monitor.check_new_releases")
@@ -32,7 +32,7 @@ def check_new_releases():
     Check for new releases from monitored artists
     Adds new albums to library and queues for download
     """
-    return asyncio.run(async_check_new_releases())
+    return runAsync(async_check_new_releases())
 
 
 async def async_search_wanted_music():
@@ -247,7 +247,7 @@ def search_discography(artist_id: int):
     Search and download full discography for an artist
     Called when user clicks "Download All" for an artist
     """
-    return asyncio.run(async_search_discography(artist_id))
+    return runAsync(async_search_discography(artist_id))
 
 
 async def async_search_discography(artist_id: int):

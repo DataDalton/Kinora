@@ -5,7 +5,7 @@ import asyncpg
 from app.schemas.movie import MovieSearch
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
-from app.core.database import get_db, get_pool
+from app.db import get_db, get_pool
 from app.services.metadata.tmdb import tmdb_service
 from app.services.metadata.anilist import anilist_service
 from app.services.metadata.deezer import deezer_service
@@ -655,6 +655,7 @@ async def interactive_search(
             "magnet_link": release.magnet or "",
             "info_hash": release.info_hash or "",
             "upload_date": upload_date_str,
+            "uploader": release.uploader or "",
         })
 
     # Sort by seeders descending

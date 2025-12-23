@@ -797,7 +797,7 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         picture_xl: mediaDetails.picture_xl || mediaDetails.poster_path,
                         nb_album: mediaDetails.nb_album,
                         nb_fan: mediaDetails.nb_fan,
-                        monitored: true,
+                        monitored: autoSearch,
                         media_profile_id: selectedProfileId
                       } as any);
                     } else if (mediaType === 'album') {
@@ -811,7 +811,7 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         release_date: mediaDetails.release_date,
                         artist_id: mediaDetails.artist?.id,
                         nb_tracks: mediaDetails.nb_tracks,
-                        monitored: true,
+                        monitored: autoSearch,
                         media_profile_id: selectedProfileId
                       } as any);
                     } else if (mediaType === 'track') {
@@ -827,13 +827,29 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         artist_name: mediaDetails.artist?.name,
                         album_id: mediaDetails.album?.id,
                         album_title: mediaDetails.album?.title,
-                        monitored: true,
+                        monitored: autoSearch,
                         media_profile_id: selectedProfileId
                       } as any);
+                    } else if (addCollection && collectionDetails?.parts?.length > 0) {
+                      // Add all movies from the collection
+                      const addPromises = collectionDetails.parts.map((movie: any) =>
+                        api.post('/movies', {
+                          tmdb_id: movie.id,
+                          monitored: autoSearch,
+                          media_profile_id: selectedProfileId
+                        }).catch(() => null)
+                      );
+                      Promise.all(addPromises).then((results) => {
+                        const successCount = results.filter(r => r !== null).length;
+                        queryClient.invalidateQueries({ queryKey: ['movies'] });
+                        showToast(`Added ${successCount} of ${collectionDetails.parts.length} movies to library!`, 'success');
+                        onClose();
+                        setShowAddModal(false);
+                      });
                     } else {
                       addMediaMutation.mutate({
                         tmdb_id: mediaDetails.id,
-                        monitored: true,
+                        monitored: autoSearch,
                         media_profile_id: selectedProfileId
                       });
                     }

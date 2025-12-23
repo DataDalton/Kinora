@@ -9,7 +9,7 @@ import asyncpg
 import json
 import secrets
 
-from app.core.database import get_db
+from app.db import get_db
 from app.core.two_factor import (
     generate_totp_secret,
     generate_totp_uri,

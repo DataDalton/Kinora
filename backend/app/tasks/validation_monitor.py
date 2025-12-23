@@ -10,11 +10,10 @@ This task runs every 5 minutes to catch edge cases:
 - Any other scenario where immediate validation didn't complete
 """
 
-import asyncio
 from datetime import datetime
 
-from app.tasks.celery_app import celery_app
-from app.core.database import get_pool
+from app.tasks.celery_app import celery_app, runAsync
+from app.db import get_pool
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.torrent_validator import torrent_validator, ValidationResult
 
@@ -25,7 +24,7 @@ def check_validating_torrents():
     Monitor torrents with "validating" tag.
     Runs validation when metadata is available.
     """
-    return asyncio.run(async_check_validating_torrents())
+    return runAsync(async_check_validating_torrents())
 
 
 async def async_check_validating_torrents():

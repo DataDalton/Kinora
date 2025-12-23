@@ -24,7 +24,7 @@ interface MonitoringState {
 }
 
 interface MonitoringOptionsDropdownProps {
-  mediaType: 'movie' | 'show' | 'anime' | 'album' | 'artist';
+  mediaType: 'movie' | 'show' | 'anime' | 'album' | 'artist' | 'track';
   mediaId: number;
   currentState: MonitoringState;
   showSeasonOptions?: boolean;
@@ -55,13 +55,26 @@ export default function MonitoringOptionsDropdown({
 
   const updateMonitoringMutation = useMutation({
     mutationFn: async (payload: Partial<MonitoringState>) => {
-      const endpoint = `/${mediaType}s/${mediaId}/monitoring`;
+      // Music types (artist, album, track) are under /music prefix
+      const isMusicType = ['artist', 'album', 'track'].includes(mediaType);
+      const endpoint = isMusicType
+        ? `/music/${mediaType}s/${mediaId}/monitoring`
+        : `/${mediaType}s/${mediaId}/monitoring`;
       const response = await api.put(endpoint, payload);
       return response.data;
     },
     onSuccess: (_, variables) => {
       const newState = { ...currentState, ...variables };
       queryClient.invalidateQueries({ queryKey: [mediaType, mediaId] });
+      // When monitored status changes, also refetch seasons/episodes since they cascade
+      if ('monitored' in variables) {
+        if (mediaType === 'show') {
+          queryClient.invalidateQueries({ queryKey: ['seasons', mediaId] });
+          queryClient.invalidateQueries({ queryKey: ['episodes', mediaId] });
+        } else if (mediaType === 'anime') {
+          queryClient.invalidateQueries({ queryKey: ['anime-episodes', mediaId] });
+        }
+      }
       onUpdate?.(newState);
     },
   });

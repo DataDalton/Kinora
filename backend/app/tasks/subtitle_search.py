@@ -7,7 +7,7 @@ from subliminal import download_best_subtitles, save_subtitles, scan_video
 from subliminal.providers.podnapisi import PodnapisiProvider
 
 from app.tasks.celery_app import celery_app
-from app.core.database import get_pool
+from app.db import get_pool
 
 
 @celery_app.task(name="app.tasks.subtitle_search.search_subtitles")
@@ -43,7 +43,7 @@ async def search_subtitles(media_id: int, media_type: str):
             return {"status": "error", "reason": "Video file does not exist", "subtitles_downloaded": 0}
 
         # Get subtitle language settings
-        lang_setting = await conn.fetchval("SELECT value FROM settings WHERE key = 'subtitle_languages'")
+        lang_setting = await conn.fetchval("SELECT value FROM app_settings WHERE key = 'subtitle_languages'")
         languages = [Language(lang.strip()) for lang in (lang_setting or "en").split(",")]
 
         try:

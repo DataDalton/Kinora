@@ -115,8 +115,8 @@ class Settings(BaseSettings):
     # OpenSubtitles API Key (optional)
     OPENSUBTITLES_API_KEY: Optional[str] = None
 
-    # Cloudflare Bypass
-    FLARESOLVERR_URL: Optional[str] = "http://flaresolverr:8191"
+    # Cloudflare Bypass (use localhost for local dev, flaresolverr for Docker)
+    FLARESOLVERR_URL: Optional[str] = "http://localhost:8191"
     BYPASSARR_URL: Optional[str] = None
     CLOUDFLARE_BYPASS_METHOD: str = "flaresolverr"
 
