@@ -3,6 +3,10 @@ import json
 import redis.asyncio as redis
 from app.core.config import settings
 
+# Cache TTL constants (in seconds)
+CACHE_TTL_SHORT = 3600  # 1 hour - for detail pages with potentially changing data (new seasons, episodes)
+CACHE_TTL_LONG = 21600  # 6 hours - for trending, popular, discover, search results, charts
+
 # Redis client
 redis_client: Optional[redis.Redis] = None
 

@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from app.core.cache import cache_get, cache_set
+from app.core.cache import cache_get, cache_set, CACHE_TTL_LONG
 from app.core.http_client import http_get
 
 
@@ -16,6 +16,7 @@ class DeezerService:
     async def _request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Make a request to Deezer API with caching using shared HTTP client
+        Music metadata is static so all requests use 6-hour cache TTL
         """
         if params is None:
             params = {}
@@ -32,7 +33,7 @@ class DeezerService:
         if "error" in data:
             raise ValueError(f"Deezer API error: {data['error'].get('message', 'Unknown error')}")
 
-        await cache_set(cache_key, data, expire=3600)
+        await cache_set(cache_key, data, expire=CACHE_TTL_LONG)
         return data
 
     async def search_artist(self, query: str, limit: int = 25) -> List[Dict[str, Any]]:

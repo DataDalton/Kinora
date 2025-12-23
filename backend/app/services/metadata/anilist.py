@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from app.core.cache import cache_get, cache_set
+from app.core.cache import cache_get, cache_set, CACHE_TTL_SHORT, CACHE_TTL_LONG
 from app.core.http_client import http_post
 
 
@@ -12,9 +12,10 @@ class AnilistService:
 
     API_URL = "https://graphql.anilist.co"
 
-    async def _query(self, query: str, variables: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def _query(self, query: str, variables: Dict[str, Any] = None, ttl: int = CACHE_TTL_LONG) -> Dict[str, Any]:
         """
         Execute a GraphQL query against Anilist API with caching using shared HTTP client
+        ttl: Cache duration in seconds. Use CACHE_TTL_SHORT for detail pages, CACHE_TTL_LONG for lists/searches
         """
         if variables is None:
             variables = {}
@@ -35,7 +36,7 @@ class AnilistService:
         if "errors" in data:
             raise Exception(f"Anilist API error: {data['errors']}")
 
-        await cache_set(cache_key, data["data"], expire=3600)
+        await cache_set(cache_key, data["data"], expire=ttl)
         return data["data"]
 
     async def search_anime(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -198,7 +199,7 @@ class AnilistService:
         }
         """
 
-        data = await self._query(gql_query, {"id": anilist_id})
+        data = await self._query(gql_query, {"id": anilist_id}, ttl=CACHE_TTL_SHORT)
         return data.get("Media", {})
 
     async def get_trending(self, page: int = 1, per_page: int = 20) -> List[Dict[str, Any]]:

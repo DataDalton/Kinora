@@ -6,7 +6,7 @@ from datetime import datetime
 from cryptography.fernet import Fernet
 
 from app.core.config import settings
-from app.core.cache import cache_get, cache_set
+from app.core.cache import cache_get, cache_set, CACHE_TTL_SHORT, CACHE_TTL_LONG
 from app.db import get_pool
 from app.core.http_client import http_get
 
@@ -69,9 +69,10 @@ class TMDBService:
             "Official Docker images have this embedded."
         )
 
-    async def _request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def _request(self, endpoint: str, params: Dict[str, Any] = None, ttl: int = CACHE_TTL_LONG) -> Dict[str, Any]:
         """
         Make a request to TMDB API with caching using shared HTTP client
+        ttl: Cache duration in seconds. Use CACHE_TTL_SHORT for detail pages, CACHE_TTL_LONG for lists/searches
         """
         if params is None:
             params = {}
@@ -88,7 +89,7 @@ class TMDBService:
         response.raise_for_status()
         data = response.json()
 
-        await cache_set(cache_key, data, expire=3600)
+        await cache_set(cache_key, data, expire=ttl)
         return data
 
     async def search_movie(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -108,7 +109,7 @@ class TMDBService:
         """
         return await self._request(f"movie/{tmdb_id}", {
             "append_to_response": "credits,recommendations"
-        })
+        }, ttl=CACHE_TTL_SHORT)
 
     async def search_tv(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -127,13 +128,13 @@ class TMDBService:
         """
         return await self._request(f"tv/{tmdb_id}", {
             "append_to_response": "credits,recommendations"
-        })
+        }, ttl=CACHE_TTL_SHORT)
 
     async def get_tv_season(self, tmdb_id: int, season_number: int) -> Dict[str, Any]:
         """
         Get TV show season details including episodes
         """
-        return await self._request(f"tv/{tmdb_id}/season/{season_number}")
+        return await self._request(f"tv/{tmdb_id}/season/{season_number}", ttl=CACHE_TTL_SHORT)
 
     async def get_trending(self, media_type: str = "all", time_window: str = "week") -> List[Dict[str, Any]]:
         """
