@@ -186,7 +186,6 @@ export const createDefaultFormData = (defaultLanguage: string = 'en'): MediaProf
   // TV options
   season_pack_preference: 'prefer',
   // File output settings
-  media_server: 'jellyfin',
   use_hardlinks: true,
   illegal_char_replacement: '_',
   colon_replacement: ' -',

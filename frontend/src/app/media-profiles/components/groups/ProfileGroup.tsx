@@ -26,7 +26,6 @@ export default function ProfileGroup({
 }: ProfileGroupProps) {
   const [languageSearch, setLanguageSearch] = useState('');
   const [subtitleLanguageSearch, setSubtitleLanguageSearch] = useState('');
-  const [advancedMode, setAdvancedMode] = useState(false);
 
   if (activeTab === 'general') {
     return (
@@ -50,108 +49,71 @@ export default function ProfileGroup({
           )}
         </div>
 
-        {/* Upgrade Behavior & Mode */}
+        {/* Upgrade Behavior */}
         <div className="p-4 bg-muted/50 rounded-lg border border-border">
+          <label className="block text-sm font-semibold mb-2">Upgrade Behavior</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData({ ...formData, upgrade_allowed: true })}
+              className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
+                formData.upgrade_allowed
+                  ? 'bg-primary text-primary-foreground shadow-md'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              }`}
+            >
+              Auto Upgrade
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormData({ ...formData, upgrade_allowed: false })}
+              className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
+                !formData.upgrade_allowed
+                  ? 'bg-primary text-primary-foreground shadow-md'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              }`}
+            >
+              One-Time Grab
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {formData.upgrade_allowed ? 'Automatically upgrade to higher quality over time' : 'Grab highest quality once and stop'}
+          </p>
+        </div>
+
+        {/* File Size Limits */}
+        <div className={`p-4 rounded-lg border-2 ${
+          hasAttemptedSubmit && formData.min_size === 0 && formData.max_size === 0
+            ? 'border-warning bg-warning/5'
+            : 'border-transparent'
+        }`}>
+          <h4 className="font-semibold text-sm mb-3">File Size Limits</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-semibold mb-2">Upgrade Behavior</label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, upgrade_allowed: true })}
-                  className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-                    formData.upgrade_allowed
-                      ? 'bg-primary text-primary-foreground shadow-md'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  }`}
-                >
-                  Auto Upgrade
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, upgrade_allowed: false })}
-                  className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-                    !formData.upgrade_allowed
-                      ? 'bg-primary text-primary-foreground shadow-md'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  }`}
-                >
-                  One-Time Grab
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {formData.upgrade_allowed ? 'Automatically upgrade to higher quality over time' : 'Grab highest quality once and stop'}
-              </p>
+              <label className="block text-sm font-semibold mb-2">Min Size (MB)</label>
+              <input
+                type="number"
+                value={formData.min_size}
+                onChange={(e) => setFormData({ ...formData, min_size: parseInt(e.target.value) || 0 })}
+                className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
+                min="0"
+                placeholder="0 = No minimum"
+              />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-2">Mode</label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAdvancedMode(false)}
-                  className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-                    !advancedMode
-                      ? 'bg-primary text-primary-foreground shadow-md'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  }`}
-                >
-                  Simple
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAdvancedMode(true)}
-                  className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-                    advancedMode
-                      ? 'bg-primary text-primary-foreground shadow-md'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  }`}
-                >
-                  Advanced
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {advancedMode ? 'Per-resolution size limits and detailed controls' : 'Basic quality selection'}
-              </p>
+              <label className="block text-sm font-semibold mb-2">Max Size (MB)</label>
+              <input
+                type="number"
+                value={formData.max_size}
+                onChange={(e) => setFormData({ ...formData, max_size: parseInt(e.target.value) || 0 })}
+                className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
+                min="0"
+                placeholder="0 = No maximum"
+              />
             </div>
           </div>
         </div>
-
-        {/* File Size Limits (Simple Mode) */}
-        {!advancedMode && (
-          <div className={`p-4 rounded-lg border-2 ${
-            hasAttemptedSubmit && formData.min_size === 0 && formData.max_size === 0
-              ? 'border-warning bg-warning/5'
-              : 'border-transparent'
-          }`}>
-            <h4 className="font-semibold text-sm mb-3">File Size Limits</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold mb-2">Min Size (MB)</label>
-                <input
-                  type="number"
-                  value={formData.min_size}
-                  onChange={(e) => setFormData({ ...formData, min_size: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
-                  min="0"
-                  placeholder="0 = No minimum"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-2">Max Size (MB)</label>
-                <input
-                  type="number"
-                  value={formData.max_size}
-                  onChange={(e) => setFormData({ ...formData, max_size: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
-                  min="0"
-                  placeholder="0 = No maximum"
-                />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }

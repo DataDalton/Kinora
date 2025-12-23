@@ -32,6 +32,30 @@ class FileManager:
         "{codec}": "codec",
     }
 
+    ANIME_TOKENS = {
+        "{title}": "title",
+        "{episode:00}": "episode_number",
+        "{episode-title}": "episode_title",
+        "{quality}": "quality",
+        "{source}": "source",
+        "{codec}": "codec",
+        "{anilist-id}": "anilist_id",
+        "{mal-id}": "mal_id",
+        "{year}": "year",
+    }
+
+    MUSIC_TOKENS = {
+        "{artist}": "artist",
+        "{album}": "album",
+        "{year}": "year",
+        "{track:00}": "track_number",
+        "{disc:00}": "disc_number",
+        "{title}": "title",
+        "{genre}": "genre",
+        "{format}": "format",
+        "{quality}": "quality",
+    }
+
     PRESETS = {
         "plex_movie": "{title} ({year})",
         "plex_show": "{series}/Season {season:00}/{series} - S{season:00}E{episode:00} - {episode-title}",
@@ -39,14 +63,16 @@ class FileManager:
         "jellyfin_show": "{series}/Season {season:00}/{series} - S{season:00}E{episode:00} - {episode-title}",
     }
 
-    def __init__(self, root_path: str):
-        self.root_path = Path(root_path)
+    def __init__(self, root_path: str = None):
+        self.root_path = Path(root_path) if root_path else None
 
     def format_movie_filename(
         self,
         pattern: str,
         movie_data: Dict[str, Any],
         include_extension: bool = True,
+        illegal_replacement: str = '',
+        colon_replacement: str = ' -',
     ) -> str:
         """
         Format movie filename using pattern and tokens
@@ -60,7 +86,7 @@ class FileManager:
             else:
                 filename = filename.replace(token, "")
 
-        filename = self._clean_filename(filename)
+        filename = self._clean_filename(filename, illegal_replacement, colon_replacement)
 
         if include_extension and "extension" in movie_data:
             filename += movie_data["extension"]
@@ -72,6 +98,8 @@ class FileManager:
         pattern: str,
         show_data: Dict[str, Any],
         include_extension: bool = True,
+        illegal_replacement: str = '',
+        colon_replacement: str = ' -',
     ) -> str:
         """
         Format TV show episode filename using pattern and tokens
@@ -89,10 +117,72 @@ class FileManager:
             else:
                 filename = filename.replace(token, "")
 
-        filename = self._clean_filename(filename)
+        filename = self._clean_filename(filename, illegal_replacement, colon_replacement)
 
         if include_extension and "extension" in show_data:
             filename += show_data["extension"]
+
+        return filename
+
+    def format_anime_filename(
+        self,
+        pattern: str,
+        anime_data: Dict[str, Any],
+        include_extension: bool = True,
+        illegal_replacement: str = '',
+        colon_replacement: str = ' -',
+    ) -> str:
+        """
+        Format anime episode filename using pattern and tokens
+        """
+        filename = pattern
+
+        for token, field in self.ANIME_TOKENS.items():
+            value = anime_data.get(field, "")
+
+            # Handle numbered tokens with padding
+            if ":00" in token and value:
+                filename = filename.replace(token, f"{int(value):02d}")
+            elif value:
+                filename = filename.replace(token, str(value))
+            else:
+                filename = filename.replace(token, "")
+
+        filename = self._clean_filename(filename, illegal_replacement, colon_replacement)
+
+        if include_extension and "extension" in anime_data:
+            filename += anime_data["extension"]
+
+        return filename
+
+    def format_music_filename(
+        self,
+        pattern: str,
+        track_data: Dict[str, Any],
+        include_extension: bool = True,
+        illegal_replacement: str = '',
+        colon_replacement: str = ' -',
+    ) -> str:
+        """
+        Format music track filename using pattern and tokens
+        """
+        filename = pattern
+
+        for token, field in self.MUSIC_TOKENS.items():
+            value = track_data.get(field, "")
+
+            # Handle numbered tokens with padding
+            if ":00" in token and value:
+                filename = filename.replace(token, f"{int(value):02d}")
+            elif value:
+                filename = filename.replace(token, str(value))
+            else:
+                filename = filename.replace(token, "")
+
+        filename = self._clean_filename(filename, illegal_replacement, colon_replacement)
+
+        if include_extension and "extension" in track_data:
+            filename += track_data["extension"]
 
         return filename
 
@@ -164,6 +254,58 @@ class FileManager:
         largest = max(video_files, key=lambda f: f.stat().st_size)
         return str(largest)
 
+    def extract_all_videos(self, torrent_path: str) -> list[str]:
+        """
+        Extract all video files from a torrent download.
+        Returns list of file paths sorted by name.
+        """
+        video_extensions = [".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv"]
+        path = Path(torrent_path)
+
+        if not path.exists():
+            return []
+
+        video_files = []
+
+        if path.is_file():
+            if path.suffix.lower() in video_extensions:
+                return [str(path)]
+            return []
+
+        for file in path.rglob("*"):
+            if file.is_file() and file.suffix.lower() in video_extensions:
+                video_files.append(file)
+
+        # Sort by filename for consistent episode ordering
+        video_files.sort(key=lambda f: f.name.lower())
+        return [str(f) for f in video_files]
+
+    def extract_all_audio(self, torrent_path: str) -> list[str]:
+        """
+        Extract all audio files from a torrent download.
+        Returns list of file paths sorted by name.
+        """
+        audio_extensions = [".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma"]
+        path = Path(torrent_path)
+
+        if not path.exists():
+            return []
+
+        audio_files = []
+
+        if path.is_file():
+            if path.suffix.lower() in audio_extensions:
+                return [str(path)]
+            return []
+
+        for file in path.rglob("*"):
+            if file.is_file() and file.suffix.lower() in audio_extensions:
+                audio_files.append(file)
+
+        # Sort by filename for consistent track ordering
+        audio_files.sort(key=lambda f: f.name.lower())
+        return [str(f) for f in audio_files]
+
     def get_file_quality(self, filename: str) -> Dict[str, Optional[str]]:
         """
         Extract quality information from filename
@@ -173,15 +315,27 @@ class FileManager:
         indexer = BaseIndexer()
         return indexer.parse_quality(filename)
 
-    def _clean_filename(self, filename: str) -> str:
+    def _clean_filename(
+        self,
+        filename: str,
+        illegal_replacement: str = '',
+        colon_replacement: str = ' -'
+    ) -> str:
         """
-        Clean filename by removing invalid characters
-        """
-        # Remove/replace invalid characters
-        invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+        Clean filename by replacing invalid characters.
 
+        Args:
+            filename: The filename to clean
+            illegal_replacement: String to replace illegal chars with (default: remove)
+            colon_replacement: String to replace colons with (default: ' -')
+        """
+        # Handle colons separately with custom replacement
+        filename = filename.replace(':', colon_replacement)
+
+        # Replace other invalid characters
+        invalid_chars = ['<', '>', '"', '/', '\\', '|', '?', '*']
         for char in invalid_chars:
-            filename = filename.replace(char, '')
+            filename = filename.replace(char, illegal_replacement)
 
         # Replace multiple spaces with single space
         filename = ' '.join(filename.split())

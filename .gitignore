@@ -95,3 +95,5 @@ backup/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+/backend/celerybeat-schedule-shm
+/backend/celerybeat-schedule-wal

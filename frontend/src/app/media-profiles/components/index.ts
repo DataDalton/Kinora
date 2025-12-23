@@ -21,9 +21,6 @@ export * from './Profile';
 // Search sections
 export * from './Search';
 
-// MediaServer section
-export * from './MediaServer';
-
 // Naming sections
 export * from './Naming';
 

@@ -107,7 +107,6 @@ const navigationStructure: NavigationItem[] = [
     label: 'File Output',
     icon: FolderOutput,
     tabs: [
-      { id: 'server', label: 'Server' },
       { id: 'files', label: 'Files' },
     ],
   },

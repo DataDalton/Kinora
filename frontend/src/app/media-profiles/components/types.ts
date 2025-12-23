@@ -74,7 +74,6 @@ export interface MediaProfileFormData {
   // TV options
   season_pack_preference: 'prefer' | 'only' | 'avoid';
   // File output settings
-  media_server: 'jellyfin' | 'custom';
   use_hardlinks: boolean;
   illegal_char_replacement: string;
   colon_replacement: string;
@@ -132,7 +131,7 @@ export type TVShowsTab = 'indexers' | 'quality' | 'naming' | 'options';
 export type AnimeTab = 'indexers' | 'quality' | 'naming' | 'options';
 export type MusicTab = 'indexers' | 'quality' | 'naming';
 export type SearchTab = 'sorting' | 'filters' | 'timing';
-export type FileOutputTab = 'server' | 'files';
+export type FileOutputTab = 'files';
 
 export interface NavigationItem {
   id: NavigationGroup;

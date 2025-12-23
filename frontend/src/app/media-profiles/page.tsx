@@ -104,7 +104,6 @@ interface MediaProfile {
   music_embed_lyrics?: boolean;
   music_embed_artwork?: boolean;
   // File output settings
-  media_server?: string;
   use_hardlinks?: boolean;
   illegal_char_replacement?: string;
   colon_replacement?: string;
@@ -245,7 +244,6 @@ export default function MediaProfilesPage() {
         music_embed_lyrics: data.music_embed_lyrics,
         music_embed_artwork: data.music_embed_artwork,
         // File output settings
-        media_server: data.media_server,
         use_hardlinks: data.use_hardlinks,
         illegal_char_replacement: data.illegal_char_replacement,
         colon_replacement: data.colon_replacement,
@@ -351,7 +349,6 @@ export default function MediaProfilesPage() {
         music_embed_lyrics: data.music_embed_lyrics,
         music_embed_artwork: data.music_embed_artwork,
         // File output settings
-        media_server: data.media_server,
         use_hardlinks: data.use_hardlinks,
         illegal_char_replacement: data.illegal_char_replacement,
         colon_replacement: data.colon_replacement,
@@ -482,7 +479,6 @@ export default function MediaProfilesPage() {
       music_embed_lyrics: profile.music_embed_lyrics ?? true,
       music_embed_artwork: profile.music_embed_artwork ?? true,
       // File output settings
-      media_server: (profile.media_server as 'jellyfin' | 'custom') || 'jellyfin',
       use_hardlinks: profile.use_hardlinks ?? true,
       illegal_char_replacement: profile.illegal_char_replacement || '_',
       colon_replacement: profile.colon_replacement || ' -',
@@ -590,7 +586,7 @@ export default function MediaProfilesPage() {
       case 'search':
         return <SearchGroup {...sectionProps} activeTab={activeTab as 'sorting' | 'filters' | 'timing'} />;
       case 'fileoutput':
-        return <FileOutputGroup {...sectionProps} activeTab={activeTab as 'server' | 'files'} />;
+        return <FileOutputGroup {...sectionProps} />;
       default:
         return null;
     }
