@@ -6,7 +6,7 @@ from datetime import datetime
 from cryptography.fernet import Fernet
 
 from app.core.config import settings
-from app.core.cache import cache_get, cache_set, CACHE_TTL_SHORT, CACHE_TTL_LONG
+from app.core.cache import cacheGet, cacheSet, CACHE_TTL_SHORT, CACHE_TTL_LONG
 from app.db import get_pool
 from app.core.http_client import http_get
 
@@ -81,7 +81,7 @@ class TMDBService:
         params["api_key"] = api_key
 
         cache_key = f"tmdb:{endpoint}:{str(params)}"
-        cached = await cache_get(cache_key)
+        cached = await cacheGet(cache_key)
         if cached:
             return cached
 
@@ -89,7 +89,7 @@ class TMDBService:
         response.raise_for_status()
         data = response.json()
 
-        await cache_set(cache_key, data, expire=ttl)
+        await cacheSet(cache_key, data, expire=ttl)
         return data
 
     async def search_movie(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:

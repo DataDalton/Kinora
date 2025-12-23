@@ -57,9 +57,15 @@ export default function MonitoringOptionsDropdown({
     mutationFn: async (payload: Partial<MonitoringState>) => {
       // Music types (artist, album, track) are under /music prefix
       const isMusicType = ['artist', 'album', 'track'].includes(mediaType);
-      const endpoint = isMusicType
-        ? `/music/${mediaType}s/${mediaId}/monitoring`
-        : `/${mediaType}s/${mediaId}/monitoring`;
+      // Anime endpoint is singular (/anime/), others are plural (/movies/, /shows/)
+      let endpoint: string;
+      if (isMusicType) {
+        endpoint = `/music/${mediaType}s/${mediaId}/monitoring`;
+      } else if (mediaType === 'anime') {
+        endpoint = `/anime/${mediaId}/monitoring`;
+      } else {
+        endpoint = `/${mediaType}s/${mediaId}/monitoring`;
+      }
       const response = await api.put(endpoint, payload);
       return response.data;
     },

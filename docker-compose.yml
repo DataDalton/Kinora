@@ -47,21 +47,33 @@ services:
       - nexarr-network
     restart: unless-stopped
 
-  redis:
-    image: redis:8-alpine
-    container_name: nexarr-redis
-    command: redis-server --appendonly yes
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.35.1
+    container_name: nexarr-dragonfly
+    command: >
+      dragonfly
+      --logtostderr
+      --dir /data
+      --dbfilename dump
+      --df_snapshot_format=true
+      --snapshot_cron "*/5 * * * *"
+      --compression_mode=2
+      --proactor_threads=0
+      --tcp_nodelay=true
+      --hz=100
+      --cache_mode=false
     volumes:
-      - redis-data:/data
+      - dragonfly-data:/data
     ports:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 5
     networks:
       - nexarr-network
+    restart: unless-stopped
 
   backend:
     build:
@@ -89,10 +101,10 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       DATABASE_URL: postgresql://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      REDIS_URL: redis://redis:6379/0
+      DRAGONFLY_HOST: dragonfly
+      DRAGONFLY_PORT: 6379
+      DRAGONFLY_DB: 0
+      DRAGONFLY_URL: redis://dragonfly:6379/0
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: 8000
       BACKEND_WORKERS: 4
@@ -101,8 +113,8 @@ services:
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       FLARESOLVERR_URL: http://flaresolverr:8191
       CLOUDFLARE_BYPASS_METHOD: flaresolverr
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://dragonfly:6379/0
+      CELERY_RESULT_BACKEND: redis://dragonfly:6379/0
       MEDIA_ROOT: /media
       DOWNLOADS_ROOT: /downloads
       TORRENTS_ROOT: /torrents
@@ -124,7 +136,7 @@ services:
         condition: service_healthy
       pgbouncer:
         condition: service_healthy
-      redis:
+      dragonfly:
         condition: service_healthy
     networks:
       - nexarr-network
@@ -149,9 +161,9 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       DATABASE_URL: postgresql://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DRAGONFLY_URL: redis://dragonfly:6379/0
+      CELERY_BROKER_URL: redis://dragonfly:6379/0
+      CELERY_RESULT_BACKEND: redis://dragonfly:6379/0
       MEDIA_ROOT: /media
       DOWNLOADS_ROOT: /downloads
       TORRENTS_ROOT: /torrents
@@ -165,7 +177,7 @@ services:
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      dragonfly:
         condition: service_healthy
     networks:
       - nexarr-network
@@ -190,16 +202,16 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       DATABASE_URL: postgresql://${POSTGRES_USER:-nexarr}:${POSTGRES_PASSWORD:-nexarr_password}@postgres:5432/${POSTGRES_DB:-nexarr}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DRAGONFLY_URL: redis://dragonfly:6379/0
+      CELERY_BROKER_URL: redis://dragonfly:6379/0
+      CELERY_RESULT_BACKEND: redis://dragonfly:6379/0
       TMDB_API_KEY: ${TMDB_API_KEY:-}
     volumes:
       - ./backend:/app
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      dragonfly:
         condition: service_healthy
     networks:
       - nexarr-network
@@ -244,7 +256,7 @@ networks:
 
 volumes:
   postgres-data:
-  redis-data:
+  dragonfly-data:
   media-data:
   downloads-data:
   torrents-data:

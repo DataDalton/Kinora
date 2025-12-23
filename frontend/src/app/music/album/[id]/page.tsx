@@ -441,22 +441,26 @@ export default function AlbumDetailPage() {
                       <span className="font-mono text-xs">{album.upc}</span>
                     </div>
                   )}
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">Status:</span>
-                    {getStatusBadge(album.status, album.has_file)}
-                  </div>
                 </div>
 
-                <div className="pt-4 border-t border-border">
-                  <MonitoringOptionsDropdown
-                    mediaType="album"
-                    mediaId={album.id}
-                    currentState={{
-                      monitored: album.monitored,
-                      upgradeAllowed: album.upgrade_allowed,
-                    }}
-                    onUpdate={handleMonitoringUpdate}
-                  />
+                {/* Status & Monitoring */}
+                <div className="py-3 border-y border-border space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Status</span>
+                    {getStatusBadge(album.status, album.has_file)}
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Monitoring</span>
+                    <MonitoringOptionsDropdown
+                      mediaType="album"
+                      mediaId={album.id}
+                      currentState={{
+                        monitored: album.monitored,
+                        upgradeAllowed: album.upgrade_allowed,
+                      }}
+                      onUpdate={handleMonitoringUpdate}
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">

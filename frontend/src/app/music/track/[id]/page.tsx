@@ -373,25 +373,28 @@ export default function TrackDetailPage() {
                       <span className="font-mono text-xs">{track.isrc}</span>
                     </div>
                   )}
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">Status:</span>
-                    {getStatusBadge(track.has_file)}
-                  </div>
                 </div>
 
-                {/* Monitoring Options */}
-                <div className="pt-4 border-t border-border">
-                  <MonitoringOptionsDropdown
-                    mediaType="track"
-                    mediaId={track.id}
-                    currentState={{
-                      monitored: track.monitored,
-                      upgradeAllowed: track.upgrade_allowed,
-                    }}
-                    onUpdate={() => {
-                      queryClient.invalidateQueries({ queryKey: ['track', trackId] });
-                    }}
-                  />
+                {/* Status & Monitoring */}
+                <div className="py-3 border-y border-border space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Status</span>
+                    {getStatusBadge(track.has_file)}
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Monitoring</span>
+                    <MonitoringOptionsDropdown
+                      mediaType="track"
+                      mediaId={track.id}
+                      currentState={{
+                        monitored: track.monitored,
+                        upgradeAllowed: track.upgrade_allowed,
+                      }}
+                      onUpdate={() => {
+                        queryClient.invalidateQueries({ queryKey: ['track', trackId] });
+                      }}
+                    />
+                  </div>
                 </div>
 
                 {/* Preview Player */}

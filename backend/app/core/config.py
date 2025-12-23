@@ -37,12 +37,12 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     DATABASE_URL: str = ""
 
-    # Redis (with defaults)
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_PASSWORD: Optional[str] = None
-    REDIS_DB: int = 0
-    REDIS_URL: str = ""
+    # Dragonfly (with defaults)
+    DRAGONFLY_HOST: str = "localhost"
+    DRAGONFLY_PORT: int = 6379
+    DRAGONFLY_PASSWORD: Optional[str] = None
+    DRAGONFLY_DB: int = 0
+    DRAGONFLY_URL: str = ""
 
     # Backend
     BACKEND_HOST: str = "0.0.0.0"
@@ -81,16 +81,16 @@ class Settings(BaseSettings):
                 f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             )
 
-        # Auto-compute REDIS_URL if not provided
-        if not self.REDIS_URL:
-            auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-            self.REDIS_URL = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        # Auto-compute DRAGONFLY_URL if not provided
+        if not self.DRAGONFLY_URL:
+            auth_part = f":{self.DRAGONFLY_PASSWORD}@" if self.DRAGONFLY_PASSWORD else ""
+            self.DRAGONFLY_URL = f"redis://{auth_part}{self.DRAGONFLY_HOST}:{self.DRAGONFLY_PORT}/{self.DRAGONFLY_DB}"
 
         # Auto-compute Celery URLs if not provided
         if not self.CELERY_BROKER_URL:
-            self.CELERY_BROKER_URL = self.REDIS_URL
+            self.CELERY_BROKER_URL = self.DRAGONFLY_URL
         if not self.CELERY_RESULT_BACKEND:
-            self.CELERY_RESULT_BACKEND = self.REDIS_URL
+            self.CELERY_RESULT_BACKEND = self.DRAGONFLY_URL
 
         return self
 

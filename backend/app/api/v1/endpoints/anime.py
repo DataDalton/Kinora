@@ -18,6 +18,7 @@ class AnimeCreate(BaseModel):
     monitored: bool = True
     media_profile_id: Optional[int] = None
     episode_monitoring: str = "all"
+    add_sequels: bool = True  # Auto-add all sequel seasons
 
 
 class AnimeMonitoringUpdate(BaseModel):
@@ -32,10 +33,15 @@ async def get_anime(
     limit: int = 20,
     status: Optional[str] = None,
     monitored: Optional[bool] = None,
+    grouped: bool = True,
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """Get all anime from library with pagination, filtering, and tags (single query)."""
+    """Get all anime from library with pagination, filtering, and tags.
+
+    When grouped=True (default), returns one entry per series with season count.
+    When grouped=False, returns all anime entries individually.
+    """
     offset = (page - 1) * limit
 
     # Build WHERE clause
@@ -53,9 +59,13 @@ async def get_anime(
         params.append(monitored)
         paramCount += 1
 
+    # When grouped, only show series parent entries (season_order = 1 or no series)
+    if grouped:
+        conditions.append(f"(a.season_order = 1 OR a.season_order IS NULL)")
+
     whereClause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    # Single query with JSON aggregation for tags
+    # Query with JSON aggregation for tags and season count
     query = f"""
         SELECT a.*,
                COALESCE(
@@ -63,7 +73,8 @@ async def get_anime(
                        json_build_object('id', t.id, 'name', t.name, 'color', t.color)
                    ) FILTER (WHERE t.id IS NOT NULL),
                    '[]'::json
-               ) as tags
+               ) as tags,
+               (SELECT COUNT(*) FROM anime a2 WHERE a2.series_id = a.id) as season_count
         FROM anime a
         LEFT JOIN media_tags mt ON a.id = mt.media_id AND mt.media_type = 'anime'
         LEFT JOIN tags t ON mt.tag_id = t.id
@@ -75,7 +86,12 @@ async def get_anime(
     params.extend([limit, offset])
 
     rows = await conn.fetch(query, *params)
-    animeList = [dict(row) for row in rows]
+    animeList = []
+    for row in rows:
+        anime = dict(row)
+        # Ensure season_count is at least 1 (for standalone anime with no series)
+        anime["season_count"] = max(1, anime.get("season_count") or 1)
+        animeList.append(anime)
 
     return {"anime": animeList, "page": page, "limit": limit}
 
@@ -99,13 +115,58 @@ async def get_anime_by_id(
     return anime
 
 
+@router.get("/{anime_id}/seasons")
+async def get_anime_seasons(
+    anime_id: int,
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """Get all seasons (related anime entries) for a series.
+
+    Returns all anime that share the same series_id, ordered by season_order.
+    Similar to how shows have seasons, this returns all entries in an anime series.
+    """
+    # First, get the anime to find its series_id
+    anime = await conn.fetchrow("SELECT id, series_id, title FROM anime WHERE id = $1", anime_id)
+
+    if not anime:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Anime with id {anime_id} not found",
+        )
+
+    # Determine series_id - if this anime has a series_id, use it; otherwise use its own id
+    seriesId = anime["series_id"] or anime["id"]
+
+    # Get all anime in this series
+    rows = await conn.fetch(
+        """
+        SELECT id, title, original_title, poster_path, backdrop_path, release_date,
+               season_year, season_period, season_order, episodes, status, monitored,
+               has_file, anilist_id, rating
+        FROM anime
+        WHERE series_id = $1 OR (id = $1 AND series_id IS NULL)
+        ORDER BY season_order NULLS LAST, season_year NULLS LAST, title
+        """,
+        seriesId
+    )
+
+    seasons = [dict(row) for row in rows]
+
+    return {
+        "seasons": seasons,
+        "total_seasons": len(seasons),
+        "series_title": anime["title"].split(" Season")[0].split(" Part")[0].strip()  # Base title without "Season X"
+    }
+
+
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def add_anime(
     anime_data: AnimeCreate,
     conn: asyncpg.Connection = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """Add an anime to library."""
+    """Add an anime to library. Auto-adds all related seasons (sequels/prequels) by default."""
     repo = AnimeRepository(conn)
 
     if await repo.existsByAnilistId(anime_data.anilist_id):
@@ -114,6 +175,7 @@ async def add_anime(
             detail="Anime already exists in library",
         )
 
+    # Add the main anime
     metadata = await anilist_service.get_anime(anime_data.anilist_id)
     parsedData = anilist_service.parse_anime_data(metadata)
 
@@ -127,7 +189,66 @@ async def add_anime(
         "episode_monitoring": anime_data.episode_monitoring,
     }
 
-    return await repo.create(animeData)
+    mainAnime = await repo.create(animeData)
+    addedAnime = [(mainAnime, parsedData.get("season_year") or 9999)]
+
+    # Auto-add related seasons (sequels and prequels)
+    if anime_data.add_sequels:
+        relatedSeasons = await anilist_service.get_all_related_seasons(anime_data.anilist_id)
+
+        for related in relatedSeasons:
+            # Skip if already in library
+            if await repo.existsByAnilistId(related["anilist_id"]):
+                # Link existing anime to series if not already linked
+                existingAnime = await conn.fetchrow(
+                    "SELECT id, series_id FROM anime WHERE anilist_id = $1",
+                    related["anilist_id"]
+                )
+                if existingAnime and not existingAnime["series_id"]:
+                    addedAnime.append((dict(existingAnime), related.get("season_year") or 9999))
+                continue
+
+            try:
+                relatedMetadata = await anilist_service.get_anime(related["anilist_id"])
+                relatedParsed = anilist_service.parse_anime_data(relatedMetadata)
+
+                relatedData = {
+                    **relatedParsed,
+                    "status": "wanted",
+                    "monitored": anime_data.monitored,
+                    "media_profile_id": anime_data.media_profile_id,
+                    "absolute_numbering": True,
+                    "has_file": False,
+                    "episode_monitoring": anime_data.episode_monitoring,
+                }
+
+                addedRelated = await repo.create(relatedData)
+                addedAnime.append((addedRelated, relatedParsed.get("season_year") or 9999))
+            except Exception as e:
+                print(f"Failed to add related anime {related['anilist_id']}: {e}")
+
+    # Sort by season_year to determine order, then assign series_id and season_order
+    addedAnime.sort(key=lambda x: x[1])
+
+    # The earliest anime becomes the series parent
+    seriesParentId = addedAnime[0][0]["id"]
+
+    # Update all anime in the series with series_id and season_order
+    for idx, (anime, _) in enumerate(addedAnime):
+        await conn.execute(
+            "UPDATE anime SET series_id = $1, season_order = $2, updated_at = NOW() WHERE id = $3",
+            seriesParentId, idx + 1, anime["id"]
+        )
+
+    # Refresh the main anime to get updated fields
+    mainAnime = await repo.getById(mainAnime["id"])
+
+    # Return main anime with count of added entries
+    return {
+        **mainAnime,
+        "related_added": len(addedAnime) - 1,
+        "total_added": len(addedAnime),
+    }
 
 
 @router.put("/{anime_id}")

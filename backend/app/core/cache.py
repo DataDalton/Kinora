@@ -7,48 +7,48 @@ from app.core.config import settings
 CACHE_TTL_SHORT = 3600  # 1 hour - for detail pages with potentially changing data (new seasons, episodes)
 CACHE_TTL_LONG = 21600  # 6 hours - for trending, popular, discover, search results, charts
 
-# Redis client
-redis_client: Optional[redis.Redis] = None
+# Dragonfly client (uses redis library for wire protocol compatibility)
+cacheClient: Optional[redis.Redis] = None
 
 
-async def get_redis() -> Optional[redis.Redis]:
+async def getCacheClient() -> Optional[redis.Redis]:
     """
-    Get Redis client instance
-    Returns None if Redis connection fails
+    Get Dragonfly client instance
+    Returns None if connection fails
     """
-    global redis_client
+    global cacheClient
 
-    if redis_client is None:
+    if cacheClient is None:
         try:
-            redis_client = await redis.from_url(
-                settings.REDIS_URL,
+            cacheClient = await redis.from_url(
+                settings.DRAGONFLY_URL,
                 encoding="utf-8",
                 decode_responses=True,
             )
         except Exception:
             return None
 
-    return redis_client
+    return cacheClient
 
 
-async def close_redis():
+async def closeCacheClient():
     """
-    Close Redis connection
+    Close Dragonfly connection
     """
-    global redis_client
+    global cacheClient
 
-    if redis_client:
-        await redis_client.close()
-        redis_client = None
+    if cacheClient:
+        await cacheClient.close()
+        cacheClient = None
 
 
-async def cache_get(key: str) -> Optional[Any]:
+async def cacheGet(key: str) -> Optional[Any]:
     """
     Get value from cache
-    Returns None if Redis is unavailable
+    Returns None if Dragonfly is unavailable
     """
     try:
-        client = await get_redis()
+        client = await getCacheClient()
         if not client:
             return None
 
@@ -65,13 +65,13 @@ async def cache_get(key: str) -> Optional[Any]:
         return None
 
 
-async def cache_set(key: str, value: Any, expire: int = 3600) -> bool:
+async def cacheSet(key: str, value: Any, expire: int = 3600) -> bool:
     """
     Set value in cache with expiration time in seconds
-    Returns False if Redis is unavailable
+    Returns False if Dragonfly is unavailable
     """
     try:
-        client = await get_redis()
+        client = await getCacheClient()
         if not client:
             return False
 
@@ -83,13 +83,13 @@ async def cache_set(key: str, value: Any, expire: int = 3600) -> bool:
         return False
 
 
-async def cache_delete(key: str) -> bool:
+async def cacheDelete(key: str) -> bool:
     """
     Delete key from cache
-    Returns False if Redis is unavailable
+    Returns False if Dragonfly is unavailable
     """
     try:
-        client = await get_redis()
+        client = await getCacheClient()
         if not client:
             return False
         return await client.delete(key) > 0
@@ -97,13 +97,13 @@ async def cache_delete(key: str) -> bool:
         return False
 
 
-async def cache_exists(key: str) -> bool:
+async def cacheExists(key: str) -> bool:
     """
     Check if key exists in cache
-    Returns False if Redis is unavailable
+    Returns False if Dragonfly is unavailable
     """
     try:
-        client = await get_redis()
+        client = await getCacheClient()
         if not client:
             return False
         return await client.exists(key) > 0

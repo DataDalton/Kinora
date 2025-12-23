@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from app.core.cache import cache_get, cache_set, CACHE_TTL_SHORT, CACHE_TTL_LONG
+from app.core.cache import cacheGet, cacheSet, CACHE_TTL_SHORT, CACHE_TTL_LONG
 from app.core.http_client import http_post
 
 
@@ -21,7 +21,7 @@ class AnilistService:
             variables = {}
 
         cache_key = f"anilist:{query[:50]}:{str(variables)}"
-        cached = await cache_get(cache_key)
+        cached = await cacheGet(cache_key)
         if cached:
             return cached
 
@@ -36,7 +36,7 @@ class AnilistService:
         if "errors" in data:
             raise Exception(f"Anilist API error: {data['errors']}")
 
-        await cache_set(cache_key, data["data"], expire=ttl)
+        await cacheSet(cache_key, data["data"], expire=ttl)
         return data["data"]
 
     async def search_anime(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -164,15 +164,23 @@ class AnilistService:
               }
             }
             relations {
-              nodes {
-                id
-                type
-                title {
-                  romaji
-                  english
-                }
-                coverImage {
-                  large
+              edges {
+                relationType
+                node {
+                  id
+                  type
+                  format
+                  status
+                  title {
+                    romaji
+                    english
+                  }
+                  coverImage {
+                    large
+                  }
+                  episodes
+                  seasonYear
+                  season
                 }
               }
             }
@@ -351,6 +359,52 @@ class AnilistService:
 
         data = await self._query(gql_query, {"page": page, "perPage": per_page, "genre": genre})
         return data.get("Page", {}).get("media", [])
+
+    async def get_all_related_seasons(self, anilist_id: int, visited: set = None) -> List[Dict[str, Any]]:
+        """
+        Recursively fetch all related seasons (sequels and prequels) for an anime.
+        Returns list of AniList IDs and basic info for all related entries in the series.
+        """
+        if visited is None:
+            visited = set()
+
+        if anilist_id in visited:
+            return []
+
+        visited.add(anilist_id)
+        related = []
+
+        try:
+            anime_data = await self.get_anime(anilist_id)
+            relations = anime_data.get("relations", {}).get("edges", [])
+
+            for edge in relations:
+                relation_type = edge.get("relationType")
+                node = edge.get("node", {})
+
+                # Follow SEQUEL and PREQUEL relations for ANIME type (TV format only, skip movies/OVAs)
+                if relation_type in ("SEQUEL", "PREQUEL") and node.get("type") == "ANIME":
+                    node_format = node.get("format")
+                    # Only include TV series, not movies, OVAs, ONAs, specials
+                    if node_format in ("TV", "TV_SHORT"):
+                        related_id = node.get("id")
+                        if related_id and related_id not in visited:
+                            related.append({
+                                "anilist_id": related_id,
+                                "title": node.get("title", {}).get("english") or node.get("title", {}).get("romaji"),
+                                "format": node_format,
+                                "episodes": node.get("episodes"),
+                                "season_year": node.get("seasonYear"),
+                                "season": node.get("season"),
+                            })
+                            # Recursively get related entries
+                            nested_related = await self.get_all_related_seasons(related_id, visited)
+                            related.extend(nested_related)
+
+        except Exception as e:
+            print(f"Error fetching related seasons for {anilist_id}: {e}")
+
+        return related
 
     def parse_anime_data(self, anilist_data: Dict[str, Any]) -> Dict[str, Any]:
         """

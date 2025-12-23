@@ -429,25 +429,28 @@ export default function ShowDetailPage() {
                         )}
                       </span>
                     </div>
-                    <div className="flex justify-between items-center pt-2 border-t border-border">
-                      <span className="text-muted-foreground">Status</span>
-                      {getStatusBadge(show.status, show.in_production)}
-                    </div>
                   </div>
 
-                  {/* Monitoring Options */}
-                  <div className="pt-4 border-t border-border">
-                    <MonitoringOptionsDropdown
-                      mediaType="show"
-                      mediaId={show.id}
-                      currentState={{
-                        monitored: show.monitored,
-                        upgradeAllowed: show.upgrade_allowed,
-                        seasonMonitoring: show.season_monitoring as any,
-                      }}
-                      showSeasonOptions={true}
-                      onUpdate={handleMonitoringUpdate}
-                    />
+                  {/* Status & Monitoring */}
+                  <div className="py-3 border-y border-border space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Status</span>
+                      {getStatusBadge(show.status, show.in_production)}
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Monitoring</span>
+                      <MonitoringOptionsDropdown
+                        mediaType="show"
+                        mediaId={show.id}
+                        currentState={{
+                          monitored: show.monitored,
+                          upgradeAllowed: show.upgrade_allowed,
+                          seasonMonitoring: show.season_monitoring as any,
+                        }}
+                        showSeasonOptions={true}
+                        onUpdate={handleMonitoringUpdate}
+                      />
+                    </div>
                   </div>
 
                   {/* Action Buttons */}

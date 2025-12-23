@@ -136,13 +136,19 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
       const response = await api.post(endpoint, data);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       if (selectedProfileId) {
         localStorage.setItem(`lastProfile_${mediaType}`, selectedProfileId.toString());
       }
       const queryKey = mediaType === 'movie' ? 'movies' : mediaType === 'show' ? 'shows' : mediaType === 'album' ? 'albums' : mediaType === 'artist' ? 'artists' : mediaType === 'track' ? 'tracks' : 'anime';
       queryClient.invalidateQueries({ queryKey: [queryKey] });
-      showToast('Added to library successfully!', 'success');
+
+      // Show count of related seasons added for anime
+      if (mediaType === 'anime' && data.total_added > 1) {
+        showToast(`Added ${data.total_added} entries to library (including ${data.related_added} related seasons)!`, 'success');
+      } else {
+        showToast('Added to library successfully!', 'success');
+      }
       onClose();
       setShowAddModal(false);
     },
@@ -846,6 +852,13 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         onClose();
                         setShowAddModal(false);
                       });
+                    } else if (mediaType === 'anime') {
+                      addMediaMutation.mutate({
+                        anilist_id: mediaDetails.id,
+                        monitored: autoSearch,
+                        media_profile_id: selectedProfileId,
+                        add_sequels: true  // Auto-add all related seasons
+                      } as any);
                     } else {
                       addMediaMutation.mutate({
                         tmdb_id: mediaDetails.id,

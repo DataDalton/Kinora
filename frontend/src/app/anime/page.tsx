@@ -29,6 +29,7 @@ interface Anime {
   season_year: number;
   has_file: boolean;
   tags?: Tag[];
+  season_count?: number;
 }
 
 export default function AnimePage() {
@@ -266,7 +267,11 @@ export default function AnimePage() {
                       </h3>
                       <div className="flex justify-between items-center mt-2">
                         <span className="text-xs text-muted-foreground">
-                          {anime.episodes ? `${anime.episodes} eps` : anime.season_year || 'N/A'}
+                          {anime.season_count && anime.season_count > 1
+                            ? `${anime.season_count} Seasons`
+                            : anime.episodes
+                              ? `${anime.episodes} eps`
+                              : anime.season_year || 'N/A'}
                         </span>
                         {getStatusBadge(anime.status, anime.has_file)}
                       </div>

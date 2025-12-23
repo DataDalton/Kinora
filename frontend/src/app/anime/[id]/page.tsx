@@ -77,6 +77,24 @@ interface Staff {
   role: string;
 }
 
+interface AnimeSeason {
+  id: number;
+  title: string;
+  original_title: string | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  release_date: string | null;
+  season_year: number | null;
+  season_period: string | null;
+  season_order: number | null;
+  episodes: number | null;
+  status: string;
+  monitored: boolean;
+  has_file: boolean;
+  anilist_id: number | null;
+  rating: number | null;
+}
+
 interface Episode {
   id: number;
   anime_id: number;
@@ -150,6 +168,14 @@ export default function AnimeDetailPage() {
       return response.data.files as FileInfo[];
     },
     enabled: !!anime?.has_file,
+  });
+
+  const { data: seasonsData } = useQuery({
+    queryKey: ['anime-seasons', animeId],
+    queryFn: async () => {
+      const response = await api.get(`/anime/${animeId}/seasons`);
+      return response.data as { seasons: AnimeSeason[]; total_seasons: number; series_title: string };
+    },
   });
 
   const searchDownloadMutation = useMutation({
@@ -500,23 +526,26 @@ export default function AnimeDetailPage() {
                         <span className="font-medium capitalize">{anime.source.toLowerCase().replace('_', ' ')}</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center pt-2 border-t border-border">
-                      <span className="text-muted-foreground">Status</span>
-                      {getStatusBadge(anime.status, anime.has_file)}
-                    </div>
                   </div>
 
-                  {/* Monitoring Options */}
-                  <div className="pt-4 border-t border-border">
-                    <MonitoringOptionsDropdown
-                      mediaType="anime"
-                      mediaId={anime.id}
-                      currentState={{
-                        monitored: anime.monitored,
-                        upgradeAllowed: anime.upgrade_allowed,
-                      }}
-                      onUpdate={handleMonitoringUpdate}
-                    />
+                  {/* Status & Monitoring */}
+                  <div className="py-3 border-y border-border space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Status</span>
+                      {getStatusBadge(anime.status, anime.has_file)}
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Monitoring</span>
+                      <MonitoringOptionsDropdown
+                        mediaType="anime"
+                        mediaId={anime.id}
+                        currentState={{
+                          monitored: anime.monitored,
+                          upgradeAllowed: anime.upgrade_allowed,
+                        }}
+                        onUpdate={handleMonitoringUpdate}
+                      />
+                    </div>
                   </div>
 
                   {/* Action Buttons */}
@@ -620,6 +649,69 @@ export default function AnimeDetailPage() {
                     Synopsis
                   </h3>
                   <p className="text-muted-foreground leading-relaxed">{anime.overview}</p>
+                </div>
+              )}
+
+              {/* Seasons (Related Anime in Series) */}
+              {seasonsData && seasonsData.total_seasons > 1 && (
+                <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                    <Tv className="w-5 h-5" />
+                    Seasons ({seasonsData.total_seasons})
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                    {seasonsData.seasons.map((season, index) => (
+                      <Link
+                        key={season.id}
+                        href={`/anime/${season.id}`}
+                        className={`group relative rounded-lg overflow-hidden border-2 transition ${
+                          season.id === animeId
+                            ? 'border-primary ring-2 ring-primary/30'
+                            : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        <div className="aspect-[2/3] relative">
+                          {season.poster_path ? (
+                            <img
+                              src={season.poster_path.startsWith('http') ? season.poster_path : `https://image.tmdb.org/t/p/w300${season.poster_path}`}
+                              alt={season.title}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-muted flex items-center justify-center">
+                              <Film className="w-8 h-8 text-muted-foreground" />
+                            </div>
+                          )}
+                          {/* Current Season Badge */}
+                          {season.id === animeId && (
+                            <div className="absolute top-2 left-2 px-2 py-1 bg-primary text-primary-foreground text-xs font-medium rounded">
+                              Current
+                            </div>
+                          )}
+                          {/* Status Badge */}
+                          <div className="absolute bottom-2 right-2">
+                            {season.has_file ? (
+                              <div className="p-1 bg-green-500 text-white rounded-full">
+                                <Check className="w-3 h-3" />
+                              </div>
+                            ) : season.monitored ? (
+                              <div className="p-1 bg-yellow-500 text-white rounded-full">
+                                <Eye className="w-3 h-3" />
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="p-2 bg-background">
+                          <p className="text-xs font-medium truncate" title={season.title}>
+                            Season {season.season_order || index + 1}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {season.episodes ? `${season.episodes} eps` : season.season_year || ''}
+                          </p>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               )}
 

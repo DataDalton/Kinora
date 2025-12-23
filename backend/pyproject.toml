@@ -14,7 +14,7 @@ dependencies = [
     "sqlalchemy>=2.0.41",
     "alembic>=1.17.0",
 
-    # Redis & Caching
+    # Dragonfly (redis-compatible client)
     "redis>=7.1.0",
     "hiredis>=3.3.0",
 

@@ -392,23 +392,26 @@ export default function MovieDetailPage() {
                         )}
                       </span>
                     </div>
-                    <div className="flex justify-between items-center pt-2 border-t border-border">
-                      <span className="text-muted-foreground">Status</span>
-                      {getStatusBadge(movie.status, movie.has_file)}
-                    </div>
                   </div>
 
-                  {/* Monitoring Options */}
-                  <div className="pt-4 border-t border-border">
-                    <MonitoringOptionsDropdown
-                      mediaType="movie"
-                      mediaId={movie.id}
-                      currentState={{
-                        monitored: movie.monitored,
-                        upgradeAllowed: movie.upgrade_allowed,
-                      }}
-                      onUpdate={handleMonitoringUpdate}
-                    />
+                  {/* Status & Monitoring */}
+                  <div className="py-3 border-y border-border space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Status</span>
+                      {getStatusBadge(movie.status, movie.has_file)}
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Monitoring</span>
+                      <MonitoringOptionsDropdown
+                        mediaType="movie"
+                        mediaId={movie.id}
+                        currentState={{
+                          monitored: movie.monitored,
+                          upgradeAllowed: movie.upgrade_allowed,
+                        }}
+                        onUpdate={handleMonitoringUpdate}
+                      />
+                    </div>
                   </div>
 
                   {/* Action Buttons */}

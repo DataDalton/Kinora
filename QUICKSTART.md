@@ -96,7 +96,7 @@ curl -X POST "http://localhost:8000/api/v1/movies" \
 Nexarr consists of:
 
 - **PostgreSQL** (port 5432): Database
-- **Redis** (port 6379): Caching and task queue
+- **Dragonfly** (port 6379): Caching and task queue
 - **Backend** (port 8000): FastAPI application
 - **Frontend** (port 3000): Next.js application
 - **Celery Worker**: Background tasks
@@ -186,7 +186,7 @@ docker-compose up -d
 ## Performance Tips
 
 - **PostgreSQL**: Has 50-connection pool by default (handles heavy load)
-- **Redis**: Used for caching (1-hour cache on metadata)
+- **Dragonfly**: Used for caching (1-hour cache on metadata)
 - **Indexers**: Rate-limited to 1 request/second (configurable)
 - **Celery**: RSS monitoring every 15 minutes (configurable)
 

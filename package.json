@@ -16,10 +16,10 @@
     "dev:celery-worker": "cd backend && python -m celery -A app.tasks.celery_app worker --loglevel=info --pool=solo",
     "dev:celery-beat": "cd backend && python -m celery -A app.tasks.celery_app beat --loglevel=info",
     "dev:frontend": "cd frontend && npm run dev",
-    "docker:dev": "docker-compose up -d postgres pgbouncer redis flaresolverr",
+    "docker:dev": "docker-compose up -d postgres pgbouncer dragonfly flaresolverr",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
-    "docker:reset": "docker-compose down -v && docker-compose up -d postgres pgbouncer redis flaresolverr",
+    "docker:reset": "docker-compose down -v && docker-compose up -d postgres pgbouncer dragonfly flaresolverr",
     "clean": "npm run docker:down && rm -rf frontend/node_modules frontend/.next backend/venv backend/__pycache__"
   },
   "devDependencies": {
