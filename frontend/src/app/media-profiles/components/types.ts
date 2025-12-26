@@ -13,16 +13,6 @@ export interface MediaTypeQuality {
 
 export interface MediaProfileFormData {
   name: string;
-  // Legacy global settings (kept for backward compatibility)
-  min_size: number;
-  max_size: number;
-  resolutions: string[];
-  sources: string[];
-  codecs: string[];
-  audio: string[];
-  audio_channels: string[];
-  hdr: string[];
-  editions: string[];
   // Per-media-type quality: Movies
   movie_resolutions: string[];
   movie_codecs: string[];
@@ -100,7 +90,7 @@ export interface MediaProfileFormData {
   music_embed_artwork: boolean;
   // Torrent validation settings
   validation_enabled: boolean;
-  allowed_extensions: string[];
+  validation_mode: 'blocklist' | 'allowlist';
   forbidden_extensions: string[];
   validation_failure_action: 'delete' | 'pause_notify' | 'quarantine';
   movie_allowed_extensions: string[];

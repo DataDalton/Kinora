@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Shield, AlertTriangle, Trash2, Pause, FolderLock, Plus, X } from 'lucide-react';
+import { Shield, AlertTriangle, Trash2, Pause, FolderLock, Plus, X, ShieldCheck, ShieldX } from 'lucide-react';
 import { SectionProps } from '../types';
 
 // Default extensions for reference
@@ -27,6 +27,21 @@ const FAILURE_ACTIONS = [
     label: 'Quarantine',
     description: 'Move to quarantine category for later review',
     icon: FolderLock,
+  },
+];
+
+const VALIDATION_MODES = [
+  {
+    value: 'allowlist',
+    label: 'Allowlist',
+    description: 'Only allow specific file extensions per media type',
+    icon: ShieldCheck,
+  },
+  {
+    value: 'blocklist',
+    label: 'Blocklist',
+    description: 'Block specific file extensions, allow everything else',
+    icon: ShieldX,
   },
 ];
 
@@ -113,6 +128,42 @@ export default function Validation({ formData, setFormData }: SectionProps) {
 
       {formData.validation_enabled && (
         <>
+          {/* Validation Mode Selection */}
+          <div className="p-4 rounded-lg border border-border">
+            <h3 className="font-semibold text-sm mb-3">Validation Mode</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {VALIDATION_MODES.map((mode) => {
+                const Icon = mode.icon;
+                const isSelected = formData.validation_mode === mode.value;
+                return (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        validation_mode: mode.value as 'blocklist' | 'allowlist',
+                      })
+                    }
+                    className={`p-4 rounded-lg border-2 text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-primary bg-primary/10'
+                        : 'border-border hover:border-muted-foreground/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Icon className={`w-4 h-4 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span className={`font-medium text-sm ${isSelected ? 'text-primary' : ''}`}>
+                        {mode.label}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{mode.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Failure Action */}
           <div className="p-4 rounded-lg border border-border">
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
@@ -152,117 +203,124 @@ export default function Validation({ formData, setFormData }: SectionProps) {
             </div>
           </div>
 
-          {/* Forbidden Extensions */}
-          <div className="p-4 rounded-lg border border-border">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="font-semibold text-sm">Forbidden File Extensions</h3>
-                <p className="text-xs text-muted-foreground">
-                  Torrents containing these file types will fail validation
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => resetToDefaults('forbidden_extensions')}
-                className="text-xs text-primary hover:underline cursor-pointer"
-              >
-                Reset to defaults
-              </button>
-            </div>
-
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={newForbiddenExt}
-                onChange={(e) => setNewForbiddenExt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addExtension('forbidden_extensions', newForbiddenExt, setNewForbiddenExt);
-                  }
-                }}
-                placeholder="e.g., .exe"
-                className="flex-1 px-3 py-2 border-input bg-background text-foreground border rounded-lg text-sm"
-              />
-              <button
-                type="button"
-                onClick={() => addExtension('forbidden_extensions', newForbiddenExt, setNewForbiddenExt)}
-                className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {(formData.forbidden_extensions || []).map((ext) => (
-                <span
-                  key={ext}
-                  className="inline-flex items-center gap-1 px-2 py-1 bg-destructive/20 text-destructive rounded text-sm"
+          {/* Blocklist Mode: Forbidden Extensions */}
+          {formData.validation_mode === 'blocklist' && (
+            <div className="p-4 rounded-lg border border-border">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="font-semibold text-sm">Forbidden File Extensions</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Torrents containing these file types will fail validation
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => resetToDefaults('forbidden_extensions')}
+                  className="text-xs text-primary hover:underline cursor-pointer"
                 >
-                  {ext}
-                  <button
-                    type="button"
-                    onClick={() => removeExtension('forbidden_extensions', ext)}
-                    className="hover:text-destructive/80 cursor-pointer"
+                  Reset to defaults
+                </button>
+              </div>
+
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={newForbiddenExt}
+                  onChange={(e) => setNewForbiddenExt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addExtension('forbidden_extensions', newForbiddenExt, setNewForbiddenExt);
+                    }
+                  }}
+                  placeholder="e.g., .exe"
+                  className="flex-1 px-3 py-2 border-input bg-background text-foreground border rounded-lg text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => addExtension('forbidden_extensions', newForbiddenExt, setNewForbiddenExt)}
+                  className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(formData.forbidden_extensions || []).map((ext) => (
+                  <span
+                    key={ext}
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-destructive/20 text-destructive rounded text-sm"
                   >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
+                    {ext}
+                    <button
+                      type="button"
+                      onClick={() => removeExtension('forbidden_extensions', ext)}
+                      className="hover:text-destructive/80 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                {formData.forbidden_extensions.length === 0 && (
+                  <span className="text-xs text-destructive italic">No extensions configured - all files will be allowed</span>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Allowed Extensions by Media Type */}
-          <div className="space-y-4">
-            <h3 className="font-semibold text-sm">Allowed Extensions by Media Type</h3>
-            <p className="text-xs text-muted-foreground -mt-2">
-              Torrents must contain at least one file with an allowed extension
-            </p>
+          {/* Allowlist Mode: Allowed Extensions by Media Type */}
+          {formData.validation_mode === 'allowlist' && (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-sm">Allowed Extensions by Media Type</h3>
+              <p className="text-xs text-muted-foreground -mt-2">
+                Torrents must contain at least one file with an allowed extension
+              </p>
 
-            {/* Movies */}
-            <ExtensionSection
-              title="Movies"
-              extensions={formData.movie_allowed_extensions || []}
-              newValue={newMovieExt}
-              setNewValue={setNewMovieExt}
-              onAdd={() => addExtension('movie_allowed_extensions', newMovieExt, setNewMovieExt)}
-              onRemove={(ext) => removeExtension('movie_allowed_extensions', ext)}
-              onReset={() => resetToDefaults('movie_allowed_extensions')}
-            />
+              {/* Movies */}
+              <ExtensionSection
+                title="Movies"
+                extensions={formData.movie_allowed_extensions || []}
+                newValue={newMovieExt}
+                setNewValue={setNewMovieExt}
+                onAdd={() => addExtension('movie_allowed_extensions', newMovieExt, setNewMovieExt)}
+                onRemove={(ext) => removeExtension('movie_allowed_extensions', ext)}
+                onReset={() => resetToDefaults('movie_allowed_extensions')}
+              />
 
-            {/* TV Shows */}
-            <ExtensionSection
-              title="TV Shows"
-              extensions={formData.show_allowed_extensions || []}
-              newValue={newShowExt}
-              setNewValue={setNewShowExt}
-              onAdd={() => addExtension('show_allowed_extensions', newShowExt, setNewShowExt)}
-              onRemove={(ext) => removeExtension('show_allowed_extensions', ext)}
-              onReset={() => resetToDefaults('show_allowed_extensions')}
-            />
+              {/* TV Shows */}
+              <ExtensionSection
+                title="TV Shows"
+                extensions={formData.show_allowed_extensions || []}
+                newValue={newShowExt}
+                setNewValue={setNewShowExt}
+                onAdd={() => addExtension('show_allowed_extensions', newShowExt, setNewShowExt)}
+                onRemove={(ext) => removeExtension('show_allowed_extensions', ext)}
+                onReset={() => resetToDefaults('show_allowed_extensions')}
+              />
 
-            {/* Anime */}
-            <ExtensionSection
-              title="Anime"
-              extensions={formData.anime_allowed_extensions || []}
-              newValue={newAnimeExt}
-              setNewValue={setNewAnimeExt}
-              onAdd={() => addExtension('anime_allowed_extensions', newAnimeExt, setNewAnimeExt)}
-              onRemove={(ext) => removeExtension('anime_allowed_extensions', ext)}
-              onReset={() => resetToDefaults('anime_allowed_extensions')}
-            />
+              {/* Anime */}
+              <ExtensionSection
+                title="Anime"
+                extensions={formData.anime_allowed_extensions || []}
+                newValue={newAnimeExt}
+                setNewValue={setNewAnimeExt}
+                onAdd={() => addExtension('anime_allowed_extensions', newAnimeExt, setNewAnimeExt)}
+                onRemove={(ext) => removeExtension('anime_allowed_extensions', ext)}
+                onReset={() => resetToDefaults('anime_allowed_extensions')}
+              />
 
-            {/* Music */}
-            <ExtensionSection
-              title="Music"
-              extensions={formData.music_allowed_extensions || []}
-              newValue={newMusicExt}
-              setNewValue={setNewMusicExt}
-              onAdd={() => addExtension('music_allowed_extensions', newMusicExt, setNewMusicExt)}
-              onRemove={(ext) => removeExtension('music_allowed_extensions', ext)}
-              onReset={() => resetToDefaults('music_allowed_extensions')}
-            />
-          </div>
+              {/* Music */}
+              <ExtensionSection
+                title="Music"
+                extensions={formData.music_allowed_extensions || []}
+                newValue={newMusicExt}
+                setNewValue={setNewMusicExt}
+                onAdd={() => addExtension('music_allowed_extensions', newMusicExt, setNewMusicExt)}
+                onRemove={(ext) => removeExtension('music_allowed_extensions', ext)}
+                onReset={() => resetToDefaults('music_allowed_extensions')}
+              />
+            </div>
+          )}
         </>
       )}
     </div>

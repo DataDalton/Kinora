@@ -36,16 +36,6 @@ class MediaProfileCreate(BaseModel):
     - If value NOT in list: rejected
     """
     name: str
-    # Legacy global settings (kept for backward compatibility)
-    min_size: Optional[int] = 0
-    max_size: Optional[int] = 0
-    resolutions: Optional[List[str]] = []
-    codecs: Optional[List[str]] = []
-    sources: Optional[List[str]] = []
-    audio_codecs: Optional[List[str]] = []
-    audio_channels: Optional[List[str]] = []
-    hdr_formats: Optional[List[str]] = []
-    editions: Optional[List[str]] = []
     # Per-media-type quality: Movies
     movie_resolutions: Optional[List[str]] = []
     movie_codecs: Optional[List[str]] = []
@@ -124,7 +114,7 @@ class MediaProfileCreate(BaseModel):
     colon_replacement: Optional[str] = " -"
     # Torrent validation settings
     validation_enabled: Optional[bool] = True
-    allowed_extensions: Optional[List[str]] = []
+    validation_mode: Optional[str] = "allowlist"
     forbidden_extensions: Optional[List[str]] = ['.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.scr', '.com', '.ps1', '.vbs', '.jar']
     validation_failure_action: Optional[str] = "pause_notify"
     movie_allowed_extensions: Optional[List[str]] = ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']
@@ -242,7 +232,7 @@ class MediaProfileUpdate(BaseModel):
     colon_replacement: Optional[str] = None
     # Torrent validation settings
     validation_enabled: Optional[bool] = None
-    allowed_extensions: Optional[List[str]] = None
+    validation_mode: Optional[str] = None
     forbidden_extensions: Optional[List[str]] = None
     validation_failure_action: Optional[str] = None
     movie_allowed_extensions: Optional[List[str]] = None
@@ -360,7 +350,7 @@ class MediaProfileResponse(BaseModel):
     colon_replacement: Optional[str]
     # Torrent validation settings
     validation_enabled: Optional[bool]
-    allowed_extensions: Optional[List[str]]
+    validation_mode: Optional[str]
     forbidden_extensions: Optional[List[str]]
     validation_failure_action: Optional[str]
     movie_allowed_extensions: Optional[List[str]]
@@ -424,9 +414,7 @@ async def create_media_profile(
     row = await conn.fetchrow(
         """
         INSERT INTO media_profiles (
-            name, min_size, max_size,
-            resolutions, codecs, sources, audio_codecs,
-            audio_channels, hdr_formats, editions,
+            name,
             movie_resolutions, movie_codecs, movie_sources, movie_audio_codecs,
             movie_audio_channels, movie_hdr_formats, movie_editions,
             movie_min_size, movie_max_size,
@@ -450,7 +438,7 @@ async def create_media_profile(
             music_preferred_quality, music_embed_lyrics, music_embed_artwork,
             media_server, use_hardlinks,
             illegal_char_replacement, colon_replacement,
-            validation_enabled, allowed_extensions, forbidden_extensions,
+            validation_enabled, validation_mode, forbidden_extensions,
             validation_failure_action, movie_allowed_extensions, show_allowed_extensions,
             anime_allowed_extensions, music_allowed_extensions
         )
@@ -462,21 +450,11 @@ async def create_media_profile(
             $41, $42, $43, $44, $45, $46, $47, $48, $49, $50,
             $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
             $61, $62, $63, $64, $65, $66, $67, $68, $69, $70,
-            $71, $72, $73, $74, $75, $76, $77, $78, $79, $80,
-            $81, $82, $83, $84
+            $71, $72, $73, $74, $75
         )
         RETURNING *
         """,
         profile.name,
-        profile.min_size,
-        profile.max_size,
-        profile.resolutions,
-        profile.codecs,
-        profile.sources,
-        profile.audio_codecs,
-        profile.audio_channels,
-        profile.hdr_formats,
-        profile.editions,
         profile.movie_resolutions,
         profile.movie_codecs,
         profile.movie_sources,
@@ -544,7 +522,7 @@ async def create_media_profile(
         profile.illegal_char_replacement,
         profile.colon_replacement,
         profile.validation_enabled,
-        profile.allowed_extensions,
+        profile.validation_mode,
         profile.forbidden_extensions,
         profile.validation_failure_action,
         profile.movie_allowed_extensions,

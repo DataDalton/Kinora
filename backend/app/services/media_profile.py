@@ -1,19 +1,10 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from dataclasses import dataclass
 import re
 import math
 
 from app.services.indexers.base import TorrentRelease
-from app.services.quality_definitions import (
-    Resolution,
-    Source,
-    Codec,
-    AudioCodec,
-    AudioChannels,
-    HDR,
-    Edition,
-    QualityHierarchy,
-)
+from app.services.quality_definitions import QualityHierarchy
 
 
 @dataclass
@@ -34,16 +25,42 @@ class MediaProfile:
 
     id: int
     name: str
-    min_size: Optional[int]  # bytes
-    max_size: Optional[int]  # bytes
-    resolutions: Optional[List[str]] = None
-    codecs: Optional[List[str]] = None
-    sources: Optional[List[str]] = None
-    audio_codecs: Optional[List[str]] = None
-    audio_channels: Optional[List[str]] = None
-    hdr_formats: Optional[List[str]] = None
-    editions: Optional[List[str]] = None
+    # Per-media-type quality: Movies
+    movie_resolutions: Optional[List[str]] = None
+    movie_codecs: Optional[List[str]] = None
+    movie_sources: Optional[List[str]] = None
+    movie_audio_codecs: Optional[List[str]] = None
+    movie_audio_channels: Optional[List[str]] = None
+    movie_hdr_formats: Optional[List[str]] = None
+    movie_editions: Optional[List[str]] = None
+    movie_min_size: Optional[int] = None
+    movie_max_size: Optional[int] = None
+    # Per-media-type quality: TV Shows
+    show_resolutions: Optional[List[str]] = None
+    show_codecs: Optional[List[str]] = None
+    show_sources: Optional[List[str]] = None
+    show_audio_codecs: Optional[List[str]] = None
+    show_audio_channels: Optional[List[str]] = None
+    show_hdr_formats: Optional[List[str]] = None
+    show_min_size: Optional[int] = None
+    show_max_size: Optional[int] = None
+    # Per-media-type quality: Anime
+    anime_resolutions: Optional[List[str]] = None
+    anime_codecs: Optional[List[str]] = None
+    anime_sources: Optional[List[str]] = None
+    anime_audio_codecs: Optional[List[str]] = None
+    anime_audio_channels: Optional[List[str]] = None
+    anime_hdr_formats: Optional[List[str]] = None
+    anime_min_size: Optional[int] = None
+    anime_max_size: Optional[int] = None
+    # Per-media-type indexers
+    movie_indexers: Optional[List[str]] = None
+    show_indexers: Optional[List[str]] = None
+    anime_indexers: Optional[List[str]] = None
+    music_indexers: Optional[List[str]] = None
+    # Common settings
     languages: Optional[List[str]] = None
+    subtitle_languages: Optional[List[str]] = None
     upgrade_allowed: bool = True
     indexers: Optional[List[str]] = None
     uploaders: Optional[List[str]] = None
@@ -59,7 +76,7 @@ class MediaProfile:
     max_results: int = 100
     # Torrent validation settings
     validation_enabled: bool = True
-    allowed_extensions: Optional[List[str]] = None
+    validation_mode: str = "allowlist"
     forbidden_extensions: Optional[List[str]] = None
     validation_failure_action: str = "pause_notify"
     movie_allowed_extensions: Optional[List[str]] = None
@@ -69,7 +86,8 @@ class MediaProfile:
 
     def get_allowed_extensions_for_type(self, media_type: str) -> List[str]:
         """
-        Get allowed extensions for a specific media type with fallback defaults.
+        Get allowed extensions for a specific media type.
+        Only used when validation_mode is 'allowlist'.
 
         Args:
             media_type: One of 'movie', 'show', 'anime', 'album'
@@ -92,11 +110,7 @@ class MediaProfile:
             if type_specific:
                 return type_specific
 
-        # Fall back to global allowed_extensions
-        if self.allowed_extensions:
-            return self.allowed_extensions
-
-        # Default extensions by media type
+        # Default extensions by media type (only used if type-specific not configured)
         defaults = {
             'movie': ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts'],
             'show': ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts'],
@@ -105,6 +119,112 @@ class MediaProfile:
             'music': ['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma'],
         }
         return defaults.get(media_type, [])
+
+    def get_resolutions_for_type(self, media_type: str) -> List[str]:
+        """Get resolutions for specific media type."""
+        type_map = {
+            'movie': 'movie_resolutions',
+            'show': 'show_resolutions',
+            'anime': 'anime_resolutions',
+        }
+        attr = type_map.get(media_type)
+        if attr:
+            return getattr(self, attr, None) or []
+        return []
+
+    def get_codecs_for_type(self, media_type: str) -> List[str]:
+        """Get codecs for specific media type."""
+        type_map = {
+            'movie': 'movie_codecs',
+            'show': 'show_codecs',
+            'anime': 'anime_codecs',
+        }
+        attr = type_map.get(media_type)
+        if attr:
+            return getattr(self, attr, None) or []
+        return []
+
+    def get_sources_for_type(self, media_type: str) -> List[str]:
+        """Get sources for specific media type."""
+        type_map = {
+            'movie': 'movie_sources',
+            'show': 'show_sources',
+            'anime': 'anime_sources',
+        }
+        attr = type_map.get(media_type)
+        if attr:
+            return getattr(self, attr, None) or []
+        return []
+
+    def get_audio_codecs_for_type(self, media_type: str) -> List[str]:
+        """Get audio codecs for specific media type."""
+        type_map = {
+            'movie': 'movie_audio_codecs',
+            'show': 'show_audio_codecs',
+            'anime': 'anime_audio_codecs',
+        }
+        attr = type_map.get(media_type)
+        if attr:
+            return getattr(self, attr, None) or []
+        return []
+
+    def get_audio_channels_for_type(self, media_type: str) -> List[str]:
+        """Get audio channels for specific media type."""
+        type_map = {
+            'movie': 'movie_audio_channels',
+            'show': 'show_audio_channels',
+            'anime': 'anime_audio_channels',
+        }
+        attr = type_map.get(media_type)
+        if attr:
+            return getattr(self, attr, None) or []
+        return []
+
+    def get_hdr_formats_for_type(self, media_type: str) -> List[str]:
+        """Get HDR formats for specific media type."""
+        type_map = {
+            'movie': 'movie_hdr_formats',
+            'show': 'show_hdr_formats',
+            'anime': 'anime_hdr_formats',
+        }
+        attr = type_map.get(media_type)
+        if attr:
+            return getattr(self, attr, None) or []
+        return []
+
+    def get_editions_for_type(self, media_type: str) -> List[str]:
+        """Get editions for specific media type (movies only)."""
+        if media_type == 'movie':
+            return self.movie_editions or []
+        return []
+
+    def get_indexers_for_type(self, media_type: str) -> Optional[List[str]]:
+        """Get indexers for specific media type."""
+        type_map = {
+            'movie': 'movie_indexers',
+            'show': 'show_indexers',
+            'anime': 'anime_indexers',
+            'album': 'music_indexers',
+            'music': 'music_indexers',
+        }
+        attr = type_map.get(media_type)
+        if attr:
+            return getattr(self, attr, None)
+        return None
+
+    def get_size_limits_for_type(self, media_type: str) -> tuple[Optional[int], Optional[int]]:
+        """Get min/max size limits for specific media type."""
+        type_map = {
+            'movie': ('movie_min_size', 'movie_max_size'),
+            'show': ('show_min_size', 'show_max_size'),
+            'anime': ('anime_min_size', 'anime_max_size'),
+        }
+        attrs = type_map.get(media_type)
+        if attrs:
+            min_size = getattr(self, attrs[0], None)
+            max_size = getattr(self, attrs[1], None)
+            return (min_size, max_size)
+        return (None, None)
 
 
 class MediaProfileService:
@@ -127,16 +247,18 @@ class MediaProfileService:
         profile: MediaProfile,
         preferred_uploaders: Optional[List[str]] = None,
         blocked_uploaders: Optional[List[str]] = None,
+        media_type: Optional[str] = None,
     ) -> float:
         """
-        Score a release based on quality profile
+        Score a release based on quality profile.
+        Uses per-media-type settings when media_type is provided.
         Returns float score (higher is better)
         Returns -1 if release should be rejected
         """
         score = 0.0
 
         # Check if release meets minimum requirements
-        if not self._meets_minimum_requirements(release, profile):
+        if not self._meets_minimum_requirements(release, profile, media_type):
             return -1.0
 
         # Blocked uploader check
@@ -144,37 +266,37 @@ class MediaProfileService:
             return -1.0
 
         # Quality score (0-100 points)
-        quality_score = self._score_quality(release.quality, profile)
+        quality_score = self._score_quality(release.quality, profile, media_type)
         if quality_score < 0:
             return -1.0
         score += quality_score
 
         # Codec score (0-30 points)
-        codec_score = self._score_codec(release.codec, profile)
+        codec_score = self._score_codec(release.codec, profile, media_type)
         score += codec_score
 
         # Source score (0-30 points)
-        source_score = self._score_source(release.source, profile)
+        source_score = self._score_source(release.source, profile, media_type)
         score += source_score
 
         # Audio score (0-20 points)
-        audio_score = self._score_audio(release.audio, profile)
+        audio_score = self._score_audio(release.audio, profile, media_type)
         score += audio_score
 
         # Resolution score (0-15 points)
-        resolution_score = self._score_resolution(release, profile)
+        resolution_score = self._score_resolution(release, profile, media_type)
         score += resolution_score
 
         # Audio channels score (0-10 points)
-        channels_score = self._score_audio_channels(release, profile)
+        channels_score = self._score_audio_channels(release, profile, media_type)
         score += channels_score
 
         # HDR score (0-20 points)
-        hdr_score = self._score_hdr(release, profile)
+        hdr_score = self._score_hdr(release, profile, media_type)
         score += hdr_score
 
         # Edition score (0-10 points)
-        edition_score = self._score_edition(release, profile)
+        edition_score = self._score_edition(release, profile, media_type)
         score += edition_score
 
         # Weighted scoring based on profile preferences
@@ -185,7 +307,7 @@ class MediaProfileService:
                 score += seeders_score * (profile.seeder_weight / 100.0)
 
             # Size weighted (configurable weight)
-            size_penalty = self._score_size(release.size, profile)
+            size_penalty = self._score_size(release.size, profile, media_type)
             score += size_penalty * (profile.size_weight / 100.0)
 
             # Recency weighted (configurable weight)
@@ -196,7 +318,7 @@ class MediaProfileService:
                 score += min(100, math.log10(release.seeders + 1) * 30)
         elif profile.search_sort_preference == "size":
             # Prefer releases closer to expected size
-            size_score = self._score_size(release.size, profile)
+            size_score = self._score_size(release.size, profile, media_type)
             score += size_score * 2
         elif profile.search_sort_preference == "date":
             # Recency preference
@@ -235,53 +357,63 @@ class MediaProfileService:
         return score
 
     def _meets_minimum_requirements(
-        self, release: TorrentRelease, profile: MediaProfile
+        self, release: TorrentRelease, profile: MediaProfile, media_type: Optional[str] = None
     ) -> bool:
         """
-        Check if release meets minimum requirements
-        Only values in the profile lists are allowed
+        Check if release meets minimum requirements.
+        Requires media_type to use per-media-type settings.
+        Only values in the profile lists are allowed.
         """
+        # Get per-type settings (no fallback to global)
+        resolutions = profile.get_resolutions_for_type(media_type) if media_type else []
+        codecs = profile.get_codecs_for_type(media_type) if media_type else []
+        sources = profile.get_sources_for_type(media_type) if media_type else []
+        audio_codecs = profile.get_audio_codecs_for_type(media_type) if media_type else []
+        audio_channels = profile.get_audio_channels_for_type(media_type) if media_type else []
+        hdr_formats = profile.get_hdr_formats_for_type(media_type) if media_type else []
+        editions = profile.get_editions_for_type(media_type) if media_type else []
+        min_size, max_size = profile.get_size_limits_for_type(media_type) if media_type else (None, None)
 
         # Resolution must be in list (if specified)
-        if profile.resolutions:
+        if resolutions:
             resolution = release.quality or self._extract_resolution(release.title)
-            if resolution and resolution not in profile.resolutions:
+            if resolution and resolution not in resolutions:
                 return False
 
         # Codec must be in list (if specified)
-        if profile.codecs:
+        if codecs:
             codec = release.codec or self._extract_codec(release.title)
-            if codec and codec not in profile.codecs:
+            if codec and codec not in codecs:
                 return False
 
         # Source must be in list (if specified)
-        if profile.sources:
+        if sources:
             source = release.source or self._extract_source(release.title)
-            if source and source not in profile.sources:
+            if source and source not in sources:
                 return False
 
         # Audio codec must be in list (if specified)
-        if profile.audio_codecs:
+        if audio_codecs:
             audio = release.audio or self._extract_audio(release.title)
-            if audio and audio not in profile.audio_codecs:
+            if audio and audio not in audio_codecs:
                 return False
 
         # Audio channels must be in list (if specified)
-        if profile.audio_channels:
+        if audio_channels:
             channels = release.audio_channels or self._extract_audio_channels(release.title)
-            if channels and channels not in profile.audio_channels:
+            if channels and channels not in audio_channels:
                 return False
 
         # HDR format must be in list (if specified)
-        if profile.hdr_formats:
+        if hdr_formats:
             hdr = release.hdr or self._extract_hdr(release.title)
-            if hdr and hdr not in profile.hdr_formats:
+            if hdr and hdr not in hdr_formats:
                 return False
 
         # Edition must be in list (if specified)
-        if profile.editions:
+        if editions:
             edition = release.edition or self._extract_edition(release.title)
-            if edition and edition not in profile.editions:
+            if edition and edition not in editions:
                 return False
 
         # Language must be in list (if specified)
@@ -291,10 +423,10 @@ class MediaProfileService:
                 return False
 
         # Size constraints
-        if profile.min_size and release.size and release.size < profile.min_size:
+        if min_size and release.size and release.size < min_size:
             return False
 
-        if profile.max_size and release.size and release.size > profile.max_size:
+        if max_size and release.size and release.size > max_size:
             return False
 
         # Minimum seeders (hardcoded for now, can be made configurable)
@@ -318,15 +450,18 @@ class MediaProfileService:
 
         return True
 
-    def _score_quality(self, quality: Optional[str], profile: MediaProfile) -> float:
+    def _score_quality(
+        self, quality: Optional[str], profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score quality (resolution) based on position in list
         Earlier in list = higher score
         """
-        if not quality or not profile.resolutions:
+        resolutions = profile.get_resolutions_for_type(media_type) if media_type else []
+        if not quality or not resolutions:
             return 0.0
 
-        if quality not in profile.resolutions:
+        if quality not in resolutions:
             return -1.0
 
         # Base score from hierarchy
@@ -334,37 +469,33 @@ class MediaProfileService:
 
         # Bonus based on position in list (earlier = better)
         try:
-            position = profile.resolutions.index(quality)
+            position = resolutions.index(quality)
             position_bonus = max(0, 25 - (position * 5))  # First item gets 25, decreases by 5 per position
             base_score += position_bonus
         except ValueError:
             pass
 
-        # Cutoff quality check
-        if profile.cutoff_quality:
-            cutoff_rank = self.QUALITY_HIERARCHY.get(profile.cutoff_quality, 999)
-            quality_rank = self.QUALITY_HIERARCHY.get(quality, 0)
-            if quality_rank < cutoff_rank:
-                base_score *= 0.5
-
         return base_score
 
-    def _score_codec(self, codec: Optional[str], profile: MediaProfile) -> float:
+    def _score_codec(
+        self, codec: Optional[str], profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score codec based on position in list
         Earlier in list = higher score
         """
-        if not codec or not profile.codecs:
+        codecs = profile.get_codecs_for_type(media_type) if media_type else []
+        if not codec or not codecs:
             return 0.0
 
-        if codec not in profile.codecs:
+        if codec not in codecs:
             return 0.0
 
         base_score = self.CODEC_HIERARCHY.get(codec, 0) * 10
 
         # Bonus based on position in list
         try:
-            position = profile.codecs.index(codec)
+            position = codecs.index(codec)
             position_bonus = max(0, 15 - (position * 3))
             base_score += position_bonus
         except ValueError:
@@ -372,22 +503,25 @@ class MediaProfileService:
 
         return base_score
 
-    def _score_source(self, source: Optional[str], profile: MediaProfile) -> float:
+    def _score_source(
+        self, source: Optional[str], profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score source based on position in list
         Earlier in list = higher score
         """
-        if not source or not profile.sources:
+        sources = profile.get_sources_for_type(media_type) if media_type else []
+        if not source or not sources:
             return 0.0
 
-        if source not in profile.sources:
+        if source not in sources:
             return 0.0
 
         base_score = self.SOURCE_HIERARCHY.get(source, 0) * 5
 
         # Bonus based on position in list
         try:
-            position = profile.sources.index(source)
+            position = sources.index(source)
             position_bonus = max(0, 15 - (position * 3))
             base_score += position_bonus
         except ValueError:
@@ -395,15 +529,18 @@ class MediaProfileService:
 
         return base_score
 
-    def _score_audio(self, audio: Optional[str], profile: MediaProfile) -> float:
+    def _score_audio(
+        self, audio: Optional[str], profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score audio codec based on position in list
         Earlier in list = higher score
         """
-        if not audio or not profile.audio_codecs:
+        audio_codecs = profile.get_audio_codecs_for_type(media_type) if media_type else []
+        if not audio or not audio_codecs:
             return 0.0
 
-        if audio not in profile.audio_codecs:
+        if audio not in audio_codecs:
             return 0.0
 
         # Use comprehensive audio hierarchy
@@ -411,7 +548,7 @@ class MediaProfileService:
 
         # Bonus based on position in list
         try:
-            position = profile.audio_codecs.index(audio)
+            position = audio_codecs.index(audio)
             position_bonus = max(0, 20 - (position * 4))
             base_score += position_bonus
         except ValueError:
@@ -419,19 +556,22 @@ class MediaProfileService:
 
         return base_score
 
-    def _score_hdr(self, release: TorrentRelease, profile: MediaProfile) -> float:
+    def _score_hdr(
+        self, release: TorrentRelease, profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score HDR format based on position in list
         Earlier in list = higher score
         """
-        if not profile.hdr_formats:
+        hdr_formats = profile.get_hdr_formats_for_type(media_type) if media_type else []
+        if not hdr_formats:
             return 0.0
 
         hdr_detected = release.hdr or self._extract_hdr(release.title)
         if not hdr_detected:
             return 0.0
 
-        if hdr_detected not in profile.hdr_formats:
+        if hdr_detected not in hdr_formats:
             return 0.0
 
         # Base score from hierarchy
@@ -439,7 +579,7 @@ class MediaProfileService:
 
         # Bonus based on position in list
         try:
-            position = profile.hdr_formats.index(hdr_detected)
+            position = hdr_formats.index(hdr_detected)
             position_bonus = max(0, 20 - (position * 5))
             score += position_bonus
         except ValueError:
@@ -447,19 +587,22 @@ class MediaProfileService:
 
         return score
 
-    def _score_edition(self, release: TorrentRelease, profile: MediaProfile) -> float:
+    def _score_edition(
+        self, release: TorrentRelease, profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score edition type based on position in list
         Earlier in list = higher score
         """
-        if not profile.editions:
+        editions = profile.get_editions_for_type(media_type) if media_type else []
+        if not editions:
             return 0.0
 
         edition_detected = release.edition or self._extract_edition(release.title)
         if not edition_detected:
             return 0.0
 
-        if edition_detected not in profile.editions:
+        if edition_detected not in editions:
             return 0.0
 
         # Base score from hierarchy
@@ -467,7 +610,7 @@ class MediaProfileService:
 
         # Bonus based on position in list
         try:
-            position = profile.editions.index(edition_detected)
+            position = editions.index(edition_detected)
             position_bonus = max(0, 10 - (position * 2))
             score += position_bonus
         except ValueError:
@@ -475,18 +618,21 @@ class MediaProfileService:
 
         return score
 
-    def _score_size(self, size: Optional[int], profile: MediaProfile) -> float:
+    def _score_size(
+        self, size: Optional[int], profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """Penalty for size outside optimal range"""
         if not size:
             return 0.0
 
+        min_size, max_size = profile.get_size_limits_for_type(media_type) if media_type else (None, None)
         penalty = 0.0
 
         # If size is way outside range, apply penalty
-        if profile.min_size and size < profile.min_size * 0.8:
+        if min_size and size < min_size * 0.8:
             penalty -= 20
 
-        if profile.max_size and size > profile.max_size * 1.2:
+        if max_size and size > max_size * 1.2:
             penalty -= 20
 
         return penalty
@@ -692,47 +838,53 @@ class MediaProfileService:
         # Default to English if no language detected
         return 'en'
 
-    def _score_resolution(self, release: TorrentRelease, profile: MediaProfile) -> float:
+    def _score_resolution(
+        self, release: TorrentRelease, profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score resolution based on position in list
         Earlier in list = higher score
         """
-        if not profile.resolutions:
+        resolutions = profile.get_resolutions_for_type(media_type) if media_type else []
+        if not resolutions:
             return 0.0
 
         resolution = release.quality or self._extract_resolution(release.title)
         if not resolution:
             return 0.0
 
-        if resolution not in profile.resolutions:
+        if resolution not in resolutions:
             return 0.0
 
         # Bonus based on position in list
         try:
-            position = profile.resolutions.index(resolution)
+            position = resolutions.index(resolution)
             score = max(0, 15 - (position * 3))
             return score
         except ValueError:
             return 0.0
 
-    def _score_audio_channels(self, release: TorrentRelease, profile: MediaProfile) -> float:
+    def _score_audio_channels(
+        self, release: TorrentRelease, profile: MediaProfile, media_type: Optional[str] = None
+    ) -> float:
         """
         Score audio channels based on position in list
         Earlier in list = higher score
         """
-        if not profile.audio_channels:
+        audio_channels = profile.get_audio_channels_for_type(media_type) if media_type else []
+        if not audio_channels:
             return 0.0
 
         channels = release.audio_channels or self._extract_audio_channels(release.title)
         if not channels:
             return 0.0
 
-        if channels not in profile.audio_channels:
+        if channels not in audio_channels:
             return 0.0
 
         # Bonus based on position in list
         try:
-            position = profile.audio_channels.index(channels)
+            position = audio_channels.index(channels)
             score = max(0, 10 - (position * 2))
             return score
         except ValueError:
@@ -744,9 +896,11 @@ class MediaProfileService:
         profile: MediaProfile,
         preferred_uploaders: Optional[List[str]] = None,
         blocked_uploaders: Optional[List[str]] = None,
+        media_type: Optional[str] = None,
     ) -> Optional[TorrentRelease]:
         """
-        Select the best release from a list based on quality profile
+        Select the best release from a list based on quality profile.
+        Uses per-media-type settings when media_type is provided.
         """
         if not releases:
             return None
@@ -755,7 +909,7 @@ class MediaProfileService:
 
         for release in releases:
             score = self.score_release(
-                release, profile, preferred_uploaders, blocked_uploaders
+                release, profile, preferred_uploaders, blocked_uploaders, media_type
             )
             if score >= 0:  # Only include valid releases
                 scored_releases.append((release, score))
@@ -773,6 +927,7 @@ class MediaProfileService:
         current_quality: str,
         new_quality: str,
         profile: MediaProfile,
+        media_type: Optional[str] = None,
     ) -> bool:
         """
         Check if new release is an upgrade over current
@@ -788,7 +943,8 @@ class MediaProfileService:
             return False
 
         # Check if new quality is in the allowed resolutions list
-        if profile.resolutions and new_quality not in profile.resolutions:
+        resolutions = profile.get_resolutions_for_type(media_type) if media_type else []
+        if resolutions and new_quality not in resolutions:
             return False
 
         return True

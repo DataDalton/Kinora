@@ -53,16 +53,30 @@ class SearchEngine:
         category: Optional[str] = None,
         limit_per_indexer: int = 50,
         media_type: Optional[str] = None,
+        selected_indexers: Optional[List[str]] = None,
+        timeout: int = 30,
+        max_results: int = 100,
     ) -> List[TorrentRelease]:
         """
-        Search all enabled indexers in parallel
-        Returns combined and deduplicated results
-        Uses appropriate indexers based on media type
+        Search all enabled indexers in parallel.
+        Returns combined and deduplicated results.
+        Uses selected_indexers if provided, otherwise falls back to type-based defaults.
         """
+        # Map indexer names to instances
+        indexer_map = {
+            '1337x': leetx_indexer,
+            'YTS': yts_indexer,
+            'Nyaa': self.nyaa_indexer,
+            'Rutracker': None,  # Not implemented yet
+        }
+
         tasks = []
 
-        # Select indexers and category based on media type
-        if media_type == "anime":
+        # Use selected indexers if provided
+        if selected_indexers:
+            indexers = [indexer_map[name] for name in selected_indexers if name in indexer_map and indexer_map[name]]
+        # Fall back to media type based selection
+        elif media_type == "anime":
             indexers = self.anime_indexers
         elif media_type == "music":
             indexers = self.music_indexers
@@ -74,7 +88,15 @@ class SearchEngine:
             task = indexer.search(query, category, limit_per_indexer)
             tasks.append(task)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Run with timeout
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            print(f"Search timeout after {timeout}s")
+            results = []
 
         all_releases = []
         for result in results:
@@ -96,7 +118,8 @@ class SearchEngine:
 
             unique_releases.append(release)
 
-        return unique_releases
+        # Limit total results
+        return unique_releases[:max_results]
 
     async def cascading_search(
         self,
@@ -111,10 +134,10 @@ class SearchEngine:
         Multi-dimensional cascading search
 
         Priority order (highest to lowest):
-        1. Resolution (from profile.resolutions, first = highest priority)
-        2. Source (from profile.sources, first = highest priority)
-        3. Codec (from profile.codecs, first = highest priority)
-        4. HDR (from profile.hdr_formats, first = highest priority)
+        1. Resolution (from per-type resolutions, first = highest priority)
+        2. Source (from per-type sources, first = highest priority)
+        3. Codec (from per-type codecs, first = highest priority)
+        4. HDR (from per-type hdr_formats, first = highest priority)
         5. Uploader (from profile.uploaders, first = highest priority)
 
         If value is in list: allowed
@@ -124,11 +147,24 @@ class SearchEngine:
         Example: ["2160p", "1080p"] + ["BluRay", "WEB-DL"] cascades:
         2160p BluRay -> 2160p WEB-DL -> 1080p BluRay -> 1080p WEB-DL
         """
-        resolution_order = self._get_quality_cascade(profile)
-        source_order = profile.sources or [None]
-        codec_order = profile.codecs or [None]
-        hdr_order = profile.hdr_formats or [None]
+        # Use per-media-type settings (no fallback)
+        resolution_order = self._get_quality_cascade(profile, media_type)
+        source_order = profile.get_sources_for_type(media_type) if media_type else []
+        codec_order = profile.get_codecs_for_type(media_type) if media_type else []
+        hdr_order = profile.get_hdr_formats_for_type(media_type) if media_type else []
         uploader_order = profile.uploaders or [None]
+
+        # Get per-media-type indexers
+        selected_indexers = profile.get_indexers_for_type(media_type) if media_type else None
+
+        # Get search timing settings from profile
+        search_timeout = profile.search_timeout
+        max_results = profile.max_results
+
+        # Ensure we have at least [None] for empty lists so iteration works
+        source_order = source_order or [None]
+        codec_order = codec_order or [None]
+        hdr_order = hdr_order or [None]
 
         print(f"Cascading search: {base_query}")
         print(f"Resolution order: {resolution_order}")
@@ -136,6 +172,8 @@ class SearchEngine:
         print(f"Codec order: {codec_order}")
         print(f"HDR order: {hdr_order}")
         print(f"Uploader order: {uploader_order}")
+        if selected_indexers:
+            print(f"Selected indexers: {selected_indexers}")
 
         # Multi-dimensional cascade
         for resolution in resolution_order:
@@ -156,8 +194,16 @@ class SearchEngine:
 
                             print(f"\nQuery: {query}")
 
-                            # Search all indexers
-                            releases = await self.search_all_indexers(query, category, limit_per_indexer=50, media_type=media_type)
+                            # Search indexers with per-type selection and timing
+                            releases = await self.search_all_indexers(
+                                query,
+                                category,
+                                limit_per_indexer=50,
+                                media_type=media_type,
+                                selected_indexers=selected_indexers,
+                                timeout=search_timeout,
+                                max_results=max_results,
+                            )
 
                             if not releases:
                                 continue
@@ -165,7 +211,7 @@ class SearchEngine:
                             # Filter by profile requirements
                             filtered_releases = []
                             for release in releases:
-                                if not media_profile_service._meets_minimum_requirements(release, profile):
+                                if not media_profile_service._meets_minimum_requirements(release, profile, media_type):
                                     continue
 
                                 if blocked_uploaders and release.uploader in blocked_uploaders:
@@ -186,6 +232,7 @@ class SearchEngine:
                                 profile,
                                 preferred_uploaders,
                                 blocked_uploaders,
+                                media_type,
                             )
 
                             if not best_release:
@@ -311,18 +358,13 @@ class SearchEngine:
 
         return all_releases
 
-    def _get_quality_cascade(self, profile: MediaProfile) -> List[str]:
+    def _get_quality_cascade(self, profile: MediaProfile, media_type: Optional[str] = None) -> List[str]:
         """
-        Build quality cascade order from profile resolutions
+        Build quality cascade order from profile resolutions.
+        Uses per-media-type resolutions (no fallback).
         Resolutions list is already ordered by preference (highest priority first)
         """
-        resolutions = profile.resolutions or []
-
-        if not resolutions:
-            # Default cascade if no resolutions specified
-            return ['2160p', '1080p', '720p', '480p']
-
-        # Resolutions are already ordered by preference (first = most preferred)
+        resolutions = profile.get_resolutions_for_type(media_type) if media_type else []
         return resolutions
 
     def _meets_anime_requirements(self, release: TorrentRelease, profile: MediaProfile) -> bool:
@@ -394,6 +436,11 @@ class SearchEngine:
             'flac', 'mp3_320', 'mp3_256', 'mp3_128', 'aac', 'ogg'
         ]
 
+        # Get per-media-type indexers and timing
+        selected_indexers = profile.get_indexers_for_type('music')
+        search_timeout = profile.search_timeout
+        max_results = profile.max_results
+
         # Map quality values to search terms
         format_search_terms = {
             'flac': 'FLAC',
@@ -406,6 +453,8 @@ class SearchEngine:
 
         print(f"Music cascading search: {query}")
         print(f"Quality order: {quality_order}")
+        if selected_indexers:
+            print(f"Selected indexers: {selected_indexers}")
 
         for quality in quality_order:
             search_term = format_search_terms.get(quality, quality.upper())
@@ -417,7 +466,10 @@ class SearchEngine:
                 search_query,
                 category="music",
                 limit_per_indexer=50,
-                media_type="music"
+                media_type="music",
+                selected_indexers=selected_indexers,
+                timeout=search_timeout,
+                max_results=max_results,
             )
 
             if not releases:

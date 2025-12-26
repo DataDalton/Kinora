@@ -1,1 +1,1 @@
-export { default as BasicInfo } from './BasicInfo';
+export { default as Validation } from './Validation';

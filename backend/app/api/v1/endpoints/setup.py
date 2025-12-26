@@ -70,6 +70,7 @@ class RootFoldersSetupRequest(BaseModel):
     movies_root: str = Field(..., description="Root folder for movies")
     shows_root: str = Field(..., description="Root folder for TV shows")
     anime_root: str = Field(..., description="Root folder for anime")
+    music_root: str = Field(..., description="Root folder for music")
 
 
 @router.get("/status", response_model=SetupStatusResponse)
@@ -101,9 +102,13 @@ async def get_setup_status(
     anime_root = await conn.fetchrow(
         "SELECT value FROM app_settings WHERE key = 'root_folder_anime'"
     )
+    music_root = await conn.fetchrow(
+        "SELECT value FROM app_settings WHERE key = 'root_folder_music'"
+    )
     has_root_folders = bool(movies_root and movies_root['value'] and
                             shows_root and shows_root['value'] and
-                            anime_root and anime_root['value'])
+                            anime_root and anime_root['value'] and
+                            music_root and music_root['value'])
 
     is_setup_complete = has_download_client and has_tmdb_key and has_root_folders
 
@@ -162,6 +167,10 @@ async def setup_qbittorrent(
             pass
         try:
             await client.add_category("anime", "/downloads/anime")
+        except Exception:
+            pass
+        try:
+            await client.add_category("music", "/downloads/music")
         except Exception:
             pass
 
@@ -281,7 +290,8 @@ async def setup_root_folders(
     for folder_type, path in [
         ("movies", config.movies_root),
         ("shows", config.shows_root),
-        ("anime", config.anime_root)
+        ("anime", config.anime_root),
+        ("music", config.music_root)
     ]:
         if not os.path.exists(path):
             try:
@@ -297,6 +307,7 @@ async def setup_root_folders(
         ("root_folder_movies", config.movies_root, "Root folder for organizing movie files"),
         ("root_folder_shows", config.shows_root, "Root folder for organizing TV show files"),
         ("root_folder_anime", config.anime_root, "Root folder for organizing anime files"),
+        ("root_folder_music", config.music_root, "Root folder for organizing music files"),
     ]
 
     for key, value, description in folders:

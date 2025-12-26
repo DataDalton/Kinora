@@ -23,16 +23,6 @@ import {
 interface MediaProfile {
   id: number;
   name: string;
-  min_size: number;
-  max_size: number;
-  // Legacy global quality
-  resolutions?: string[];
-  codecs?: string[];
-  sources?: string[];
-  audio_codecs?: string[];
-  audio_channels?: string[];
-  hdr_formats?: string[];
-  editions?: string[];
   // Per-media-type quality: Movies
   movie_resolutions?: string[];
   movie_codecs?: string[];
@@ -109,7 +99,7 @@ interface MediaProfile {
   colon_replacement?: string;
   // Torrent validation settings
   validation_enabled?: boolean;
-  allowed_extensions?: string[];
+  validation_mode?: string;
   forbidden_extensions?: string[];
   validation_failure_action?: string;
   movie_allowed_extensions?: string[];
@@ -164,16 +154,6 @@ export default function MediaProfilesPage() {
     mutationFn: async (data: MediaProfileFormData) => {
       const response = await api.post('/media-profiles', {
         name: data.name,
-        min_size: data.min_size,
-        max_size: data.max_size,
-        // Legacy global quality (for backward compatibility)
-        resolutions: data.resolutions,
-        codecs: data.codecs,
-        sources: data.sources,
-        audio_codecs: data.audio,
-        audio_channels: data.audio_channels,
-        hdr_formats: data.hdr,
-        editions: data.editions,
         // Per-media-type quality: Movies
         movie_resolutions: data.movie_resolutions,
         movie_codecs: data.movie_codecs,
@@ -249,7 +229,7 @@ export default function MediaProfilesPage() {
         colon_replacement: data.colon_replacement,
         // Torrent validation settings
         validation_enabled: data.validation_enabled,
-        allowed_extensions: data.allowed_extensions,
+        validation_mode: data.validation_mode,
         forbidden_extensions: data.forbidden_extensions,
         validation_failure_action: data.validation_failure_action,
         movie_allowed_extensions: data.movie_allowed_extensions,
@@ -269,16 +249,6 @@ export default function MediaProfilesPage() {
     mutationFn: async ({ id, data }: { id: number; data: MediaProfileFormData }) => {
       const response = await api.put(`/media-profiles/${id}`, {
         name: data.name,
-        min_size: data.min_size,
-        max_size: data.max_size,
-        // Legacy global quality
-        resolutions: data.resolutions,
-        codecs: data.codecs,
-        sources: data.sources,
-        audio_codecs: data.audio,
-        audio_channels: data.audio_channels,
-        hdr_formats: data.hdr,
-        editions: data.editions,
         // Per-media-type quality: Movies
         movie_resolutions: data.movie_resolutions,
         movie_codecs: data.movie_codecs,
@@ -354,7 +324,7 @@ export default function MediaProfilesPage() {
         colon_replacement: data.colon_replacement,
         // Torrent validation settings
         validation_enabled: data.validation_enabled,
-        allowed_extensions: data.allowed_extensions,
+        validation_mode: data.validation_mode,
         forbidden_extensions: data.forbidden_extensions,
         validation_failure_action: data.validation_failure_action,
         movie_allowed_extensions: data.movie_allowed_extensions,
@@ -399,16 +369,6 @@ export default function MediaProfilesPage() {
     setFormData({
       ...defaults,
       name: profile.name,
-      min_size: profile.min_size || 0,
-      max_size: profile.max_size || 0,
-      // Legacy global quality
-      resolutions: profile.resolutions || [],
-      sources: profile.sources || [],
-      codecs: profile.codecs || [],
-      audio: profile.audio_codecs || [],
-      audio_channels: profile.audio_channels || [],
-      hdr: profile.hdr_formats || [],
-      editions: profile.editions || [],
       // Per-media-type quality: Movies
       movie_resolutions: profile.movie_resolutions || [],
       movie_codecs: profile.movie_codecs || [],
@@ -484,7 +444,7 @@ export default function MediaProfilesPage() {
       colon_replacement: profile.colon_replacement || ' -',
       // Torrent validation settings
       validation_enabled: profile.validation_enabled ?? true,
-      allowed_extensions: profile.allowed_extensions || [],
+      validation_mode: (profile.validation_mode as 'blocklist' | 'allowlist') || 'allowlist',
       forbidden_extensions: profile.forbidden_extensions || defaults.forbidden_extensions,
       validation_failure_action: (profile.validation_failure_action as 'delete' | 'pause_notify' | 'quarantine') || 'pause_notify',
       movie_allowed_extensions: profile.movie_allowed_extensions || defaults.movie_allowed_extensions,
@@ -512,20 +472,74 @@ export default function MediaProfilesPage() {
       errors.push('At least one indexer must be selected');
     }
 
-    // Check if any quality filters are set for any media type
-    const hasMovieQuality = formData.movie_resolutions.length > 0 ||
-                           formData.movie_codecs.length > 0 ||
-                           formData.movie_sources.length > 0;
-    const hasShowQuality = formData.show_resolutions.length > 0 ||
-                          formData.show_codecs.length > 0 ||
-                          formData.show_sources.length > 0;
-    const hasAnimeQuality = formData.anime_resolutions.length > 0 ||
-                           formData.anime_codecs.length > 0 ||
-                           formData.anime_sources.length > 0;
-    const hasMusicQuality = formData.music_preferred_quality.length > 0;
+    // Require resolutions for each media type that has indexers configured
+    if (formData.movie_indexers.length > 0 && formData.movie_resolutions.length === 0) {
+      errors.push('Movie resolutions are required when movie indexers are selected');
+    }
+    if (formData.show_indexers.length > 0 && formData.show_resolutions.length === 0) {
+      errors.push('TV show resolutions are required when show indexers are selected');
+    }
+    if (formData.anime_indexers.length > 0 && formData.anime_resolutions.length === 0) {
+      errors.push('Anime resolutions are required when anime indexers are selected');
+    }
+    if (formData.music_indexers.length > 0 && formData.music_preferred_quality.length === 0) {
+      errors.push('Music quality preferences are required when music indexers are selected');
+    }
 
-    if (!hasMovieQuality && !hasShowQuality && !hasAnimeQuality && !hasMusicQuality) {
-      warnings.push('No quality filters set for any media type - will accept any quality');
+    // Require naming formats for each media type that has indexers configured
+    if (formData.movie_indexers.length > 0 && !formData.movie_naming_format.trim()) {
+      errors.push('Movie naming format is required when movie indexers are selected');
+    }
+    if (formData.show_indexers.length > 0 && !formData.show_naming_format.trim()) {
+      errors.push('TV show naming format is required when show indexers are selected');
+    }
+    if (formData.anime_indexers.length > 0 && !formData.anime_naming_format.trim()) {
+      errors.push('Anime naming format is required when anime indexers are selected');
+    }
+    if (formData.music_indexers.length > 0 && !formData.music_track_naming_format.trim()) {
+      errors.push('Music track naming format is required when music indexers are selected');
+    }
+
+    // Validate custom regex if provided
+    if (formData.custom_regex.trim()) {
+      try {
+        new RegExp(formData.custom_regex);
+      } catch {
+        errors.push('Custom regex filter is invalid');
+      }
+    }
+
+    // Validate timing inputs are within acceptable ranges
+    if (formData.search_timeout < 5 || formData.search_timeout > 300) {
+      errors.push('Search timeout must be between 5 and 300 seconds');
+    }
+    if (formData.max_retries < 0 || formData.max_retries > 10) {
+      errors.push('Max retries must be between 0 and 10');
+    }
+    if (formData.max_results < 10 || formData.max_results > 1000) {
+      errors.push('Max results must be between 10 and 1000');
+    }
+
+    // Validate file extension settings when validation is enabled
+    if (formData.validation_enabled) {
+      if (formData.validation_mode === 'allowlist') {
+        if (formData.movie_indexers.length > 0 && formData.movie_allowed_extensions.length === 0) {
+          errors.push('Movie allowed extensions are required when validation is enabled');
+        }
+        if (formData.show_indexers.length > 0 && formData.show_allowed_extensions.length === 0) {
+          errors.push('TV show allowed extensions are required when validation is enabled');
+        }
+        if (formData.anime_indexers.length > 0 && formData.anime_allowed_extensions.length === 0) {
+          errors.push('Anime allowed extensions are required when validation is enabled');
+        }
+        if (formData.music_indexers.length > 0 && formData.music_allowed_extensions.length === 0) {
+          errors.push('Music allowed extensions are required when validation is enabled');
+        }
+      } else if (formData.validation_mode === 'blocklist') {
+        if (formData.forbidden_extensions.length === 0) {
+          errors.push('Forbidden extensions are required when blocklist mode is enabled');
+        }
+      }
     }
 
     if (formData.languages.length === 0) {

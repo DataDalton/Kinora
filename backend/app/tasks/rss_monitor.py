@@ -105,8 +105,8 @@ async def check_and_grab_movie(conn, release, movie):
 
     profile = MediaProfile(**dict(profile_row))
 
-    # Score the release
-    score = media_profile_service.score_release(release, profile)
+    # Score the release with movie-specific settings
+    score = media_profile_service.score_release(release, profile, media_type='movie')
 
     if score < 0:
         return False  # Release doesn't meet requirements
@@ -208,8 +208,8 @@ async def check_and_grab_show(conn, release, show):
 
     profile = MediaProfile(**dict(profile_row))
 
-    # Score the release
-    score = media_profile_service.score_release(release, profile)
+    # Score the release with show-specific settings
+    score = media_profile_service.score_release(release, profile, media_type='show')
 
     if score < 0:
         return False

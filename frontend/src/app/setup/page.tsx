@@ -39,10 +39,11 @@ export default function SetupPage() {
     movies_root: '',
     shows_root: '',
     anime_root: '',
+    music_root: '',
   });
 
   const [showBrowser, setShowBrowser] = useState(false);
-  const [browserField, setBrowserField] = useState<'movies_root' | 'shows_root' | 'anime_root' | null>(null);
+  const [browserField, setBrowserField] = useState<'movies_root' | 'shows_root' | 'anime_root' | 'music_root' | null>(null);
   const [currentBrowserPath, setCurrentBrowserPath] = useState('/');
   const [manualPath, setManualPath] = useState('/');
   const [isWindows] = useState(() => navigator.platform.toLowerCase().includes('win'));
@@ -140,7 +141,7 @@ export default function SetupPage() {
     },
   });
 
-  const openBrowser = (field: 'movies_root' | 'shows_root' | 'anime_root') => {
+  const openBrowser = (field: 'movies_root' | 'shows_root' | 'anime_root' | 'music_root') => {
     setBrowserField(field);
     // Start at root - on Windows this will show drive list, on Unix shows /
     setCurrentBrowserPath('/');
@@ -449,6 +450,27 @@ export default function SetupPage() {
                       <button
                         type="button"
                         onClick={() => openBrowser('anime_root')}
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
+                      >
+                        <FolderOpen className="w-4 h-4" />
+                        Browse
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Music Root Folder</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={foldersData.music_root}
+                        onChange={(e) => setFoldersData({ ...foldersData, music_root: e.target.value })}
+                        placeholder={isWindows ? "C:\\Media\\Music" : "/media/music"}
+                        className="flex-1 px-4 py-2 bg-card border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => openBrowser('music_root')}
                         className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
                       >
                         <FolderOpen className="w-4 h-4" />

@@ -92,14 +92,16 @@ export default function SearchGroup({ formData, setFormData, activeTab }: Search
                     max="100"
                     value={formData.seeder_weight}
                     onChange={(e) => {
-                      const newValue = parseInt(e.target.value);
-                      const remaining = 100 - newValue;
+                      const seederWeight = parseInt(e.target.value);
+                      const remaining = 100 - seederWeight;
                       const sizeRatio = formData.size_weight / (formData.size_weight + formData.recency_weight) || 0.5;
+                      const sizeWeight = Math.round(remaining * sizeRatio);
+                      const recencyWeight = remaining - sizeWeight;
                       setFormData({
                         ...formData,
-                        seeder_weight: newValue,
-                        size_weight: Math.round(remaining * sizeRatio),
-                        recency_weight: Math.round(remaining * (1 - sizeRatio))
+                        seeder_weight: seederWeight,
+                        size_weight: sizeWeight,
+                        recency_weight: recencyWeight
                       });
                     }}
                     className="w-full h-2 bg-background rounded-lg appearance-none cursor-pointer accent-primary"
@@ -117,14 +119,16 @@ export default function SearchGroup({ formData, setFormData, activeTab }: Search
                     max="100"
                     value={formData.size_weight}
                     onChange={(e) => {
-                      const newValue = parseInt(e.target.value);
-                      const remaining = 100 - newValue;
+                      const sizeWeight = parseInt(e.target.value);
+                      const remaining = 100 - sizeWeight;
                       const seederRatio = formData.seeder_weight / (formData.seeder_weight + formData.recency_weight) || 0.5;
+                      const seederWeight = Math.round(remaining * seederRatio);
+                      const recencyWeight = remaining - seederWeight;
                       setFormData({
                         ...formData,
-                        size_weight: newValue,
-                        seeder_weight: Math.round(remaining * seederRatio),
-                        recency_weight: Math.round(remaining * (1 - seederRatio))
+                        size_weight: sizeWeight,
+                        seeder_weight: seederWeight,
+                        recency_weight: recencyWeight
                       });
                     }}
                     className="w-full h-2 bg-background rounded-lg appearance-none cursor-pointer accent-primary"
@@ -142,14 +146,16 @@ export default function SearchGroup({ formData, setFormData, activeTab }: Search
                     max="100"
                     value={formData.recency_weight}
                     onChange={(e) => {
-                      const newValue = parseInt(e.target.value);
-                      const remaining = 100 - newValue;
+                      const recencyWeight = parseInt(e.target.value);
+                      const remaining = 100 - recencyWeight;
                       const seederRatio = formData.seeder_weight / (formData.seeder_weight + formData.size_weight) || 0.5;
+                      const seederWeight = Math.round(remaining * seederRatio);
+                      const sizeWeight = remaining - seederWeight;
                       setFormData({
                         ...formData,
-                        recency_weight: newValue,
-                        seeder_weight: Math.round(remaining * seederRatio),
-                        size_weight: Math.round(remaining * (1 - seederRatio))
+                        recency_weight: recencyWeight,
+                        seeder_weight: seederWeight,
+                        size_weight: sizeWeight
                       });
                     }}
                     className="w-full h-2 bg-background rounded-lg appearance-none cursor-pointer accent-primary"

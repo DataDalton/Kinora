@@ -125,16 +125,6 @@ export const INDEXERS_BY_TYPE = {
 // Default form data factory function
 export const createDefaultFormData = (defaultLanguage: string = 'en'): MediaProfileFormData => ({
   name: '',
-  // Legacy global settings
-  min_size: 0,
-  max_size: 0,
-  resolutions: [],
-  sources: [],
-  codecs: [],
-  audio: [],
-  audio_channels: [],
-  hdr: [],
-  editions: [],
   // Per-media-type quality: Movies
   movie_resolutions: [],
   movie_codecs: [],
@@ -212,7 +202,7 @@ export const createDefaultFormData = (defaultLanguage: string = 'en'): MediaProf
   music_embed_artwork: true,
   // Torrent validation settings
   validation_enabled: true,
-  allowed_extensions: [],
+  validation_mode: 'allowlist',
   forbidden_extensions: ['.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.scr', '.com', '.ps1', '.vbs', '.jar'],
   validation_failure_action: 'pause_notify',
   movie_allowed_extensions: ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts'],

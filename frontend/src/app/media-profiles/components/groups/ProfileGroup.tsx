@@ -81,39 +81,6 @@ export default function ProfileGroup({
           </p>
         </div>
 
-        {/* File Size Limits */}
-        <div className={`p-4 rounded-lg border-2 ${
-          hasAttemptedSubmit && formData.min_size === 0 && formData.max_size === 0
-            ? 'border-warning bg-warning/5'
-            : 'border-transparent'
-        }`}>
-          <h4 className="font-semibold text-sm mb-3">File Size Limits</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold mb-2">Min Size (MB)</label>
-              <input
-                type="number"
-                value={formData.min_size}
-                onChange={(e) => setFormData({ ...formData, min_size: parseInt(e.target.value) || 0 })}
-                className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
-                min="0"
-                placeholder="0 = No minimum"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-2">Max Size (MB)</label>
-              <input
-                type="number"
-                value={formData.max_size}
-                onChange={(e) => setFormData({ ...formData, max_size: parseInt(e.target.value) || 0 })}
-                className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
-                min="0"
-                placeholder="0 = No maximum"
-              />
-            </div>
-          </div>
-        </div>
       </div>
     );
   }
