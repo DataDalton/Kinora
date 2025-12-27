@@ -238,7 +238,7 @@ export default function AnimeDetailPage() {
   });
 
   const getPosterUrl = (path: string | null) => {
-    if (!path) return '/placeholder-poster.jpg';
+    if (!path) return '/placeholder-poster.svg';
     if (path.startsWith('http')) return path;
     return `https://image.tmdb.org/t/p/w500${path}`;
   };

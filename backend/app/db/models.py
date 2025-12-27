@@ -118,7 +118,7 @@ movies = Table(
     Column("imdb_id", String(20)),
     Column("monitored", Boolean, default=True, nullable=False),
     Column("media_profile_id", Integer),
-    Column("root_folder_path", String(500)),
+    Column("root_folder_id", Integer, ForeignKey("root_folders.id", ondelete="SET NULL")),
     Column("runtime", Integer),
     Column("budget", BigInteger),
     Column("revenue", BigInteger),
@@ -169,7 +169,7 @@ shows = Table(
     Column("tvrage_id", Integer),
     Column("monitored", Boolean, default=True, nullable=False),
     Column("media_profile_id", Integer),
-    Column("root_folder_path", String(500)),
+    Column("root_folder_id", Integer, ForeignKey("root_folders.id", ondelete="SET NULL")),
     Column("number_of_seasons", Integer),
     Column("number_of_episodes", Integer),
     Column("episode_run_time", JSONB),
@@ -263,7 +263,7 @@ anime = Table(
     Column("mal_id", Integer),
     Column("monitored", Boolean, default=True, nullable=False),
     Column("media_profile_id", Integer),
-    Column("root_folder_path", String(500)),
+    Column("root_folder_id", Integer, ForeignKey("root_folders.id", ondelete="SET NULL")),
     Column("episodes", Integer),
     Column("duration", Integer),
     Column("season_year", Integer),
@@ -324,7 +324,7 @@ artists = Table(
     Column("picture_xl", String(500)),
     Column("deezer_id", BigInteger, unique=True),
     Column("monitored", Boolean, default=True, nullable=False),
-    Column("root_folder_path", String(500)),
+    Column("root_folder_id", Integer, ForeignKey("root_folders.id", ondelete="SET NULL")),
     Column("genres", JSONB),
     Column("nb_album", Integer),
     Column("nb_fan", Integer),
@@ -351,7 +351,7 @@ albums = Table(
     Column("upc", String(50)),
     Column("monitored", Boolean, default=True, nullable=False),
     Column("media_profile_id", Integer),
-    Column("root_folder_path", String(500)),
+    Column("root_folder_id", Integer, ForeignKey("root_folders.id", ondelete="SET NULL")),
     Column("status", String(50), default="wanted", nullable=False),
     Column("genres", JSONB),
     Column("nb_tracks", Integer),
@@ -523,6 +523,43 @@ appSettings = Table(
     Index("idx_app_settings_category", "category"),
 )
 
+# Root folders table - stores multiple root folders per media type with paired download paths
+rootFolders = Table(
+    "root_folders",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("media_type", String(20), nullable=False),
+    Column("name", String(100), nullable=False),
+    Column("root_path", String(500), nullable=False),
+    Column("download_path", String(500), nullable=False),
+    Column("priority", Integer, default=0, nullable=False),
+    Column("fill_threshold_percent", Integer),
+    Column("fill_threshold_gb", Integer),
+    Column("is_active", Boolean, default=True, nullable=False),
+    Column("is_default", Boolean, default=False, nullable=False),
+    Column("total_space_bytes", BigInteger),
+    Column("free_space_bytes", BigInteger),
+    Column("last_health_check", DateTime),
+    Column("health_status", String(20), default="unknown", nullable=False),
+    Column("health_message", String(500)),
+    Column("created_at", DateTime, server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime, server_default=func.now(), nullable=False),
+    UniqueConstraint("media_type", "root_path", name="uq_root_folders_media_type_root_path"),
+    Index("idx_root_folders_media_type", "media_type"),
+)
+
+# Folder selection settings - stores selection mode per media type
+folderSelectionSettings = Table(
+    "folder_selection_settings",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("media_type", String(20), nullable=False),
+    Column("selection_mode", String(20), default="most_free_space", nullable=False),
+    Column("created_at", DateTime, server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime, server_default=func.now(), nullable=False),
+    UniqueConstraint("media_type", name="uq_folder_selection_settings_media_type"),
+)
+
 # Download clients table
 downloadClients = Table(
     "download_clients",
@@ -572,6 +609,7 @@ downloadHistory = Table(
     Column("source", String(50)),
     Column("seeders", Integer),
     Column("was_upgrade", Boolean, default=False),
+    Column("root_folder_id", Integer, ForeignKey("root_folders.id", ondelete="SET NULL")),
     Column("created_at", DateTime, server_default=func.now(), nullable=False),
     Column("updated_at", DateTime, server_default=func.now(), nullable=False),
     Index("idx_download_history_media", "media_id", "media_type"),

@@ -10,6 +10,8 @@ import AuthProvidersSection from '@/components/AuthProvidersSection';
 import OIDCProvidersManagement from '@/components/OIDCProvidersManagement';
 import ForwardAuthSettings from '@/components/ForwardAuthSettings';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import RootFoldersSection from '@/components/settings/RootFoldersSection';
+import FolderHealthSection from '@/components/settings/FolderHealthSection';
 
 interface Setting {
   key: string;
@@ -46,7 +48,7 @@ interface AppUser {
   updated_at: string;
 }
 
-type SettingsSection = 'users' | 'authentication' | 'oidc-providers' | 'forward-auth' | 'download-clients' | 'api-keys' | 'paths' | 'system';
+type SettingsSection = 'users' | 'authentication' | 'oidc-providers' | 'forward-auth' | 'download-clients' | 'api-keys' | 'root-folders' | 'folder-health' | 'system';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -58,6 +60,7 @@ export default function SettingsPage() {
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
     'auth': true,
     'general': true,
+    'storage': true,
   });
 
   // User management state
@@ -381,8 +384,15 @@ export default function SettingsPage() {
       sections: [
         { id: 'download-clients' as SettingsSection, name: 'Download Clients', count: downloadClients?.length || 0 },
         { id: 'api-keys' as SettingsSection, name: 'API Keys', count: settingsGroups?.find(g => g.category === 'api_keys')?.settings.length || 0 },
-        { id: 'paths' as SettingsSection, name: 'Root Folders', count: settingsGroups?.find(g => g.category === 'paths')?.settings.length || 0 },
         { id: 'system' as SettingsSection, name: 'System', count: settingsGroups?.find(g => g.category === 'system')?.settings.length || 0 },
+      ]
+    },
+    {
+      id: 'storage',
+      name: 'Storage & Folders',
+      sections: [
+        { id: 'root-folders' as SettingsSection, name: 'Root Folders', count: 0 },
+        { id: 'folder-health' as SettingsSection, name: 'Folder Health', count: 0 },
       ]
     }
   ];
@@ -812,37 +822,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Root Folders Section */}
-          {selectedSection === 'paths' && (
-            <div>
-              <PageHeader
-                title="Root Folders"
-                description="Configure where your media files are organized"
-                gradientFrom="yellow-600/10"
-                gradientVia="orange-600/10"
-                gradientTo="red-600/10"
-              />
-              <div className="p-8">
-                <div className="max-w-6xl mx-auto">
-                {settingsGroups?.find(g => g.category === 'paths') && (
-                  <SettingsGroupSection
-                    group={settingsGroups.find(g => g.category === 'paths')!}
-                    editingKey={editingKey}
-                    editValue={editValue}
-                    onEdit={handleEdit}
-                    onSave={handleSave}
-                    onCancel={handleCancel}
-                    onReset={handleReset}
-                    setEditValue={setEditValue}
-                    updateMutation={updateSettingMutation}
-                    deleteMutation={deleteSettingMutation}
-                  />
-                )}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* System Section */}
           {selectedSection === 'system' && (
             <div>
@@ -872,6 +851,16 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Root Folders Section */}
+          {selectedSection === 'root-folders' && (
+            <RootFoldersSection />
+          )}
+
+          {/* Folder Health Section */}
+          {selectedSection === 'folder-health' && (
+            <FolderHealthSection />
           )}
         </div>
       </div>

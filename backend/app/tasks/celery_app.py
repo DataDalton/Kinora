@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.tasks.transcoding",
         "app.tasks.music_monitor",
         "app.tasks.validation_monitor",
+        "app.tasks.folder_health",
     ],
 )
 
@@ -119,6 +120,14 @@ celery_app.conf.beat_schedule = {
     "validation-monitor": {
         "task": "app.tasks.validation_monitor.check_validating_torrents",
         "schedule": 300.0,  # Every 5 minutes - fallback for edge cases (server restarts)
+    },
+    "folder-health-check": {
+        "task": "app.tasks.folder_health.check_folder_health",
+        "schedule": 300.0,  # Every 5 minutes - check folder accessibility
+    },
+    "folder-disk-space-update": {
+        "task": "app.tasks.folder_health.update_disk_space",
+        "schedule": 60.0,  # Every 60 seconds - update cached disk space
     },
 }
 

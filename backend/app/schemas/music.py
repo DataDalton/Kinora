@@ -13,7 +13,7 @@ class ArtistBase(BaseModel):
     picture_xl: Optional[str] = None
     deezer_id: Optional[int] = None
     monitored: bool = True
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
 
 
 class ArtistCreate(ArtistBase):
@@ -30,7 +30,7 @@ class ArtistUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
     monitored: Optional[bool] = None
     upgrade_allowed: Optional[bool] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
 
 
 class Artist(ArtistBase):
@@ -76,7 +76,7 @@ class AlbumBase(BaseModel):
     upc: Optional[str] = None
     monitored: bool = True
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
 
 
 class AlbumCreate(AlbumBase):
@@ -94,7 +94,7 @@ class AlbumUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     monitored: Optional[bool] = None
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
     status: Optional[str] = None
 
 

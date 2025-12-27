@@ -33,7 +33,7 @@ class MovieBase(BaseModel):
     imdb_id: Optional[str] = None
     monitored: bool = True
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
 
 
 class MovieCreate(MovieBase):
@@ -48,7 +48,7 @@ class MovieUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     monitored: Optional[bool] = None
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
     status: Optional[str] = None
 
 

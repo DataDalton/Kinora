@@ -124,7 +124,7 @@ export default function DiscoverMusicPage() {
             >
               <div className="relative aspect-square">
                 <img
-                  src={artist.picture_xl || artist.picture_big || artist.picture_medium || artist.picture || '/placeholder-poster.jpg'}
+                  src={artist.picture_xl || artist.picture_big || artist.picture_medium || artist.picture || '/placeholder-poster.svg'}
                   alt={artist.name}
                   className="w-full h-full object-cover rounded-t-lg"
                 />
@@ -171,7 +171,7 @@ export default function DiscoverMusicPage() {
             >
               <div className="relative aspect-square">
                 <img
-                  src={album.cover_xl || album.cover_medium || album.cover || '/placeholder-poster.jpg'}
+                  src={album.cover_xl || album.cover_medium || album.cover || '/placeholder-poster.svg'}
                   alt={album.title}
                   className="w-full h-full object-cover"
                 />
@@ -224,7 +224,7 @@ export default function DiscoverMusicPage() {
                   {index + 1}
                 </span>
                 <img
-                  src={track.album?.cover_medium || track.album?.cover_xl || '/placeholder-poster.jpg'}
+                  src={track.album?.cover_medium || track.album?.cover_xl || '/placeholder-poster.svg'}
                   alt={track.album?.title}
                   className="w-12 h-12 rounded object-cover"
                 />
@@ -263,7 +263,7 @@ export default function DiscoverMusicPage() {
               }`}
             >
               <img
-                src={genre.picture_big || genre.picture_medium || genre.picture || '/placeholder-poster.jpg'}
+                src={genre.picture_big || genre.picture_medium || genre.picture || '/placeholder-poster.svg'}
                 alt={genre.name}
                 className="w-full h-full object-cover"
               />
@@ -316,7 +316,7 @@ export default function DiscoverMusicPage() {
                   >
                     <div className="relative aspect-square">
                       <img
-                        src={artist.picture_xl || artist.picture_big || artist.picture_medium || artist.picture || '/placeholder-poster.jpg'}
+                        src={artist.picture_xl || artist.picture_big || artist.picture_medium || artist.picture || '/placeholder-poster.svg'}
                         alt={artist.name}
                         className="w-full h-full object-cover rounded-t-lg"
                       />

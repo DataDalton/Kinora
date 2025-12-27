@@ -18,6 +18,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
 from app.services.download_clients.qbittorrent import QBittorrentClient
 from app.core.config import settings
+from app.services.folder_selector import folderSelector
 
 
 router = APIRouter()
@@ -65,12 +66,28 @@ class TMDBSetupRequest(BaseModel):
     api_key: str = Field(..., min_length=32, description="TMDB API v3 key")
 
 
+class RootFolderSetupItem(BaseModel):
+    """Single root folder configuration for setup"""
+    name: str = Field(..., description="Display name for this folder")
+    root_path: str = Field(..., description="Root folder path for organized media")
+    download_path: Optional[str] = Field(None, description="Download folder path (auto-generated if not provided)")
+
+
+class SelectionModeConfig(BaseModel):
+    """Per-media-type selection mode configuration"""
+    movies: str = Field(default="most_free_space", description="Selection mode for movies")
+    shows: str = Field(default="most_free_space", description="Selection mode for TV shows")
+    anime: str = Field(default="most_free_space", description="Selection mode for anime")
+    music: str = Field(default="most_free_space", description="Selection mode for music")
+
+
 class RootFoldersSetupRequest(BaseModel):
-    """Request to configure root folders"""
-    movies_root: str = Field(..., description="Root folder for movies")
-    shows_root: str = Field(..., description="Root folder for TV shows")
-    anime_root: str = Field(..., description="Root folder for anime")
-    music_root: str = Field(..., description="Root folder for music")
+    """Request to configure root folders - supports multiple folders per media type"""
+    movies: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for movies")
+    shows: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for TV shows")
+    anime: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for anime")
+    music: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for music")
+    selection_modes: SelectionModeConfig = Field(default_factory=SelectionModeConfig, description="Selection mode per media type")
 
 
 @router.get("/status", response_model=SetupStatusResponse)
@@ -92,23 +109,18 @@ async def get_setup_status(
     )
     has_tmdb_key = bool(tmdb_key_row and tmdb_key_row['value'])
 
-    # Check for root folders
-    movies_root = await conn.fetchrow(
-        "SELECT value FROM app_settings WHERE key = 'root_folder_movies'"
-    )
-    shows_root = await conn.fetchrow(
-        "SELECT value FROM app_settings WHERE key = 'root_folder_shows'"
-    )
-    anime_root = await conn.fetchrow(
-        "SELECT value FROM app_settings WHERE key = 'root_folder_anime'"
-    )
-    music_root = await conn.fetchrow(
-        "SELECT value FROM app_settings WHERE key = 'root_folder_music'"
-    )
-    has_root_folders = bool(movies_root and movies_root['value'] and
-                            shows_root and shows_root['value'] and
-                            anime_root and anime_root['value'] and
-                            music_root and music_root['value'])
+    # Check for root folders - requires at least one active folder per media type
+    mediaTypes = ['movies', 'shows', 'anime', 'music']
+    hasAllFolders = True
+    for mediaType in mediaTypes:
+        folderCount = await conn.fetchval(
+            "SELECT COUNT(*) FROM root_folders WHERE media_type = $1 AND is_active = TRUE",
+            mediaType
+        )
+        if not folderCount or folderCount == 0:
+            hasAllFolders = False
+            break
+    has_root_folders = hasAllFolders
 
     is_setup_complete = has_download_client and has_tmdb_key and has_root_folders
 
@@ -277,6 +289,7 @@ async def setup_root_folders(
 ):
     """
     Configure root folders for media organization.
+    Creates multiple root folders per media type with paired download folders.
     Only administrators can configure setup.
     """
     if current_user.role != 'administrator':
@@ -285,47 +298,73 @@ async def setup_root_folders(
             detail="Only administrators can configure setup"
         )
 
-    # Validate paths exist (optional - you might want to create them)
-    import os
-    for folder_type, path in [
-        ("movies", config.movies_root),
-        ("shows", config.shows_root),
-        ("anime", config.anime_root),
-        ("music", config.music_root)
-    ]:
-        if not os.path.exists(path):
+    # Map media types to their folder lists
+    mediaTypeFolders = {
+        "movies": config.movies,
+        "shows": config.shows,
+        "anime": config.anime,
+        "music": config.music,
+    }
+
+    createdFolders = []
+    errors = []
+
+    for mediaType, folders in mediaTypeFolders.items():
+        for folderItem in folders:
             try:
-                os.makedirs(path, exist_ok=True)
-            except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to create {folder_type} folder at {path}: {str(e)}"
+                # Create the root folder using the folder selector service
+                folder = await folderSelector.createFolder(
+                    conn,
+                    mediaType=mediaType,
+                    name=folderItem.name,
+                    rootPath=folderItem.root_path,
+                    downloadPath=folderItem.download_path,
+                    priority=0,
+                    fillThresholdPercent=None,
+                    fillThresholdGb=None,
                 )
+                createdFolders.append({
+                    "mediaType": mediaType,
+                    "name": folderItem.name,
+                    "id": folder["id"]
+                })
+            except ValueError as e:
+                errors.append(f"{mediaType}/{folderItem.name}: {str(e)}")
+            except Exception as e:
+                errors.append(f"{mediaType}/{folderItem.name}: {str(e)}")
 
-    # Save root folders
-    folders = [
-        ("root_folder_movies", config.movies_root, "Root folder for organizing movie files"),
-        ("root_folder_shows", config.shows_root, "Root folder for organizing TV show files"),
-        ("root_folder_anime", config.anime_root, "Root folder for organizing anime files"),
-        ("root_folder_music", config.music_root, "Root folder for organizing music files"),
-    ]
-
-    for key, value, description in folders:
+        # Set up folder selection settings for this media type
+        selectionMode = getattr(config.selection_modes, mediaType, "most_free_space")
         await conn.execute(
             """
-            INSERT INTO app_settings (key, value, value_type, is_encrypted, category, description)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+            INSERT INTO folder_selection_settings (media_type, selection_mode)
+            VALUES ($1, $2)
+            ON CONFLICT (media_type) DO UPDATE SET selection_mode = $2, updated_at = NOW()
             """,
-            key,
-            value,
-            "string",
-            False,
-            "paths",
-            description
+            mediaType,
+            selectionMode
         )
 
-    return {"status": "success", "message": "Root folders configured successfully"}
+    if errors:
+        # If some folders failed but others succeeded, return partial success
+        if createdFolders:
+            return {
+                "status": "partial",
+                "message": f"Created {len(createdFolders)} folders with {len(errors)} errors",
+                "created": createdFolders,
+                "errors": errors
+            }
+        # If all folders failed, raise an error
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create root folders: {'; '.join(errors)}"
+        )
+
+    return {
+        "status": "success",
+        "message": f"Root folders configured successfully ({len(createdFolders)} folders created)",
+        "created": createdFolders
+    }
 
 
 @router.post("/complete")

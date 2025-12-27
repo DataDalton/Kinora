@@ -13,6 +13,8 @@ from app.services.automation.search_engine import search_engine
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.media_profile import MediaProfile
 from app.services.torrent_validator import validate_and_resume_torrent
+from app.services.folder_selector import folderSelector
+from app.services.folder_health import folderHealthMonitor
 from app.services.quality_definitions import (
     Resolution,
     Source,
@@ -45,6 +47,7 @@ class DownloadReleaseRequest(BaseModel):
     quality: Optional[str] = None
     size: Optional[int] = None
     seeders: Optional[int] = None
+    root_folder_id: Optional[int] = None  # Override folder selection
 
 
 @router.get("/")
@@ -673,8 +676,8 @@ async def download_release(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Download a selected release from search results
-    Sends to qBittorrent download client
+    Download a selected release from search results.
+    Selects appropriate root folder and sends to qBittorrent.
     """
     try:
         # Get torrent source (prefer .torrent URL, fallback to magnet)
@@ -694,67 +697,129 @@ async def download_release(
                 detail="Download client not configured or unavailable"
             )
 
-        # Add torrent paused with validating tag for pre-download validation
-        base_tags = ["nexarr", "validating"]
-        if data.indexer:
-            base_tags.append(data.indexer)
-
-        torrent_hash = await client.add_torrent(
-            torrent=torrent_source,
-            category=data.media_type,
-            tags=base_tags,
-            paused=True,
-        )
-
-        # Get media profile for validation settings
-        profile = None
         pool = await get_pool()
         async with pool.acquire() as conn:
-            # Map media type to table name
-            table_map = {
-                "movie": "movies",
-                "show": "shows",
-                "anime": "anime",
-                "album": "albums",
-                "music": "albums",
+            # Map media type to table name and folder media type
+            tableMap = {
+                "movie": ("movies", "movies"),
+                "show": ("shows", "shows"),
+                "anime": ("anime", "anime"),
+                "album": ("albums", "music"),
+                "music": ("albums", "music"),
             }
-            table_name = table_map.get(data.media_type)
+            tableName, folderMediaType = tableMap.get(data.media_type, (None, None))
 
-            if table_name and data.media_id:
-                media_row = await conn.fetchrow(
-                    f"SELECT media_profile_id FROM {table_name} WHERE id = $1",
+            # Get media item's assigned folder and profile
+            mediaRootFolderId = None
+            profile = None
+
+            if tableName and data.media_id:
+                mediaRow = await conn.fetchrow(
+                    f"SELECT root_folder_id, media_profile_id FROM {tableName} WHERE id = $1",
                     data.media_id
                 )
-                if media_row and media_row.get("media_profile_id"):
-                    profile_row = await conn.fetchrow(
-                        "SELECT * FROM media_profiles WHERE id = $1",
-                        media_row["media_profile_id"]
-                    )
-                    if profile_row:
-                        profile = MediaProfile(**dict(profile_row))
+                if mediaRow:
+                    mediaRootFolderId = mediaRow.get("root_folder_id")
+                    if mediaRow.get("media_profile_id"):
+                        profileRow = await conn.fetchrow(
+                            "SELECT * FROM media_profiles WHERE id = $1",
+                            mediaRow["media_profile_id"]
+                        )
+                        if profileRow:
+                            profile = MediaProfile(**dict(profileRow))
+
+            # Determine which folder to use:
+            # 1. User override from request
+            # 2. Media item's assigned folder
+            # 3. Auto-select based on rules
+            overrideFolderId = data.root_folder_id or mediaRootFolderId
+
+            # Select folder using folder selector service
+            folder = await folderSelector.selectFolder(
+                conn,
+                mediaType=folderMediaType or data.media_type,
+                overrideFolderId=overrideFolderId
+            )
+
+            if not folder:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No active root folder configured for {data.media_type}"
+                )
+
+            # Check folder health before using
+            if folder.get("health_status") == "error":
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Root folder '{folder['name']}' is unhealthy: {folder.get('health_message', 'Unknown error')}"
+                )
+
+            # Add torrent paused with validating tag
+            baseTags = ["nexarr", "validating"]
+            if data.indexer:
+                baseTags.append(data.indexer)
+            # Add folder identifier tag for traceability in qBittorrent
+            baseTags.append(f"folder:{folder['id']}")
+
+            # Use folder's paired download path for hardlink compatibility
+            torrentHash = await client.add_torrent(
+                torrent=torrent_source,
+                save_path=folder["download_path"],
+                category=data.media_type,
+                tags=baseTags,
+                paused=True,
+            )
+
+            # Record in download_history with folder assignment
+            await conn.execute(
+                """
+                INSERT INTO download_history (
+                    torrent_hash, media_type, media_id, episode_id, root_folder_id,
+                    indexer, quality, size_bytes, status, created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'downloading', NOW())
+                ON CONFLICT (torrent_hash) DO UPDATE SET
+                    root_folder_id = $5,
+                    updated_at = NOW()
+                """,
+                torrentHash,
+                data.media_type,
+                data.media_id,
+                data.episode_id,
+                folder["id"],
+                data.indexer,
+                data.quality,
+                data.size,
+            )
 
         # Trigger validation immediately after adding
         if profile:
-            validation_result = await validate_and_resume_torrent(
-                torrent_hash=torrent_hash,
+            validationResult = await validate_and_resume_torrent(
+                torrent_hash=torrentHash,
                 client=client,
                 profile=profile,
                 media_type=data.media_type,
             )
             return {
                 "success": True,
-                "hash": torrent_hash,
-                "message": f"Download queued: {validation_result.message}"
+                "hash": torrentHash,
+                "root_folder_id": folder["id"],
+                "root_folder_name": folder["name"],
+                "download_path": folder["download_path"],
+                "message": f"Download queued to '{folder['name']}': {validationResult.message}"
             }
         else:
             # No profile found, resume without validation
-            await client.remove_tags(torrent_hash, ["validating"])
-            await client.set_tags(torrent_hash, ["validated"])
-            await client.resume_torrent(torrent_hash)
+            await client.remove_tags(torrentHash, ["validating"])
+            await client.set_tags(torrentHash, ["validated"])
+            await client.resume_torrent(torrentHash)
             return {
                 "success": True,
-                "hash": torrent_hash,
-                "message": "Download started (no profile for validation)"
+                "hash": torrentHash,
+                "root_folder_id": folder["id"],
+                "root_folder_name": folder["name"],
+                "download_path": folder["download_path"],
+                "message": f"Download started to '{folder['name']}' (no profile for validation)"
             }
 
     except HTTPException:

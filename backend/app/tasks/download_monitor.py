@@ -9,6 +9,7 @@ from app.services.download_clients.base import TorrentState
 from app.core.webtransport import webtransport_manager
 from app.services.file_manager import FileManager
 from app.services.metadata_extractor import MetadataExtractor
+from app.services.folder_selector import folderSelector
 
 
 async def get_file_operation(conn, media_id: int, media_type: str) -> str:
@@ -88,19 +89,13 @@ async def get_profile_settings(conn, media_id: int, media_type: str) -> dict:
     return dict(result)
 
 
-def organize_with_fallback(file_manager: FileManager, source: str, dest: str, operation: str) -> bool:
+def organize_file_hardlink(file_manager: FileManager, source: str, dest: str) -> bool:
     """
-    Try the specified operation, fall back to copy if hardlink fails.
-    Returns True on success, False on failure.
+    Organize file using hardlink only. No fallback to copy.
+    Root folder and download folder are paired on same filesystem to guarantee hardlinks work.
+    Returns True on success, raises exception on failure.
     """
-    try:
-        return file_manager.organize_file(source, dest, operation)
-    except OSError as e:
-        # Hardlink may fail across filesystems, fall back to copy
-        if operation == 'hardlink':
-            print(f"Hardlink failed ({e}), falling back to copy")
-            return file_manager.organize_file(source, dest, 'copy')
-        raise
+    return file_manager.organize_file(source, dest, 'hardlink')
 
 
 def parse_episode_info(filename: str) -> dict:
@@ -233,7 +228,8 @@ async def async_check_downloads():
 async def handle_completed_download(conn, download_record, torrent):
     """
     Handle post-processing for completed download.
-    Organizes files using FileManager and updates database.
+    Organizes files using FileManager with hardlinks and updates database.
+    Root folder comes from download_history.root_folder_id.
     """
     try:
         # Mark as completed
@@ -248,6 +244,18 @@ async def handle_completed_download(conn, download_record, torrent):
 
         media_id = download_record["media_id"]
         media_type = download_record["media_type"]
+        root_folder_id = download_record.get("root_folder_id")
+
+        # Get the root folder from download history
+        root_folder = None
+        if root_folder_id:
+            root_folder = await folderSelector.getFolder(conn, root_folder_id)
+
+        if not root_folder:
+            print(f"No root folder found for download {torrent.hash}")
+            return
+
+        root_path = root_folder["root_path"]
 
         # Initialize services
         file_manager = FileManager()
@@ -255,7 +263,6 @@ async def handle_completed_download(conn, download_record, torrent):
 
         # Get profile settings for file organization
         profile = await get_profile_settings(conn, media_id, media_type)
-        operation = 'hardlink' if profile.get('use_hardlinks', True) else 'copy'
         illegal_replacement = profile.get('illegal_char_replacement') or ''
         colon_replacement = profile.get('colon_replacement') or ' -'
 
@@ -264,7 +271,7 @@ async def handle_completed_download(conn, download_record, torrent):
             # Get movie details
             movie = await conn.fetchrow(
                 """
-                SELECT title, release_date, tmdb_id, root_folder_path
+                SELECT title, release_date, tmdb_id
                 FROM movies WHERE id = $1
                 """,
                 media_id
@@ -286,11 +293,12 @@ async def handle_completed_download(conn, download_record, torrent):
                     """
                     UPDATE movies
                     SET status = 'completed', has_file = TRUE,
-                        file_path = $1, file_size = $2, updated_at = NOW()
-                    WHERE id = $3
+                        file_path = $1, file_size = $2, root_folder_id = $3, updated_at = NOW()
+                    WHERE id = $4
                     """,
                     torrent.save_path,
                     torrent.size,
+                    root_folder_id,
                     media_id
                 )
                 return
@@ -298,9 +306,6 @@ async def handle_completed_download(conn, download_record, torrent):
             # Extract metadata from file
             file_metadata = metadata_extractor.extract_metadata(source_path)
             quality_detected = file_metadata.get('quality') if file_metadata else None
-
-            # Determine destination path
-            root_folder = movie["root_folder_path"] or "/media/movies"
 
             # Get naming pattern from profile or use default
             naming_pattern = profile.get('movie_naming_format') or "{title} ({year})"
@@ -332,30 +337,31 @@ async def handle_completed_download(conn, download_record, torrent):
                 colon_replacement=colon_replacement,
             )
 
-            # Construct full destination path
-            destination_path = os.path.join(root_folder, folder_name, filename)
+            # Construct full destination path using root folder's root_path
+            destination_path = os.path.join(root_path, folder_name, filename)
 
-            # Organize file using profile's hardlink/copy setting
+            # Organize file using hardlink (no fallback - folders are on same filesystem)
             try:
-                organize_with_fallback(file_manager, source_path, destination_path, operation)
+                organize_file_hardlink(file_manager, source_path, destination_path)
                 final_path = destination_path
                 file_size = os.path.getsize(final_path) if os.path.exists(final_path) else torrent.size
             except Exception as e:
-                print(f"Error organizing file: {e}. Keeping original path.")
-                final_path = source_path
-                file_size = torrent.size
+                print(f"Hardlink failed: {e}. This should not happen - check folder configuration.")
+                raise
 
-            # Update database with organized file info
+            # Update database with organized file info and root folder assignment
             await conn.execute(
                 """
                 UPDATE movies
                 SET status = 'completed', has_file = TRUE,
-                    file_path = $1, file_size = $2, quality_detected = $3, updated_at = NOW()
-                WHERE id = $4
+                    file_path = $1, file_size = $2, quality_detected = $3,
+                    root_folder_id = $4, updated_at = NOW()
+                WHERE id = $5
                 """,
                 final_path,
                 file_size,
                 quality_detected,
+                root_folder_id,
                 media_id
             )
 
@@ -363,7 +369,7 @@ async def handle_completed_download(conn, download_record, torrent):
             # Get show details
             show = await conn.fetchrow(
                 """
-                SELECT title, root_folder_path
+                SELECT title
                 FROM shows WHERE id = $1
                 """,
                 media_id
@@ -374,7 +380,6 @@ async def handle_completed_download(conn, download_record, torrent):
                 return
 
             title = show["title"]
-            root_folder = show["root_folder_path"] or "/media/tv"
 
             # Get naming patterns from profile
             naming_pattern = profile.get('show_naming_format') or "{series} - S{season:00}E{episode:00}"
@@ -389,11 +394,12 @@ async def handle_completed_download(conn, download_record, torrent):
                     """
                     UPDATE shows
                     SET status = 'completed', has_file = TRUE,
-                        file_path = $1, file_size = $2, updated_at = NOW()
-                    WHERE id = $3
+                        file_path = $1, file_size = $2, root_folder_id = $3, updated_at = NOW()
+                    WHERE id = $4
                     """,
                     torrent.save_path,
                     torrent.size,
+                    root_folder_id,
                     media_id
                 )
             else:
@@ -441,16 +447,16 @@ async def handle_completed_download(conn, download_record, torrent):
                         colon_replacement=colon_replacement,
                     )
 
-                    destination_path = os.path.join(root_folder, folder_name, filename)
+                    destination_path = os.path.join(root_path, folder_name, filename)
 
                     try:
-                        organize_with_fallback(file_manager, source_path, destination_path, operation)
+                        organize_file_hardlink(file_manager, source_path, destination_path)
                         organized_paths.append(destination_path)
                         if os.path.exists(destination_path):
                             total_size += os.path.getsize(destination_path)
                     except Exception as e:
-                        print(f"Error organizing episode file: {e}")
-                        organized_paths.append(source_path)
+                        print(f"Hardlink failed for episode: {e}. Check folder configuration.")
+                        raise
 
                 # Update database with first organized path (or folder)
                 final_path = organized_paths[0] if organized_paths else torrent.save_path
@@ -458,12 +464,14 @@ async def handle_completed_download(conn, download_record, torrent):
                     """
                     UPDATE shows
                     SET status = 'completed', has_file = TRUE,
-                        file_path = $1, file_size = $2, quality_detected = $3, updated_at = NOW()
-                    WHERE id = $4
+                        file_path = $1, file_size = $2, quality_detected = $3,
+                        root_folder_id = $4, updated_at = NOW()
+                    WHERE id = $5
                     """,
                     final_path,
                     total_size or torrent.size,
                     quality_detected,
+                    root_folder_id,
                     media_id
                 )
 
@@ -471,7 +479,7 @@ async def handle_completed_download(conn, download_record, torrent):
             # Get anime details
             anime = await conn.fetchrow(
                 """
-                SELECT title, season_year, anilist_id, mal_id, root_folder_path
+                SELECT title, season_year, anilist_id, mal_id
                 FROM anime WHERE id = $1
                 """,
                 media_id
@@ -482,7 +490,6 @@ async def handle_completed_download(conn, download_record, torrent):
                 return
 
             title = anime["title"]
-            root_folder = anime["root_folder_path"] or "/media/anime"
             year = anime["season_year"]
 
             # Get naming patterns from profile
@@ -498,11 +505,12 @@ async def handle_completed_download(conn, download_record, torrent):
                     """
                     UPDATE anime
                     SET status = 'completed', has_file = TRUE,
-                        file_path = $1, file_size = $2, updated_at = NOW()
-                    WHERE id = $3
+                        file_path = $1, file_size = $2, root_folder_id = $3, updated_at = NOW()
+                    WHERE id = $4
                     """,
                     torrent.save_path,
                     torrent.size,
+                    root_folder_id,
                     media_id
                 )
             else:
@@ -552,16 +560,16 @@ async def handle_completed_download(conn, download_record, torrent):
                         colon_replacement=colon_replacement,
                     )
 
-                    destination_path = os.path.join(root_folder, folder_name, filename)
+                    destination_path = os.path.join(root_path, folder_name, filename)
 
                     try:
-                        organize_with_fallback(file_manager, source_path, destination_path, operation)
+                        organize_file_hardlink(file_manager, source_path, destination_path)
                         organized_paths.append(destination_path)
                         if os.path.exists(destination_path):
                             total_size += os.path.getsize(destination_path)
                     except Exception as e:
-                        print(f"Error organizing anime episode file: {e}")
-                        organized_paths.append(source_path)
+                        print(f"Hardlink failed for anime episode: {e}. Check folder configuration.")
+                        raise
 
                 # Update database with first organized path
                 final_path = organized_paths[0] if organized_paths else torrent.save_path
@@ -569,12 +577,14 @@ async def handle_completed_download(conn, download_record, torrent):
                     """
                     UPDATE anime
                     SET status = 'completed', has_file = TRUE,
-                        file_path = $1, file_size = $2, quality_detected = $3, updated_at = NOW()
-                    WHERE id = $4
+                        file_path = $1, file_size = $2, quality_detected = $3,
+                        root_folder_id = $4, updated_at = NOW()
+                    WHERE id = $5
                     """,
                     final_path,
                     total_size or torrent.size,
                     quality_detected,
+                    root_folder_id,
                     media_id
                 )
 
@@ -582,7 +592,7 @@ async def handle_completed_download(conn, download_record, torrent):
             # Get album and artist details
             album = await conn.fetchrow(
                 """
-                SELECT a.*, ar.name as artist_name, ar.root_folder_path as artist_root_folder
+                SELECT a.*, ar.name as artist_name
                 FROM albums a
                 LEFT JOIN artists ar ON a.artist_id = ar.id
                 WHERE a.id = $1
@@ -596,7 +606,6 @@ async def handle_completed_download(conn, download_record, torrent):
 
             title = album["title"]
             artist_name = album["artist_name"] or "Unknown Artist"
-            root_folder = album["root_folder_path"] or album["artist_root_folder"] or "/media/music"
             year = album["release_date"].year if album["release_date"] else None
 
             # Get naming patterns from profile
@@ -613,10 +622,11 @@ async def handle_completed_download(conn, download_record, torrent):
                     """
                     UPDATE albums
                     SET status = 'completed', has_file = TRUE,
-                        file_path = $1, updated_at = NOW()
-                    WHERE id = $2
+                        file_path = $1, root_folder_id = $2, updated_at = NOW()
+                    WHERE id = $3
                     """,
                     torrent.save_path,
+                    root_folder_id,
                     media_id
                 )
             else:
@@ -665,16 +675,16 @@ async def handle_completed_download(conn, download_record, torrent):
                         colon_replacement=colon_replacement,
                     )
 
-                    destination_path = os.path.join(root_folder, artist_folder, album_folder, track_name)
+                    destination_path = os.path.join(root_path, artist_folder, album_folder, track_name)
 
                     try:
-                        organize_with_fallback(file_manager, source_path, destination_path, operation)
+                        organize_file_hardlink(file_manager, source_path, destination_path)
                         organized_paths.append(destination_path)
                         if os.path.exists(destination_path):
                             total_size += os.path.getsize(destination_path)
                     except Exception as e:
-                        print(f"Error organizing audio file: {e}")
-                        organized_paths.append(source_path)
+                        print(f"Hardlink failed for audio file: {e}. Check folder configuration.")
+                        raise
 
                 # Update database with album folder path
                 album_folder_path = os.path.dirname(organized_paths[0]) if organized_paths else torrent.save_path
@@ -682,10 +692,11 @@ async def handle_completed_download(conn, download_record, torrent):
                     """
                     UPDATE albums
                     SET status = 'completed', has_file = TRUE,
-                        file_path = $1, updated_at = NOW()
-                    WHERE id = $2
+                        file_path = $1, root_folder_id = $2, updated_at = NOW()
+                    WHERE id = $3
                     """,
                     album_folder_path,
+                    root_folder_id,
                     media_id
                 )
 

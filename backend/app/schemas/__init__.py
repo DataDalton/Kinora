@@ -2,6 +2,21 @@ from app.schemas.user import User, UserCreate, UserUpdate, UserLogin, Token
 from app.schemas.movie import Movie, MovieCreate, MovieUpdate, MovieSearch
 from app.schemas.show import Show, ShowCreate, ShowUpdate, Season, Episode
 from app.schemas.anime import Anime, AnimeCreate, AnimeUpdate
+from app.schemas.root_folder import (
+    RootFolderCreate,
+    RootFolderUpdate,
+    RootFolderResponse,
+    RootFolderWithStats,
+    FolderSelectionSettingsCreate,
+    FolderSelectionSettingsUpdate,
+    FolderSelectionSettingsResponse,
+    FolderTestRequest,
+    FolderTestResponse,
+    DriveStats,
+    FolderHealthSummary,
+    BrowseDirectoryRequest,
+    BrowseDirectoryResponse,
+)
 
 __all__ = [
     "User",
@@ -21,4 +36,17 @@ __all__ = [
     "Anime",
     "AnimeCreate",
     "AnimeUpdate",
+    "RootFolderCreate",
+    "RootFolderUpdate",
+    "RootFolderResponse",
+    "RootFolderWithStats",
+    "FolderSelectionSettingsCreate",
+    "FolderSelectionSettingsUpdate",
+    "FolderSelectionSettingsResponse",
+    "FolderTestRequest",
+    "FolderTestResponse",
+    "DriveStats",
+    "FolderHealthSummary",
+    "BrowseDirectoryRequest",
+    "BrowseDirectoryResponse",
 ]

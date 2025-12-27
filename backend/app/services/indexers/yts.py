@@ -16,7 +16,7 @@ class YTSIndexer(BaseIndexer):
     base_url = "https://yts.lt"
     api_url = "https://yts.lt/api/v2"
     alternative_urls = [
-        "https://yts.mx",
+        "https://yts.gg",
         "https://yts.am",
         "https://yts.ag",
     ]

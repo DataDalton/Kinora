@@ -180,7 +180,7 @@ export default function AlbumDetailPage() {
   });
 
   const getCoverUrl = (album: Album) => {
-    return album.cover_xl || album.cover_big || album.cover_medium || album.cover || '/placeholder-poster.jpg';
+    return album.cover_xl || album.cover_big || album.cover_medium || album.cover || '/placeholder-poster.svg';
   };
 
   const formatDuration = (seconds: number) => {

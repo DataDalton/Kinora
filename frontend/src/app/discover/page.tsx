@@ -129,7 +129,7 @@ export default function DiscoverPage() {
   });
 
   const getPosterUrl = (path: string | null, isAnime: boolean = false) => {
-    if (!path) return '/placeholder-poster.jpg';
+    if (!path) return '/placeholder-poster.svg';
     if (isAnime) return path;
     return `https://image.tmdb.org/t/p/w500${path}`;
   };

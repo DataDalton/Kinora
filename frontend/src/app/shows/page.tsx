@@ -52,7 +52,7 @@ export default function ShowsPage() {
   });
 
   const getPosterUrl = (path: string | null) => {
-    if (!path) return '/placeholder-poster.jpg';
+    if (!path) return '/placeholder-poster.svg';
     return `https://image.tmdb.org/t/p/w500${path}`;
   };
 

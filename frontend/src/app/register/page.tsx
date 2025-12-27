@@ -3,10 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { UserPlus, Loader2, Moon, Sun, Film, ArrowRight, ArrowLeft, Shield } from 'lucide-react';
+import { UserPlus, Loader2, Film, ArrowRight, ArrowLeft, Shield } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { useTheme } from '@/contexts/ThemeContext';
 import TwoFactorSettings from '@/components/TwoFactorSettings';
 import HolographicGrid from '@/components/HolographicGrid';
 
@@ -14,7 +13,6 @@ type RegistrationStep = 'credentials' | '2fa';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
   const [currentStep, setCurrentStep] = useState<RegistrationStep>('credentials');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -96,19 +94,6 @@ export default function RegisterPage() {
     <div className="min-h-screen relative flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 overflow-hidden bg-background">
       {/* Holographic grid background */}
       <HolographicGrid />
-
-      {/* Theme toggle button */}
-      <button
-        onClick={toggleTheme}
-        className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-gradient-to-br from-[#27272a] to-[#3b82f6] hover:shadow-2xl hover:scale-110 transition-all duration-300 shadow-xl cursor-pointer"
-        aria-label="Toggle theme"
-      >
-        {theme === 'dark' ? (
-          <Sun className="w-6 h-6 text-white" />
-        ) : (
-          <Moon className="w-6 h-6 text-white" />
-        )}
-      </button>
 
       {/* Register card */}
       <div className={cn(

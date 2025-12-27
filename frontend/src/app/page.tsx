@@ -70,9 +70,9 @@ export default function HomePage() {
 
   const getPosterUrl = (item: RecentItem) => {
     if (item.mediaType === 'album') {
-      return item.cover_xl || item.picture_xl || '/placeholder-poster.jpg';
+      return item.cover_xl || item.picture_xl || '/placeholder-poster.svg';
     }
-    if (!item.poster_path) return '/placeholder-poster.jpg';
+    if (!item.poster_path) return '/placeholder-poster.svg';
     if (item.mediaType === 'anime') {
       return item.poster_path;
     }

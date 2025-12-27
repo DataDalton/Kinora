@@ -71,7 +71,7 @@ class ShowBase(BaseModel):
     tvdb_id: Optional[int] = None
     monitored: bool = True
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
     season_monitoring: str = "all"
 
 
@@ -87,7 +87,7 @@ class ShowUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     monitored: Optional[bool] = None
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
     season_monitoring: Optional[str] = None
     status: Optional[str] = None
 

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import Toast from './Toast';
+import { Folder, HardDrive } from 'lucide-react';
 
 interface Media {
   id: number;
@@ -15,6 +16,19 @@ interface Media {
   anilist_id?: number;
 }
 
+interface RootFolder {
+  id: number;
+  mediaType: string;
+  name: string;
+  rootPath: string;
+  downloadPath: string;
+  freeSpaceBytes: number | null;
+  totalSpaceBytes: number | null;
+  isDefault: boolean;
+  isActive: boolean;
+  healthStatus: string;
+}
+
 interface MediaDetailModalProps {
   media: Media | null;
   isOpen: boolean;
@@ -22,10 +36,20 @@ interface MediaDetailModalProps {
   defaultMediaType?: string;
 }
 
+const formatBytes = (bytes: number | null): string => {
+  if (bytes === null || bytes === undefined) return 'Unknown';
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1000) {
+    return `${(gb / 1024).toFixed(1)} TB`;
+  }
+  return `${gb.toFixed(1)} GB`;
+};
+
 export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaType = 'movie' }: MediaDetailModalProps) {
   const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [autoSearch, setAutoSearch] = useState(true);
   const [addCollection, setAddCollection] = useState(false);
   const [navigationStack, setNavigationStack] = useState<Media[]>([]);
@@ -77,6 +101,36 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
     },
   });
 
+  // Get the backend media type for folder lookup (music types map to 'music')
+  const getFolderMediaType = () => {
+    if (mediaType === 'artist' || mediaType === 'album' || mediaType === 'track') return 'music';
+    if (mediaType === 'show') return 'shows';
+    if (mediaType === 'movie') return 'movies';
+    return mediaType;
+  };
+
+  const { data: rootFolders } = useQuery<RootFolder[]>({
+    queryKey: ['root-folders', getFolderMediaType()],
+    queryFn: async () => {
+      const response = await api.get(`/root-folders?media_type=${getFolderMediaType()}`);
+      const folders = response.data;
+      // Transform snake_case to camelCase
+      return folders.map((f: any) => ({
+        id: f.id,
+        mediaType: f.media_type,
+        name: f.name,
+        rootPath: f.root_path,
+        downloadPath: f.download_path,
+        freeSpaceBytes: f.free_space_bytes,
+        totalSpaceBytes: f.total_space_bytes,
+        isDefault: f.is_default,
+        isActive: f.is_active,
+        healthStatus: f.health_status,
+      }));
+    },
+    enabled: showAddModal,
+  });
+
   useEffect(() => {
     const savedProfileId = localStorage.getItem(`lastProfile_${mediaType}`);
     if (savedProfileId && profiles) {
@@ -90,6 +144,22 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
       setSelectedProfileId(profiles[0].id);
     }
   }, [mediaType, profiles]);
+
+  // Set folder selection when modal opens - default to automatic (null) unless user previously overrode
+  useEffect(() => {
+    if (rootFolders && rootFolders.length > 0) {
+      const savedFolderId = localStorage.getItem(`lastFolder_${getFolderMediaType()}`);
+      if (savedFolderId && savedFolderId !== 'automatic') {
+        const folderExists = rootFolders.find(f => f.id === parseInt(savedFolderId) && f.isActive);
+        if (folderExists) {
+          setSelectedFolderId(parseInt(savedFolderId));
+          return;
+        }
+      }
+      // Default to automatic (null) - let selection mode decide
+      setSelectedFolderId(null);
+    }
+  }, [rootFolders]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -140,6 +210,8 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
       if (selectedProfileId) {
         localStorage.setItem(`lastProfile_${mediaType}`, selectedProfileId.toString());
       }
+      // Store folder preference - 'automatic' if using selection mode, otherwise the folder id
+      localStorage.setItem(`lastFolder_${getFolderMediaType()}`, selectedFolderId ? selectedFolderId.toString() : 'automatic');
       const queryKey = mediaType === 'movie' ? 'movies' : mediaType === 'show' ? 'shows' : mediaType === 'album' ? 'albums' : mediaType === 'artist' ? 'artists' : mediaType === 'track' ? 'tracks' : 'anime';
       queryClient.invalidateQueries({ queryKey: [queryKey] });
 
@@ -446,7 +518,7 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                             }}
                           >
                             <img
-                              src={album.cover_xl || album.cover || '/placeholder-poster.jpg'}
+                              src={album.cover_xl || album.cover || '/placeholder-poster.svg'}
                               alt={album.title}
                               className="w-full aspect-square object-cover rounded-lg mb-2 group-hover:scale-105 transition-transform"
                             />
@@ -700,7 +772,7 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                 <select
                   value={selectedProfileId || ''}
                   onChange={(e) => setSelectedProfileId(parseInt(e.target.value))}
-                  className="w-full px-4 py-3 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
+                  className="w-full px-4 py-3 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary cursor-pointer"
                 >
                   {!profiles || profiles.length === 0 ? (
                     <option value="">No profiles available</option>
@@ -717,6 +789,59 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                 </select>
                 <p className="text-xs text-muted-foreground mt-1">
                   Quality profile for downloads
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2">Root Folder</label>
+                <select
+                  value={selectedFolderId ?? ''}
+                  onChange={(e) => setSelectedFolderId(e.target.value ? parseInt(e.target.value) : null)}
+                  className="w-full px-4 py-3 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary cursor-pointer"
+                >
+                  {!rootFolders || rootFolders.length === 0 ? (
+                    <option value="">No folders configured</option>
+                  ) : (
+                    <>
+                      <option value="">Use Selection Mode</option>
+                      {rootFolders.filter(f => f.isActive).map((folder) => (
+                        <option key={folder.id} value={folder.id}>
+                          {folder.name} - {formatBytes(folder.freeSpaceBytes)} free
+                        </option>
+                      ))}
+                    </>
+                  )}
+                </select>
+                {selectedFolderId === null && rootFolders && rootFolders.length > 0 ? (
+                  <div className="mt-2 p-2 bg-primary/10 rounded-lg">
+                    <p className="text-xs text-primary">
+                      Folder will be selected automatically based on your configured selection mode
+                    </p>
+                  </div>
+                ) : selectedFolderId && rootFolders ? (
+                  <div className="mt-2 p-2 bg-muted/50 rounded-lg">
+                    {(() => {
+                      const folder = rootFolders.find(f => f.id === selectedFolderId);
+                      if (!folder) return null;
+                      return (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Folder className="w-3 h-3" />
+                          <span className="truncate">{folder.rootPath}</span>
+                          <span className={`ml-auto px-1.5 py-0.5 rounded text-xs ${
+                            folder.healthStatus === 'healthy' ? 'bg-green-500/20 text-green-500' :
+                            folder.healthStatus === 'warning' ? 'bg-yellow-500/20 text-yellow-500' :
+                            folder.healthStatus === 'error' ? 'bg-red-500/20 text-red-500' :
+                            'bg-gray-500/20 text-gray-500'
+                          }`}>
+                            {folder.healthStatus}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : null}
+                <p className="text-xs text-muted-foreground mt-1">
+                  Where files will be stored after download
                 </p>
               </div>
 
@@ -804,7 +929,8 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         nb_album: mediaDetails.nb_album,
                         nb_fan: mediaDetails.nb_fan,
                         monitored: autoSearch,
-                        media_profile_id: selectedProfileId
+                        media_profile_id: selectedProfileId,
+                        root_folder_id: selectedFolderId
                       } as any);
                     } else if (mediaType === 'album') {
                       addMediaMutation.mutate({
@@ -818,7 +944,8 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         artist_id: mediaDetails.artist?.id,
                         nb_tracks: mediaDetails.nb_tracks,
                         monitored: autoSearch,
-                        media_profile_id: selectedProfileId
+                        media_profile_id: selectedProfileId,
+                        root_folder_id: selectedFolderId
                       } as any);
                     } else if (mediaType === 'track') {
                       addMediaMutation.mutate({
@@ -834,7 +961,8 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         album_id: mediaDetails.album?.id,
                         album_title: mediaDetails.album?.title,
                         monitored: autoSearch,
-                        media_profile_id: selectedProfileId
+                        media_profile_id: selectedProfileId,
+                        root_folder_id: selectedFolderId
                       } as any);
                     } else if (addCollection && collectionDetails?.parts?.length > 0) {
                       // Add all movies from the collection
@@ -842,11 +970,13 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         api.post('/movies', {
                           tmdb_id: movie.id,
                           monitored: autoSearch,
-                          media_profile_id: selectedProfileId
+                          media_profile_id: selectedProfileId,
+                          root_folder_id: selectedFolderId
                         }).catch(() => null)
                       );
                       Promise.all(addPromises).then((results) => {
                         const successCount = results.filter(r => r !== null).length;
+                        localStorage.setItem(`lastFolder_${getFolderMediaType()}`, selectedFolderId ? selectedFolderId.toString() : 'automatic');
                         queryClient.invalidateQueries({ queryKey: ['movies'] });
                         showToast(`Added ${successCount} of ${collectionDetails.parts.length} movies to library!`, 'success');
                         onClose();
@@ -857,13 +987,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         anilist_id: mediaDetails.id,
                         monitored: autoSearch,
                         media_profile_id: selectedProfileId,
-                        add_sequels: true  // Auto-add all related seasons
+                        root_folder_id: selectedFolderId,
+                        add_sequels: true
                       } as any);
                     } else {
                       addMediaMutation.mutate({
                         tmdb_id: mediaDetails.id,
                         monitored: autoSearch,
-                        media_profile_id: selectedProfileId
+                        media_profile_id: selectedProfileId,
+                        root_folder_id: selectedFolderId
                       });
                     }
                   }}
@@ -877,6 +1009,8 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                     setShowAddModal(false);
                     setAutoSearch(true);
                     setAddCollection(false);
+                    // Reset folder selection to automatic on cancel
+                    setSelectedFolderId(null);
                   }}
                   className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition-all hover:scale-105"
                 >

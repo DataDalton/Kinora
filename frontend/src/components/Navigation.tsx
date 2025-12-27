@@ -4,8 +4,6 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 import {
-  Moon,
-  Sun,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -25,13 +23,11 @@ import {
   Wrench
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 
 export default function Navigation() {
   const router = useRouter();
   const pathname = usePathname();
-  const { theme, toggleTheme } = useTheme();
   const { collapsed, toggleCollapsed } = useSidebar();
   const [user, setUser] = useState<any>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -216,10 +212,10 @@ export default function Navigation() {
                       {searchResults.map((item) => {
                         const getImageUrl = () => {
                           if (item.media_type === 'artist') {
-                            return item.picture_medium || item.picture || '/placeholder-poster.jpg';
+                            return item.picture_medium || item.picture || '/placeholder-poster.svg';
                           }
                           if (item.media_type === 'album') {
-                            return item.cover_medium || item.cover || '/placeholder-poster.jpg';
+                            return item.cover_medium || item.cover || '/placeholder-poster.svg';
                           }
                           if (item.poster_path) {
                             return `https://image.tmdb.org/t/p/w92${item.poster_path}`;
@@ -331,26 +327,8 @@ export default function Navigation() {
           </div>
         </nav>
 
-        {/* Bottom Section - User and Theme */}
+        {/* Bottom Section - User */}
         <div className="border-t-2 border-border p-3 space-y-2">
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition w-full cursor-pointer"
-            aria-label="Toggle theme"
-            title={collapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
-          >
-            {theme === 'dark' ? (
-              <Sun className="w-5 h-5 text-yellow-400" />
-            ) : (
-              <Moon className="w-5 h-5 text-muted-foreground" />
-            )}
-            {!collapsed && (
-              <span className="text-sm font-medium">
-                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-              </span>
-            )}
-          </button>
-
           {user && !collapsed && (
             <Link
               href="/profile"
@@ -466,22 +444,6 @@ export default function Navigation() {
                     </div>
                   </Link>
                 )}
-                <button
-                  onClick={toggleTheme}
-                  className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition cursor-pointer"
-                >
-                  {theme === 'dark' ? (
-                    <>
-                      <Sun className="w-5 h-5 text-yellow-400" />
-                      <span className="font-medium">Light Mode</span>
-                    </>
-                  ) : (
-                    <>
-                      <Moon className="w-5 h-5" />
-                      <span className="font-medium">Dark Mode</span>
-                    </>
-                  )}
-                </button>
                 <button
                   onClick={() => {
                     setMobileMenuOpen(false);

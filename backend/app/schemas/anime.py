@@ -22,7 +22,7 @@ class AnimeBase(BaseModel):
     imdb_id: Optional[str] = None
     monitored: bool = True
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
     absolute_numbering: bool = True
     episode_monitoring: str = "all"
 
@@ -39,7 +39,7 @@ class AnimeUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     monitored: Optional[bool] = None
     media_profile_id: Optional[int] = None
-    root_folder_path: Optional[str] = None
+    root_folder_id: Optional[int] = None
     episode_monitoring: Optional[str] = None
     status: Optional[str] = None
 

@@ -243,11 +243,11 @@ export default function ArtistDetailPage() {
   });
 
   const getPictureUrl = (artist: Artist) => {
-    return artist.picture_xl || artist.picture_big || artist.picture_medium || artist.picture || '/placeholder-poster.jpg';
+    return artist.picture_xl || artist.picture_big || artist.picture_medium || artist.picture || '/placeholder-poster.svg';
   };
 
   const getCoverUrl = (album: Album | DiscographyAlbum) => {
-    return album.cover_xl || album.cover_big || album.cover_medium || album.cover || '/placeholder-poster.jpg';
+    return album.cover_xl || album.cover_big || album.cover_medium || album.cover || '/placeholder-poster.svg';
   };
 
   const handleAddAlbum = (album: DiscographyAlbum) => {

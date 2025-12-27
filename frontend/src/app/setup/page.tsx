@@ -1,26 +1,77 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { testFolderPaths } from '@/lib/api/root-folders';
 import { useRouter } from 'next/navigation';
-import { Check, ChevronRight, Server, Key, Folder, Loader2, FolderOpen } from 'lucide-react';
+import { Check, ChevronRight, Server, Key, Folder, Loader2, FolderOpen, Plus, Trash2, ChevronDown, ChevronUp, Link, AlertTriangle, X, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface SetupStatus {
-  is_setup_complete: boolean;
-  has_download_client: boolean;
-  has_tmdb_key: boolean;
-  has_root_folders: boolean;
-  user_role: string;
+  isSetupComplete: boolean;
+  hasDownloadClient: boolean;
+  hasTmdbKey: boolean;
+  hasRootFolders: boolean;
+  userRole: string;
 }
 
 type SetupStep = 'qbittorrent' | 'tmdb' | 'folders' | 'complete';
+
+type MediaType = 'movies' | 'shows' | 'anime' | 'music';
+
+interface FolderTestStatus {
+  testing: boolean;
+  success: boolean | null;
+  hardlinkSupported: boolean | null;
+  message: string | null;
+}
+
+interface FolderItem {
+  id: string;
+  name: string;
+  rootPath: string;
+  downloadPath: string;
+  fillThresholdPercent?: number;
+  fillThresholdGb?: number;
+  testStatus?: FolderTestStatus;
+}
+
+interface FoldersData {
+  movies: FolderItem[];
+  shows: FolderItem[];
+  anime: FolderItem[];
+  music: FolderItem[];
+  selectionModes: Record<MediaType, string>;
+}
+
+const mediaTypeLabels: Record<MediaType, string> = {
+  movies: 'Movies',
+  shows: 'TV Shows',
+  anime: 'Anime',
+  music: 'Music',
+};
+
+const generateId = () => Math.random().toString(36).substring(2, 11);
+
+const generateDownloadPath = (rootPath: string, mediaType: string): string => {
+  if (!rootPath) return '';
+  const isWindows = rootPath.includes('\\') || /^[A-Z]:/.test(rootPath);
+  const separator = isWindows ? '\\' : '/';
+  const parentPath = rootPath.split(separator).slice(0, -1).join(separator);
+  return `${parentPath}${separator}downloads${separator}${mediaType}`;
+};
 
 export default function SetupPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState<SetupStep>('qbittorrent');
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [expandedTypes, setExpandedTypes] = useState<Record<MediaType, boolean>>({
+    movies: false,
+    shows: false,
+    anime: false,
+    music: false,
+  });
 
   const [qbittorrentData, setQBittorrentData] = useState({
     name: 'qBittorrent',
@@ -35,25 +86,111 @@ export default function SetupPage() {
     api_key: '',
   });
 
-  const [foldersData, setFoldersData] = useState({
-    movies_root: '',
-    shows_root: '',
-    anime_root: '',
-    music_root: '',
+  const [foldersData, setFoldersData] = useState<FoldersData>({
+    movies: [{ id: generateId(), name: 'Movies', rootPath: '', downloadPath: '' }],
+    shows: [{ id: generateId(), name: 'TV Shows', rootPath: '', downloadPath: '' }],
+    anime: [{ id: generateId(), name: 'Anime', rootPath: '', downloadPath: '' }],
+    music: [{ id: generateId(), name: 'Music', rootPath: '', downloadPath: '' }],
+    selectionModes: {
+      movies: 'most_free_space',
+      shows: 'most_free_space',
+      anime: 'most_free_space',
+      music: 'most_free_space',
+    },
   });
 
   const [showBrowser, setShowBrowser] = useState(false);
-  const [browserField, setBrowserField] = useState<'movies_root' | 'shows_root' | 'anime_root' | 'music_root' | null>(null);
+  const [browserTarget, setBrowserTarget] = useState<{ mediaType: MediaType; folderId: string; field: 'rootPath' | 'downloadPath' } | null>(null);
   const [currentBrowserPath, setCurrentBrowserPath] = useState('/');
   const [manualPath, setManualPath] = useState('/');
-  const [isWindows] = useState(() => navigator.platform.toLowerCase().includes('win'));
+  const [isWindows] = useState(() => typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('win'));
+
+  // Track pending tests to debounce API calls
+  const testTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
+
+  // Test folder paths and update status
+  const testFolderConfig = useCallback(async (mediaType: MediaType, folderId: string, rootPath: string, downloadPath: string) => {
+    // Skip if either path is empty
+    if (!rootPath || !downloadPath) {
+      setFoldersData(prev => ({
+        ...prev,
+        [mediaType]: prev[mediaType].map(f =>
+          f.id === folderId ? { ...f, testStatus: undefined } : f
+        ),
+      }));
+      return;
+    }
+
+    // Set testing state
+    setFoldersData(prev => ({
+      ...prev,
+      [mediaType]: prev[mediaType].map(f =>
+        f.id === folderId ? { ...f, testStatus: { testing: true, success: null, hardlinkSupported: null, message: null } } : f
+      ),
+    }));
+
+    try {
+      const result = await testFolderPaths(rootPath, downloadPath);
+      setFoldersData(prev => ({
+        ...prev,
+        [mediaType]: prev[mediaType].map(f =>
+          f.id === folderId ? {
+            ...f,
+            testStatus: {
+              testing: false,
+              success: result.success,
+              hardlinkSupported: result.hardlinkSupported,
+              message: result.message,
+            }
+          } : f
+        ),
+      }));
+    } catch {
+      setFoldersData(prev => ({
+        ...prev,
+        [mediaType]: prev[mediaType].map(f =>
+          f.id === folderId ? {
+            ...f,
+            testStatus: {
+              testing: false,
+              success: false,
+              hardlinkSupported: false,
+              message: 'Failed to test folder configuration',
+            }
+          } : f
+        ),
+      }));
+    }
+  }, []);
+
+  // Debounced test trigger when paths change
+  const triggerFolderTest = useCallback((mediaType: MediaType, folderId: string, rootPath: string, downloadPath: string) => {
+    const key = `${mediaType}-${folderId}`;
+
+    // Clear existing timeout for this folder
+    if (testTimeouts.current[key]) {
+      clearTimeout(testTimeouts.current[key]);
+    }
+
+    // Set new timeout to debounce rapid changes
+    testTimeouts.current[key] = setTimeout(() => {
+      testFolderConfig(mediaType, folderId, rootPath, downloadPath);
+    }, 500);
+  }, [testFolderConfig]);
 
   // Fetch setup status
   const { data: setupStatus, isLoading: statusLoading } = useQuery<SetupStatus>({
     queryKey: ['setup-status'],
     queryFn: async () => {
       const response = await api.get('/setup/status');
-      return response.data;
+      const data = response.data;
+      return {
+        isSetupComplete: data.is_setup_complete,
+        hasDownloadClient: data.has_download_client,
+        hasTmdbKey: data.has_tmdb_key,
+        hasRootFolders: data.has_root_folders,
+        userRole: data.user_role,
+      };
     },
   });
 
@@ -77,7 +214,7 @@ export default function SetupPage() {
 
   // Redirect if not administrator
   useEffect(() => {
-    if (setupStatus && setupStatus.user_role !== 'administrator') {
+    if (setupStatus && setupStatus.userRole !== 'administrator') {
       setIsRedirecting(true);
       router.push('/');
     }
@@ -85,11 +222,11 @@ export default function SetupPage() {
 
   // Redirect if setup is already complete
   useEffect(() => {
-    if (setupStatus?.is_setup_complete && currentStep !== 'complete') {
+    if (setupStatus?.isSetupComplete && currentStep !== 'complete') {
       setIsRedirecting(true);
       router.push('/');
     }
-  }, [setupStatus?.is_setup_complete, currentStep, router]);
+  }, [setupStatus?.isSetupComplete, currentStep, router]);
 
   // Configure qBittorrent
   const qbittorrentMutation = useMutation({
@@ -115,10 +252,24 @@ export default function SetupPage() {
     },
   });
 
-  // Configure folders
+  // Configure folders - transform to backend format
   const foldersMutation = useMutation({
     mutationFn: async () => {
-      const response = await api.post('/setup/root-folders', foldersData);
+      const transformFolder = (f: FolderItem) => ({
+        name: f.name,
+        root_path: f.rootPath,
+        download_path: f.downloadPath || undefined,
+        fill_threshold_percent: f.fillThresholdPercent,
+        fill_threshold_gb: f.fillThresholdGb,
+      });
+      const payload = {
+        movies: foldersData.movies.map(transformFolder),
+        shows: foldersData.shows.map(transformFolder),
+        anime: foldersData.anime.map(transformFolder),
+        music: foldersData.music.map(transformFolder),
+        selection_modes: foldersData.selectionModes,
+      };
+      const response = await api.post('/setup/root-folders', payload);
       return response.data;
     },
     onSuccess: async () => {
@@ -134,16 +285,13 @@ export default function SetupPage() {
       return response.data;
     },
     onSuccess: () => {
-      // Invalidate setup status to ensure it's marked as complete
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
-      // Navigate to dashboard
       router.push('/');
     },
   });
 
-  const openBrowser = (field: 'movies_root' | 'shows_root' | 'anime_root' | 'music_root') => {
-    setBrowserField(field);
-    // Start at root - on Windows this will show drive list, on Unix shows /
+  const openBrowser = (mediaType: MediaType, folderId: string, field: 'rootPath' | 'downloadPath') => {
+    setBrowserTarget({ mediaType, folderId, field });
     setCurrentBrowserPath('/');
     setManualPath('/');
     setShowBrowser(true);
@@ -154,17 +302,129 @@ export default function SetupPage() {
   };
 
   const selectFolder = (path: string) => {
-    if (browserField) {
-      setFoldersData({ ...foldersData, [browserField]: path });
+    if (browserTarget) {
+      const { mediaType, folderId, field } = browserTarget;
+      setFoldersData(prev => {
+        const newData = {
+          ...prev,
+          [mediaType]: prev[mediaType].map(f => {
+            if (f.id === folderId) {
+              const updated = { ...f, [field]: path };
+              // Auto-generate download path when root path is set
+              if (field === 'rootPath' && !f.downloadPath) {
+                updated.downloadPath = generateDownloadPath(path, mediaType);
+              }
+              return updated;
+            }
+            return f;
+          }),
+        };
+
+        // Trigger test after path selection
+        const folder = newData[mediaType].find(f => f.id === folderId);
+        if (folder) {
+          triggerFolderTest(mediaType, folderId, folder.rootPath, folder.downloadPath);
+        }
+
+        return newData;
+      });
       setShowBrowser(false);
-      setBrowserField(null);
+      setBrowserTarget(null);
     }
   };
 
+  const addFolder = (mediaType: MediaType) => {
+    const newFolder: FolderItem = {
+      id: generateId(),
+      name: `${mediaTypeLabels[mediaType]} ${foldersData[mediaType].length + 1}`,
+      rootPath: '',
+      downloadPath: '',
+    };
+    setFoldersData(prev => ({
+      ...prev,
+      [mediaType]: [...prev[mediaType], newFolder],
+    }));
+  };
+
+  const removeFolder = (mediaType: MediaType, folderId: string) => {
+    const folders = foldersData[mediaType];
+    if (folders.length <= 1) return;
+
+    const updatedFolders = folders.filter(f => f.id !== folderId);
+
+    setFoldersData(prev => ({
+      ...prev,
+      [mediaType]: updatedFolders,
+    }));
+  };
+
+  const updateFolder = (mediaType: MediaType, folderId: string, field: keyof FolderItem, value: string | boolean | number | undefined) => {
+    setFoldersData(prev => {
+      const newData = {
+        ...prev,
+        [mediaType]: prev[mediaType].map(f => {
+          if (f.id === folderId) {
+            const updated = { ...f, [field]: value };
+            // Auto-generate download path when root path is changed
+            if (field === 'rootPath' && typeof value === 'string') {
+              updated.downloadPath = generateDownloadPath(value, mediaType);
+            }
+            return updated;
+          }
+          return f;
+        }),
+      };
+
+      // Trigger test if path fields changed
+      if (field === 'rootPath' || field === 'downloadPath') {
+        const folder = newData[mediaType].find(f => f.id === folderId);
+        if (folder) {
+          triggerFolderTest(mediaType, folderId, folder.rootPath, folder.downloadPath);
+        }
+      }
+
+      return newData;
+    });
+  };
+
+  const toggleExpanded = (mediaType: MediaType) => {
+    setExpandedTypes(prev => ({
+      ...prev,
+      [mediaType]: !prev[mediaType],
+    }));
+  };
+
+  const moveFolder = (mediaType: MediaType, folderId: string, direction: 'up' | 'down') => {
+    setFoldersData(prev => {
+      const folders = [...prev[mediaType]];
+      const currentIndex = folders.findIndex(f => f.id === folderId);
+      if (currentIndex === -1) return prev;
+
+      const swapIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+      if (swapIndex < 0 || swapIndex >= folders.length) return prev;
+
+      // Swap folders
+      [folders[currentIndex], folders[swapIndex]] = [folders[swapIndex], folders[currentIndex]];
+
+      return {
+        ...prev,
+        [mediaType]: folders,
+      };
+    });
+  };
+
+  const isFoldersValid = () => {
+    const mediaTypes: MediaType[] = ['movies', 'shows', 'anime', 'music'];
+    return mediaTypes.every(type =>
+      foldersData[type].length > 0 &&
+      foldersData[type].every(f => f.name && f.rootPath)
+    );
+  };
+
   const steps = [
-    { id: 'qbittorrent', name: 'Download Client', icon: Server, completed: setupStatus?.has_download_client },
-    { id: 'tmdb', name: 'TMDB API', icon: Key, completed: setupStatus?.has_tmdb_key },
-    { id: 'folders', name: 'Root Folders', icon: Folder, completed: setupStatus?.has_root_folders },
+    { id: 'qbittorrent', name: 'Download Client', icon: Server, completed: setupStatus?.hasDownloadClient },
+    { id: 'tmdb', name: 'TMDB API', icon: Key, completed: setupStatus?.hasTmdbKey },
+    { id: 'folders', name: 'Root Folders', icon: Folder, completed: setupStatus?.hasRootFolders },
   ];
 
   if (statusLoading || isRedirecting) {
@@ -182,7 +442,7 @@ export default function SetupPage() {
         <div className="w-64 bg-card border-r border-border p-6 min-h-screen">
           <h2 className="text-xl font-bold mb-6">Initial Setup</h2>
           <nav className="space-y-2">
-            {steps.map((step, idx) => {
+            {steps.map((step) => {
               const StepIcon = step.icon;
               const isActive = currentStep === step.id;
               const isCompleted = step.completed;
@@ -216,7 +476,7 @@ export default function SetupPage() {
 
         {/* Main Content */}
         <div className="flex-1 p-8">
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-3xl mx-auto">
             {/* qBittorrent Setup */}
             {currentStep === 'qbittorrent' && (
               <div>
@@ -391,93 +651,243 @@ export default function SetupPage() {
               <div>
                 <h1 className="text-3xl font-bold mb-2">Configure Root Folders</h1>
                 <p className="text-muted-foreground mb-6">
-                  Set where your media files will be organized
+                  Set where your media files will be organized. Each root folder is paired with a download folder on the same filesystem to enable hardlinking.
                 </p>
 
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Movies Root Folder</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={foldersData.movies_root}
-                        onChange={(e) => setFoldersData({ ...foldersData, movies_root: e.target.value })}
-                        placeholder={isWindows ? "C:\\Media\\Movies" : "/media/movies"}
-                        className="flex-1 px-4 py-2 bg-card border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
-                      />
+                  {/* Media Type Sections */}
+                  {(['movies', 'shows', 'anime', 'music'] as MediaType[]).map(mediaType => (
+                    <div key={mediaType} className="border border-border rounded-lg overflow-hidden">
                       <button
-                        type="button"
-                        onClick={() => openBrowser('movies_root')}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
+                        onClick={() => toggleExpanded(mediaType)}
+                        className="w-full flex items-center justify-between p-4 bg-card hover:bg-accent transition cursor-pointer"
                       >
-                        <FolderOpen className="w-4 h-4" />
-                        Browse
+                        <div className="flex items-center gap-3">
+                          <Folder className="w-5 h-5 text-primary" />
+                          <span className="font-medium">{mediaTypeLabels[mediaType]}</span>
+                          <span className="text-sm text-muted-foreground">
+                            ({foldersData[mediaType].length} folder{foldersData[mediaType].length !== 1 ? 's' : ''})
+                          </span>
+                        </div>
+                        {expandedTypes[mediaType] ? (
+                          <ChevronUp className="w-5 h-5 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                        )}
                       </button>
-                    </div>
-                  </div>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-2">TV Shows Root Folder</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={foldersData.shows_root}
-                        onChange={(e) => setFoldersData({ ...foldersData, shows_root: e.target.value })}
-                        placeholder={isWindows ? "C:\\Media\\Shows" : "/media/shows"}
-                        className="flex-1 px-4 py-2 bg-card border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => openBrowser('shows_root')}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                        Browse
-                      </button>
-                    </div>
-                  </div>
+                      {expandedTypes[mediaType] && (
+                        <div className="p-4 space-y-4 bg-background">
+                          {/* Selection Mode for this media type */}
+                          <div className="p-3 bg-muted/30 border border-border rounded-lg">
+                            <label className="block text-sm font-medium mb-2">Folder Selection Mode</label>
+                            <select
+                              value={foldersData.selectionModes[mediaType]}
+                              onChange={(e) => setFoldersData(prev => ({
+                                ...prev,
+                                selectionModes: { ...prev.selectionModes, [mediaType]: e.target.value }
+                              }))}
+                              className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary cursor-pointer text-sm"
+                            >
+                              <option value="most_free_space">Most Free Space</option>
+                              <option value="priority">Priority Order</option>
+                              <option value="fill_threshold">Fill Threshold</option>
+                            </select>
+                            <p className="text-xs text-muted-foreground mt-1.5">
+                              {foldersData.selectionModes[mediaType] === 'most_free_space' && 'Always use the folder with most available space.'}
+                              {foldersData.selectionModes[mediaType] === 'priority' && 'Fill folders in your defined order (1→2→3).'}
+                              {foldersData.selectionModes[mediaType] === 'fill_threshold' && 'Among folders under threshold, always picks most free space.'}
+                            </p>
+                          </div>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Anime Root Folder</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={foldersData.anime_root}
-                        onChange={(e) => setFoldersData({ ...foldersData, anime_root: e.target.value })}
-                        placeholder={isWindows ? "C:\\Media\\Anime" : "/media/anime"}
-                        className="flex-1 px-4 py-2 bg-card border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => openBrowser('anime_root')}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                        Browse
-                      </button>
-                    </div>
-                  </div>
+                          {foldersData[mediaType].map((folder, index) => (
+                            <div key={folder.id} className="p-4 bg-card border border-border rounded-lg space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  {/* Priority Reorder Controls */}
+                                  {foldersData.selectionModes[mediaType] === 'priority' && foldersData[mediaType].length > 1 && (
+                                    <div className="flex items-center gap-1 mr-2">
+                                      <button
+                                        onClick={() => moveFolder(mediaType, folder.id, 'up')}
+                                        disabled={index === 0}
+                                        className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition"
+                                        title="Move up in priority"
+                                      >
+                                        <ArrowUp className="w-3 h-3" />
+                                      </button>
+                                      <span className="text-xs font-medium text-muted-foreground w-4 text-center">
+                                        {index + 1}
+                                      </span>
+                                      <button
+                                        onClick={() => moveFolder(mediaType, folder.id, 'down')}
+                                        disabled={index === foldersData[mediaType].length - 1}
+                                        className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition"
+                                        title="Move down in priority"
+                                      >
+                                        <ArrowDown className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                  <span className="text-sm font-medium text-muted-foreground">Folder {index + 1}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {foldersData[mediaType].length > 1 && (
+                                    <button
+                                      onClick={() => removeFolder(mediaType, folder.id)}
+                                      className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded transition cursor-pointer"
+                                      title="Remove folder"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Music Root Folder</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={foldersData.music_root}
-                        onChange={(e) => setFoldersData({ ...foldersData, music_root: e.target.value })}
-                        placeholder={isWindows ? "C:\\Media\\Music" : "/media/music"}
-                        className="flex-1 px-4 py-2 bg-card border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => openBrowser('music_root')}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                        Browse
-                      </button>
+                              <div>
+                                <label className="block text-xs font-medium mb-1 text-muted-foreground">Name</label>
+                                <input
+                                  type="text"
+                                  value={folder.name}
+                                  onChange={(e) => updateFolder(mediaType, folder.id, 'name', e.target.value)}
+                                  placeholder="Folder name"
+                                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium mb-1 text-muted-foreground">Root Path (organized media)</label>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={folder.rootPath}
+                                    onChange={(e) => updateFolder(mediaType, folder.id, 'rootPath', e.target.value)}
+                                    placeholder={isWindows ? `D:\\Media\\${mediaTypeLabels[mediaType]}` : `/media/${mediaType}`}
+                                    className="flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => openBrowser(mediaType, folder.id, 'rootPath')}
+                                    className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
+                                  >
+                                    <FolderOpen className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium mb-1 text-muted-foreground">Download Path (same filesystem)</label>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={folder.downloadPath}
+                                    onChange={(e) => updateFolder(mediaType, folder.id, 'downloadPath', e.target.value)}
+                                    placeholder={isWindows ? `D:\\Downloads\\${mediaType}` : `/downloads/${mediaType}`}
+                                    className="flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => openBrowser(mediaType, folder.id, 'downloadPath')}
+                                    className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer"
+                                  >
+                                    <FolderOpen className="w-4 h-4" />
+                                  </button>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Must be on the same drive/filesystem as root path for hardlinking
+                                </p>
+                              </div>
+
+                              {/* Fill Threshold Settings */}
+                              {(foldersData.selectionModes[mediaType] === 'fill_threshold' || foldersData.selectionModes[mediaType] === 'priority') && (
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs font-medium mb-1 text-muted-foreground">
+                                      Max Disk Usage
+                                      <span className="ml-2 text-primary font-semibold">
+                                        {folder.fillThresholdPercent ?? 'Off'}
+                                        {folder.fillThresholdPercent ? '%' : ''}
+                                      </span>
+                                    </label>
+                                    <input
+                                      type="range"
+                                      min={0}
+                                      max={100}
+                                      step={5}
+                                      value={folder.fillThresholdPercent ?? 0}
+                                      onChange={(e) => updateFolder(mediaType, folder.id, 'fillThresholdPercent', parseInt(e.target.value) || undefined)}
+                                      className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+                                    />
+                                    <div className="grid grid-cols-3 text-xs text-muted-foreground mt-1">
+                                      <span>Off</span>
+                                      <span className="text-center">50%</span>
+                                      <span className="text-right">100%</span>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium mb-1 text-muted-foreground">Min Free Space</label>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={folder.fillThresholdGb ?? ''}
+                                      onChange={(e) => updateFolder(mediaType, folder.id, 'fillThresholdGb', e.target.value ? parseInt(e.target.value) : undefined)}
+                                      placeholder="GB"
+                                      className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm [&::-webkit-inner-spin-button]:dark:invert [&::-webkit-outer-spin-button]:dark:invert"
+                                    />
+                                  </div>
+                                  <p className="col-span-2 text-xs text-muted-foreground">
+                                    Move to next folder when disk usage reaches threshold
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Hardlink Status Banner */}
+                              {folder.testStatus && (
+                                <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
+                                  folder.testStatus.testing
+                                    ? 'bg-muted/50 text-muted-foreground'
+                                    : folder.testStatus.success && folder.testStatus.hardlinkSupported
+                                    ? 'bg-green-500/10 text-green-500 border border-green-500/20'
+                                    : folder.testStatus.success && !folder.testStatus.hardlinkSupported
+                                    ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20'
+                                    : 'bg-red-500/10 text-red-500 border border-red-500/20'
+                                }`}>
+                                  {folder.testStatus.testing ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                                      <span>Testing folder configuration...</span>
+                                    </>
+                                  ) : folder.testStatus.success && folder.testStatus.hardlinkSupported ? (
+                                    <>
+                                      <Link className="w-4 h-4 shrink-0" />
+                                      <span>Hardlinks supported - paths are on the same filesystem</span>
+                                    </>
+                                  ) : folder.testStatus.success && !folder.testStatus.hardlinkSupported ? (
+                                    <>
+                                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                                      <span>Hardlinks not supported - files will need to be copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <X className="w-4 h-4 shrink-0" />
+                                      <span>{folder.testStatus.message || 'Folder configuration error'}</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          <button
+                            onClick={() => addFolder(mediaType)}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-border rounded-lg hover:border-primary hover:text-primary transition cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Add Another Folder
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  ))}
 
                   {foldersMutation.isError && (
                     <div className="p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-500 text-sm">
@@ -494,7 +904,7 @@ export default function SetupPage() {
                     </button>
                     <button
                       onClick={() => foldersMutation.mutate()}
-                      disabled={foldersMutation.isPending}
+                      disabled={foldersMutation.isPending || !isFoldersValid()}
                       className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
                     >
                       {foldersMutation.isPending ? (
