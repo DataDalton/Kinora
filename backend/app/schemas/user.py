@@ -1,6 +1,20 @@
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, TYPE_CHECKING
+from pydantic import BaseModel, Field, ConfigDict
+
+if TYPE_CHECKING:
+    from app.schemas.permission import PermissionGroupSimple
+
+
+class PermissionGroupSimpleInline(BaseModel):
+    """Inline permission group schema to avoid circular imports"""
+
+    id: int
+    name: str
+    displayName: str = Field(validation_alias="display_name")
+    color: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class UserBase(BaseModel):
@@ -24,11 +38,11 @@ class UserUpdate(BaseModel):
 
 
 class UserAdminCreate(UserBase):
-    """Schema for creating a user by an administrator"""
+    """Schema for creating a user by an administrator with group assignments"""
 
     password: str = Field(..., min_length=8, max_length=100)
-    role: str = Field(default='user')
-    is_active: bool = Field(default=True)
+    groupIds: List[int] = Field(default_factory=list, description="List of group IDs to assign")
+    isActive: bool = Field(default=True)
 
 
 class UserAdminUpdate(BaseModel):
@@ -36,27 +50,40 @@ class UserAdminUpdate(BaseModel):
 
     username: Optional[str] = Field(None, min_length=3, max_length=50)
     password: Optional[str] = Field(None, min_length=8, max_length=100)
-    is_active: Optional[bool] = None
-    role: Optional[str] = None
+    isActive: Optional[bool] = None
+    groupIds: Optional[List[int]] = Field(None, description="List of group IDs to assign")
 
 
 class UserPasswordReset(BaseModel):
-    """Schema for resetting a user's password"""
+    """Schema for admin resetting a user's password"""
 
     password: str = Field(..., min_length=8, max_length=100)
+
+
+class PasswordChange(BaseModel):
+    """Schema for user changing their own password"""
+
+    currentPassword: str = Field(..., min_length=1)
+    newPassword: str = Field(..., min_length=8, max_length=100)
+
+
+class UserGroupsUpdate(BaseModel):
+    """Schema for setting user group assignments"""
+
+    groupIds: List[int] = Field(..., description="List of group IDs to assign to the user")
 
 
 class User(UserBase):
     """Schema for user response"""
 
     id: int
-    is_active: bool
-    role: str
-    created_at: datetime
-    updated_at: datetime
+    isActive: bool = Field(validation_alias="is_active")
+    groups: List[PermissionGroupSimpleInline] = []
+    permissions: List[str] = []
+    createdAt: datetime = Field(validation_alias="created_at")
+    updatedAt: datetime = Field(validation_alias="updated_at")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class UserLogin(BaseModel):
@@ -247,3 +274,36 @@ class TwoFactorStatusResponse(BaseModel):
     totp_enabled: bool
     webauthn_enabled: bool
     webauthn_credentials_count: int
+
+
+class PermissionGroup(BaseModel):
+    """Schema for permission group in user context"""
+
+    id: int
+    name: str
+    displayName: Optional[str] = Field(default=None, validation_alias="display_name")
+    description: Optional[str] = None
+    color: Optional[str] = None
+    priority: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class UserWithPermissions(UserBase):
+    """Schema for user response with permissions data"""
+
+    id: int
+    isActive: bool = Field(validation_alias="is_active")
+    groups: List[PermissionGroup] = []
+    permissions: List[str] = []
+    createdAt: datetime = Field(validation_alias="created_at")
+    updatedAt: datetime = Field(validation_alias="updated_at")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class UserPermissionsResponse(BaseModel):
+    """Schema for effective permissions response"""
+
+    userId: int
+    permissions: List[str] = []

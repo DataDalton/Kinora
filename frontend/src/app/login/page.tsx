@@ -42,6 +42,7 @@ export default function LoginPage() {
         document.cookie = `access_token=${access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
         document.cookie = `refresh_token=${refresh_token}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
 
+        window.dispatchEvent(new Event('auth:login'));
         router.push('/');
         return true;
       } catch (error) {
@@ -115,6 +116,7 @@ export default function LoginPage() {
       if (data.access_token && data.refresh_token) {
         document.cookie = `access_token=${data.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
         document.cookie = `refresh_token=${data.refresh_token}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+        window.dispatchEvent(new Event('auth:login'));
         router.push('/');
       }
     } catch (err: any) {
@@ -140,6 +142,7 @@ export default function LoginPage() {
       document.cookie = `access_token=${access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
       document.cookie = `refresh_token=${refresh_token}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
 
+      window.dispatchEvent(new Event('auth:login'));
       router.push('/');
     } catch (err: any) {
       setError(err.response?.data?.detail || '2FA verification failed.');
@@ -189,6 +192,7 @@ export default function LoginPage() {
       document.cookie = `access_token=${access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
       document.cookie = `refresh_token=${refresh_token}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
 
+      window.dispatchEvent(new Event('auth:login'));
       router.push('/');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'WebAuthn authentication failed.');

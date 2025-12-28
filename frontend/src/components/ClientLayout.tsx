@@ -4,6 +4,7 @@ import { ReactNode, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
+import { PermissionProvider } from '@/contexts/PermissionContext';
 import Navigation from '@/components/Navigation';
 import { api } from '@/lib/api';
 
@@ -38,7 +39,7 @@ function MainContent({ children }: { children: ReactNode }) {
 
       try {
         const response = await api.get('/setup/status');
-        if (!response.data.is_setup_complete && response.data.user_role === 'administrator') {
+        if (!response.data.is_setup_complete && response.data.is_admin) {
           router.push('/setup');
         }
       } catch (error) {
@@ -65,12 +66,14 @@ function MainContent({ children }: { children: ReactNode }) {
 export function ClientLayout({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
-      <SidebarProvider>
-        <div className="flex min-h-screen">
-          <Navigation />
-          <MainContent>{children}</MainContent>
-        </div>
-      </SidebarProvider>
+      <PermissionProvider>
+        <SidebarProvider>
+          <div className="flex min-h-screen">
+            <Navigation />
+            <MainContent>{children}</MainContent>
+          </div>
+        </SidebarProvider>
+      </PermissionProvider>
     </ThemeProvider>
   );
 }

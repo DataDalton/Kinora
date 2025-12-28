@@ -14,8 +14,8 @@ import os
 from pathlib import Path
 
 from app.db import get_db
-from app.api.v1.endpoints.auth import get_current_user
-from app.schemas.user import User
+from app.api.v1.endpoints.auth import get_current_user, require_permission
+from app.schemas.user import UserWithPermissions
 from app.services.download_clients.qbittorrent import QBittorrentClient
 from app.core.config import settings
 from app.services.folder_selector import folderSelector
@@ -48,7 +48,7 @@ class SetupStatusResponse(BaseModel):
     has_download_client: bool
     has_tmdb_key: bool
     has_root_folders: bool
-    user_role: str
+    is_admin: bool
 
 
 class QBittorrentSetupRequest(BaseModel):
@@ -92,7 +92,7 @@ class RootFoldersSetupRequest(BaseModel):
 
 @router.get("/status", response_model=SetupStatusResponse)
 async def get_setup_status(
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -124,30 +124,28 @@ async def get_setup_status(
 
     is_setup_complete = has_download_client and has_tmdb_key and has_root_folders
 
+    # Check if user has system.admin permission
+    is_admin = "system.admin" in current_user.permissions
+
     return SetupStatusResponse(
         is_setup_complete=is_setup_complete,
         has_download_client=has_download_client,
         has_tmdb_key=has_tmdb_key,
         has_root_folders=has_root_folders,
-        user_role=current_user.role
+        is_admin=is_admin
     )
 
 
 @router.post("/qbittorrent")
 async def setup_qbittorrent(
     config: QBittorrentSetupRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
     Configure qBittorrent download client.
     Only administrators can configure setup.
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can configure setup"
-        )
 
     # Test connection first
     try:
@@ -228,18 +226,13 @@ async def setup_qbittorrent(
 @router.post("/tmdb")
 async def setup_tmdb(
     config: TMDBSetupRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
     Configure TMDB API key.
     Only administrators can configure setup.
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can configure setup"
-        )
 
     # Test the API key
     from app.core.http_client import http_get
@@ -284,7 +277,7 @@ async def setup_tmdb(
 @router.post("/root-folders")
 async def setup_root_folders(
     config: RootFoldersSetupRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -292,11 +285,6 @@ async def setup_root_folders(
     Creates multiple root folders per media type with paired download folders.
     Only administrators can configure setup.
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can configure setup"
-        )
 
     # Map media types to their folder lists
     mediaTypeFolders = {
@@ -369,18 +357,13 @@ async def setup_root_folders(
 
 @router.post("/complete")
 async def mark_setup_complete(
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
     Mark setup as complete after all steps are done.
     Only administrators can complete setup.
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can complete setup"
-        )
 
     # Verify all required setup is complete
     status_response = await get_setup_status(current_user, conn)
@@ -437,17 +420,12 @@ class BrowseDirectoryResponse(BaseModel):
 @router.get("/browse-directory", response_model=BrowseDirectoryResponse)
 async def browse_directory(
     path: str = "/",
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Browse filesystem directories for folder selection.
     Only administrators can browse directories.
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can browse directories"
-        )
 
     try:
         # Handle Windows drive root listing

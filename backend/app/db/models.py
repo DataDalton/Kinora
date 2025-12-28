@@ -44,12 +44,10 @@ users = Table(
     Column("username", String(50), unique=True, nullable=False),
     Column("hashed_password", String(255)),
     Column("is_active", Boolean, default=True, nullable=False),
-    Column("role", String(50), default="user", nullable=False),
     Column("last_login_at", DateTime),
     Column("created_at", DateTime, server_default=func.now(), nullable=False),
     Column("updated_at", DateTime, server_default=func.now(), nullable=False),
     Index("idx_users_username", "username"),
-    Index("idx_users_role", "role"),
 )
 
 userAuthProviders = Table(
@@ -811,4 +809,90 @@ hardwareAccelDevices = Table(
     UniqueConstraint("device_type", "device_index"),
     Index("idx_hardware_accel_type", "device_type"),
     Index("idx_hardware_accel_available", "is_available"),
+)
+
+# Permissions table - individual permission definitions
+permissions = Table(
+    "permissions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", String(100), unique=True, nullable=False),
+    Column("display_name", String(100), nullable=False),
+    Column("description", Text),
+    Column("category", String(50), nullable=False),
+    Column("created_at", DateTime, server_default=func.now()),
+    Index("idx_permissions_name", "name"),
+    Index("idx_permissions_category", "category"),
+)
+
+# Permission groups table - named collections of permissions
+permissionGroups = Table(
+    "permission_groups",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", String(100), unique=True, nullable=False),
+    Column("display_name", String(100), nullable=False),
+    Column("description", Text),
+    Column("color", String(7)),
+    Column("is_system", Boolean, default=False, nullable=False),
+    Column("priority", Integer, default=0, nullable=False),
+    Column("created_at", DateTime, server_default=func.now()),
+    Column("updated_at", DateTime, server_default=func.now()),
+    Index("idx_permission_groups_name", "name"),
+    Index("idx_permission_groups_priority", "priority"),
+)
+
+# Permission group permissions table - junction between groups and permissions
+permissionGroupPermissions = Table(
+    "permission_group_permissions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("group_id", Integer, ForeignKey("permission_groups.id", ondelete="CASCADE"), nullable=False),
+    Column("permission_name", String(100), nullable=False),
+    UniqueConstraint("group_id", "permission_name"),
+    Index("idx_pgp_group", "group_id"),
+    Index("idx_pgp_permission", "permission_name"),
+)
+
+# User groups table - junction between users and permission groups (stackable)
+userGroups = Table(
+    "user_groups",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("group_id", Integer, ForeignKey("permission_groups.id", ondelete="CASCADE"), nullable=False),
+    Column("assigned_at", DateTime, server_default=func.now()),
+    Column("assigned_by", Integer, ForeignKey("users.id", ondelete="SET NULL")),
+    UniqueConstraint("user_id", "group_id"),
+    Index("idx_user_groups_user", "user_id"),
+    Index("idx_user_groups_group", "group_id"),
+)
+
+# Media requests table - pending requests for approval
+mediaRequests = Table(
+    "media_requests",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("media_type", String(20), nullable=False),
+    Column("external_id", Integer, nullable=False),
+    Column("title", String(255), nullable=False),
+    Column("poster_path", String(500)),
+    Column("year", Integer),
+    Column("overview", Text),
+    Column("metadata", JSONB),
+    Column("status", String(20), default="pending", nullable=False),
+    Column("requested_at", DateTime, server_default=func.now()),
+    Column("reviewed_at", DateTime),
+    Column("reviewed_by", Integer, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("review_notes", Text),
+    Column("request_notes", Text),
+    Column("media_profile_id", Integer),
+    Column("root_folder_id", Integer, ForeignKey("root_folders.id", ondelete="SET NULL")),
+    Column("auto_search", Boolean, default=True),
+    Column("created_media_id", Integer),
+    Index("idx_media_requests_user", "user_id"),
+    Index("idx_media_requests_status", "status"),
+    Index("idx_media_requests_media_type", "media_type"),
+    Index("idx_media_requests_external", "media_type", "external_id"),
 )

@@ -4,316 +4,475 @@ import asyncpg
 
 from app.db import get_db
 from app.core.security import get_password_hash
-from app.api.v1.endpoints.auth import get_current_user
-from app.schemas.user import User, UserAdminCreate, UserAdminUpdate, UserPasswordReset
+from app.api.v1.endpoints.auth import (
+    require_permission,
+    UserWithPermissions,
+)
+from app.core.permissions import (
+    getUserGroups,
+    getUserPermissions,
+    setUserGroups,
+    validateGroupIds,
+    isUserAdmin,
+)
+from app.schemas.user import (
+    UserAdminCreate,
+    UserAdminUpdate,
+    UserPasswordReset,
+    UserGroupsUpdate,
+    UserWithPermissions as UserWithPermissionsSchema,
+    UserPermissionsResponse,
+    PermissionGroup,
+)
 
 router = APIRouter()
 
 
-async def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    """
-    Dependency to require administrator role
-    """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can perform this action"
-        )
-    return current_user
+async def buildUserWithGroups(conn: asyncpg.Connection, userRow: dict) -> dict:
+    """Build user dict with groups and permissions"""
+    userData = dict(userRow)
+    userId = userData["id"]
+
+    # Fetch user's groups
+    groups = await getUserGroups(conn, userId)
+    userData["groups"] = [PermissionGroup(**g) for g in groups]
+
+    # Fetch user's effective permissions
+    permissions = await getUserPermissions(conn, userId)
+    userData["permissions"] = list(permissions)
+
+    return userData
 
 
-@router.get("/", response_model=List[User])
-async def list_users(
+@router.get("/", response_model=List[UserWithPermissionsSchema])
+async def listUsers(
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
 ):
     """
-    List all users (administrator only)
+    List all users with their groups.
+    Requires system.users permission.
     """
-    users = await conn.fetch("SELECT * FROM users ORDER BY created_at DESC")
-    return [User(**dict(user)) for user in users]
+    userRows = await conn.fetch("SELECT * FROM users ORDER BY created_at DESC")
+    users = []
+    for row in userRows:
+        userData = await buildUserWithGroups(conn, dict(row))
+        users.append(UserWithPermissionsSchema(**userData))
+    return users
 
 
-@router.get("/{user_id}", response_model=User)
-async def get_user(
-    user_id: int,
+@router.get("/{userId}", response_model=UserWithPermissionsSchema)
+async def getUser(
+    userId: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
 ):
     """
-    Get a specific user by ID (administrator only)
+    Get a specific user by ID with their groups and effective permissions.
+    Requires system.users permission.
     """
-    user_row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    userRow = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
-    if not user_row:
+    if not userRow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
-    return User(**dict(user_row))
+    userData = await buildUserWithGroups(conn, dict(userRow))
+    return UserWithPermissionsSchema(**userData)
 
 
-@router.post("/", response_model=User, status_code=status.HTTP_201_CREATED)
-async def create_user(
-    user_data: UserAdminCreate,
+@router.post("/", response_model=UserWithPermissionsSchema, status_code=status.HTTP_201_CREATED)
+async def createUser(
+    userData: UserAdminCreate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
 ):
     """
-    Create a new user (administrator only)
+    Create a new user with group assignments.
+    Requires system.users permission.
     """
     # Check if username exists
-    existing_user = await conn.fetchrow(
+    existingUser = await conn.fetchrow(
         "SELECT id FROM users WHERE username = $1",
-        user_data.username,
+        userData.username,
     )
 
-    if existing_user:
+    if existingUser:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already exists"
         )
 
-    # Validate role
-    if user_data.role not in ['administrator', 'user']:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid role. Must be 'administrator' or 'user'"
-        )
+    # Validate group IDs if provided
+    if userData.groupIds:
+        validGroupIds = await validateGroupIds(conn, userData.groupIds)
+        if len(validGroupIds) != len(userData.groupIds):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="One or more group IDs are invalid"
+            )
 
     # Hash password and create user
-    hashed_password = get_password_hash(user_data.password)
+    hashedPassword = get_password_hash(userData.password)
 
-    user_row = await conn.fetchrow(
+    userRow = await conn.fetchrow(
         """
-        INSERT INTO users (username, hashed_password, role, is_active)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (username, hashed_password, is_active)
+        VALUES ($1, $2, $3)
         RETURNING *
         """,
-        user_data.username,
-        hashed_password,
-        user_data.role,
-        user_data.is_active,
+        userData.username,
+        hashedPassword,
+        userData.isActive,
     )
 
-    return User(**dict(user_row))
+    userId = userRow["id"]
+
+    # Assign user to groups
+    if userData.groupIds:
+        await setUserGroups(conn, userId, userData.groupIds, currentUser.id)
+
+    # Build response with groups
+    responseData = await buildUserWithGroups(conn, dict(userRow))
+    return UserWithPermissionsSchema(**responseData)
 
 
-@router.put("/{user_id}", response_model=User)
-async def update_user(
-    user_id: int,
-    user_data: UserAdminUpdate,
+@router.put("/{userId}", response_model=UserWithPermissionsSchema)
+async def updateUser(
+    userId: int,
+    userData: UserAdminUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
 ):
     """
-    Update a user (administrator only)
+    Update a user including group assignments.
+    Requires system.users permission.
     """
     # Check if user exists
-    existing_user = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
-    if not existing_user:
+    if not existingUser:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
-    # Prevent self-demotion from administrator
-    if user_id == current_user.id and user_data.role and user_data.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot change your own administrator role"
-        )
-
     # Prevent self-deactivation
-    if user_id == current_user.id and user_data.is_active is False:
+    if userId == currentUser.id and userData.isActive is False:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot deactivate your own account"
         )
 
-    # Validate role if provided
-    if user_data.role and user_data.role not in ['administrator', 'user']:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid role. Must be 'administrator' or 'user'"
-        )
-
     # Check if new username already exists
-    if user_data.username and user_data.username != existing_user['username']:
-        username_exists = await conn.fetchrow(
+    if userData.username and userData.username != existingUser['username']:
+        usernameExists = await conn.fetchrow(
             "SELECT id FROM users WHERE username = $1 AND id != $2",
-            user_data.username,
-            user_id,
+            userData.username,
+            userId,
         )
-        if username_exists:
+        if usernameExists:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Username already exists"
             )
 
+    # Prevent removing admin groups from self if user is admin
+    if userId == currentUser.id and userData.groupIds is not None:
+        currentIsAdmin = await isUserAdmin(conn, currentUser.id)
+        if currentIsAdmin:
+            # Validate that admin group is still included
+            validGroupIds = await validateGroupIds(conn, userData.groupIds)
+            willBeAdmin = False
+            for groupId in validGroupIds:
+                # Check if any of the new groups has system.admin permission
+                hasAdmin = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM permission_group_permissions
+                        WHERE group_id = $1 AND permission_name = 'system.admin'
+                    )
+                    """,
+                    groupId,
+                )
+                if hasAdmin:
+                    willBeAdmin = True
+                    break
+            if not willBeAdmin:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot remove your own administrator privileges"
+                )
+
+    # Validate group IDs if provided
+    if userData.groupIds is not None:
+        validGroupIds = await validateGroupIds(conn, userData.groupIds)
+        if len(validGroupIds) != len(userData.groupIds):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="One or more group IDs are invalid"
+            )
+
     # Build update query dynamically
-    update_fields = []
-    update_values = []
-    param_count = 1
+    updateFields = []
+    updateValues = []
+    paramCount = 1
 
-    if user_data.username is not None:
-        update_fields.append(f"username = ${param_count}")
-        update_values.append(user_data.username)
-        param_count += 1
+    if userData.username is not None:
+        updateFields.append(f"username = ${paramCount}")
+        updateValues.append(userData.username)
+        paramCount += 1
 
-    if user_data.password is not None:
-        hashed_password = get_password_hash(user_data.password)
-        update_fields.append(f"hashed_password = ${param_count}")
-        update_values.append(hashed_password)
-        param_count += 1
+    if userData.password is not None:
+        hashedPassword = get_password_hash(userData.password)
+        updateFields.append(f"hashed_password = ${paramCount}")
+        updateValues.append(hashedPassword)
+        paramCount += 1
 
-    if user_data.is_active is not None:
-        update_fields.append(f"is_active = ${param_count}")
-        update_values.append(user_data.is_active)
-        param_count += 1
+    if userData.isActive is not None:
+        updateFields.append(f"is_active = ${paramCount}")
+        updateValues.append(userData.isActive)
+        paramCount += 1
 
-    if user_data.role is not None:
-        update_fields.append(f"role = ${param_count}")
-        update_values.append(user_data.role)
-        param_count += 1
+    if updateFields:
+        # Add updated_at
+        updateFields.append("updated_at = NOW()")
 
-    if not update_fields:
-        return User(**dict(existing_user))
+        # Build the final query
+        query = f"""
+            UPDATE users
+            SET {', '.join(updateFields)}
+            WHERE id = ${paramCount}
+            RETURNING *
+        """
 
-    # Add updated_at using NOW() function directly
-    update_fields.append("updated_at = NOW()")
+        updateValues.append(userId)
+        userRow = await conn.fetchrow(query, *updateValues)
+    else:
+        userRow = existingUser
 
-    # Build the final query with user_id parameter
-    query = f"""
-        UPDATE users
-        SET {', '.join(update_fields)}
-        WHERE id = ${param_count}
-        RETURNING *
-    """
+    # Update group assignments if provided
+    if userData.groupIds is not None:
+        await setUserGroups(conn, userId, userData.groupIds, currentUser.id)
 
-    # Add user_id as the final parameter
-    update_values.append(user_id)
-
-    user_row = await conn.fetchrow(query, *update_values)
-
-    return User(**dict(user_row))
+    # Build response with groups
+    responseData = await buildUserWithGroups(conn, dict(userRow))
+    return UserWithPermissionsSchema(**responseData)
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(
-    user_id: int,
+@router.delete("/{userId}", status_code=status.HTTP_204_NO_CONTENT)
+async def deleteUser(
+    userId: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
 ):
     """
-    Delete a user (administrator only)
+    Delete a user.
+    Requires system.users permission.
     """
     # Check if user exists
-    existing_user = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
-    if not existing_user:
+    if not existingUser:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
     # Prevent self-deletion
-    if user_id == current_user.id:
+    if userId == currentUser.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete your own account"
         )
 
-    # Check if this is the last administrator
-    if existing_user['role'] == 'administrator':
-        admin_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM users WHERE role = 'administrator'"
+    # Check if this is the last admin user
+    userIsAdmin = await isUserAdmin(conn, userId)
+    if userIsAdmin:
+        # Count users with system.admin permission
+        adminCount = await conn.fetchval(
+            """
+            SELECT COUNT(DISTINCT ug.user_id)
+            FROM user_groups ug
+            JOIN permission_group_permissions pgp ON ug.group_id = pgp.group_id
+            WHERE pgp.permission_name = 'system.admin'
+            """
         )
-        if admin_count <= 1:
+        if adminCount <= 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete the last administrator account"
             )
 
-    await conn.execute("DELETE FROM users WHERE id = $1", user_id)
+    await conn.execute("DELETE FROM users WHERE id = $1", userId)
 
     return None
 
 
-@router.put("/{user_id}/password", response_model=User)
-async def reset_user_password(
-    user_id: int,
-    password_data: UserPasswordReset,
+@router.put("/{userId}/groups", response_model=UserWithPermissionsSchema)
+async def setUserGroupsEndpoint(
+    userId: int,
+    groupData: UserGroupsUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
 ):
     """
-    Reset a user's password (administrator only)
+    Set a user's group assignments.
+    Requires system.users permission.
     """
     # Check if user exists
-    existing_user = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    userRow = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
-    if not existing_user:
+    if not userRow:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # Validate group IDs
+    validGroupIds = await validateGroupIds(conn, groupData.groupIds)
+    if len(validGroupIds) != len(groupData.groupIds):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="One or more group IDs are invalid"
+        )
+
+    # Prevent removing admin groups from self if user is admin
+    if userId == currentUser.id:
+        currentIsAdmin = await isUserAdmin(conn, currentUser.id)
+        if currentIsAdmin:
+            willBeAdmin = False
+            for groupId in validGroupIds:
+                hasAdmin = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM permission_group_permissions
+                        WHERE group_id = $1 AND permission_name = 'system.admin'
+                    )
+                    """,
+                    groupId,
+                )
+                if hasAdmin:
+                    willBeAdmin = True
+                    break
+            if not willBeAdmin:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot remove your own administrator privileges"
+                )
+
+    # Set user groups
+    await setUserGroups(conn, userId, validGroupIds, currentUser.id)
+
+    # Build response with groups
+    responseData = await buildUserWithGroups(conn, dict(userRow))
+    return UserWithPermissionsSchema(**responseData)
+
+
+@router.get("/{userId}/permissions", response_model=UserPermissionsResponse)
+async def getUserPermissionsEndpoint(
+    userId: int,
+    conn: asyncpg.Connection = Depends(get_db),
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
+):
+    """
+    Get effective permissions for a user.
+    Requires system.users permission.
+    """
+    # Check if user exists
+    userRow = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
+
+    if not userRow:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    permissions = await getUserPermissions(conn, userId)
+
+    return UserPermissionsResponse(userId=userId, permissions=list(permissions))
+
+
+@router.put("/{userId}/password", response_model=UserWithPermissionsSchema)
+async def resetUserPassword(
+    userId: int,
+    passwordData: UserPasswordReset,
+    conn: asyncpg.Connection = Depends(get_db),
+    currentUser: UserWithPermissions = Depends(require_permission("users.password.reset")),
+):
+    """
+    Reset a user's password.
+    Requires users.password.reset permission.
+    """
+    # Check if user exists
+    existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
+
+    if not existingUser:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
     # Hash new password
-    hashed_password = get_password_hash(password_data.password)
+    hashedPassword = get_password_hash(passwordData.password)
 
-    user_row = await conn.fetchrow(
+    userRow = await conn.fetchrow(
         """
         UPDATE users
         SET hashed_password = $1, updated_at = NOW()
         WHERE id = $2
         RETURNING *
         """,
-        hashed_password,
-        user_id,
+        hashedPassword,
+        userId,
     )
 
-    return User(**dict(user_row))
+    # Build response with groups
+    responseData = await buildUserWithGroups(conn, dict(userRow))
+    return UserWithPermissionsSchema(**responseData)
 
 
-@router.put("/{user_id}/toggle-active", response_model=User)
-async def toggle_user_active(
-    user_id: int,
+@router.put("/{userId}/toggle-active", response_model=UserWithPermissionsSchema)
+async def toggleUserActive(
+    userId: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    currentUser: UserWithPermissions = Depends(require_permission("system.users")),
 ):
     """
-    Toggle user active status (administrator only)
+    Toggle user active status.
+    Requires system.users permission.
     """
     # Check if user exists
-    existing_user = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
-    if not existing_user:
+    if not existingUser:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
     # Prevent self-deactivation
-    if user_id == current_user.id:
+    if userId == currentUser.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot toggle your own account status"
         )
 
-    new_status = not existing_user['is_active']
+    newStatus = not existingUser['is_active']
 
-    user_row = await conn.fetchrow(
+    userRow = await conn.fetchrow(
         """
         UPDATE users
         SET is_active = $1, updated_at = NOW()
         WHERE id = $2
         RETURNING *
         """,
-        new_status,
-        user_id,
+        newStatus,
+        userId,
     )
 
-    return User(**dict(user_row))
+    # Build response with groups
+    responseData = await buildUserWithGroups(conn, dict(userRow))
+    return UserWithPermissionsSchema(**responseData)

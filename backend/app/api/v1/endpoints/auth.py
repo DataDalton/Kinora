@@ -17,6 +17,13 @@ from app.core.security import (
 from app.core.config import settings
 from app.core.forward_auth import detect_forward_auth
 from app.core.oidc import OIDCProvider, create_oidc_provider_from_settings
+from app.core.permissions import (
+    getUserPermissions,
+    getUserGroups,
+    userHasPermission,
+    getGroupByName,
+    assignUserToGroup,
+)
 from app.schemas.user import (
     User,
     UserCreate,
@@ -30,6 +37,9 @@ from app.schemas.user import (
     OIDCCallbackRequest,
     LinkAuthProviderRequest,
     UserAuthProvider,
+    UserWithPermissions,
+    PermissionGroup,
+    PasswordChange,
 )
 from app.core.two_factor import verify_totp_code
 import secrets
@@ -57,9 +67,9 @@ async def get_registration_status(conn: asyncpg.Connection = Depends(get_db)):
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     conn: asyncpg.Connection = Depends(get_db),
-) -> User:
+) -> UserWithPermissions:
     """
-    Get current authenticated user from token
+    Get current authenticated user from token with groups and permissions
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -80,13 +90,57 @@ async def get_current_user(
     if user_row is None:
         raise credentials_exception
 
-    return User(**dict(user_row))
+    user_data = dict(user_row)
+    user_id = user_data["id"]
+
+    # Fetch user's groups
+    groups = await getUserGroups(conn, user_id)
+    user_data["groups"] = [PermissionGroup(**g) for g in groups]
+
+    # Fetch user's effective permissions
+    permissions = await getUserPermissions(conn, user_id)
+    user_data["permissions"] = list(permissions)
+
+    return UserWithPermissions(**user_data)
+
+
+def require_permission(permission: str):
+    """Factory function to create permission-checking dependency."""
+    async def dependency(
+        current_user: UserWithPermissions = Depends(get_current_user),
+        conn: asyncpg.Connection = Depends(get_db),
+    ) -> UserWithPermissions:
+        hasPerm = await userHasPermission(conn, current_user.id, permission)
+        if not hasPerm:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission '{permission}' required",
+            )
+        return current_user
+    return dependency
+
+
+def require_any_permission(*permissions: str):
+    """Factory function requiring any one of multiple permissions."""
+    async def dependency(
+        current_user: UserWithPermissions = Depends(get_current_user),
+        conn: asyncpg.Connection = Depends(get_db),
+    ) -> UserWithPermissions:
+        userPerms = await getUserPermissions(conn, current_user.id)
+        if not any(p in userPerms for p in permissions):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"One of {permissions} required",
+            )
+        return current_user
+    return dependency
 
 
 @router.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get_db)):
     """
-    Register a new user
+    Register a new user.
+    First user is assigned to 'administrator' group, subsequent users to 'media_manager' group.
     """
     # Check if this is the first user (should be administrator)
     user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
@@ -116,21 +170,26 @@ async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get
             detail="Username already registered",
         )
 
-    user_role = 'administrator' if is_first_user else 'user'
-
     # Hash password and create user
     hashed_password = get_password_hash(user_data.password)
 
     user_row = await conn.fetchrow(
         """
-        INSERT INTO users (username, hashed_password, is_active, role)
-        VALUES ($1, $2, TRUE, $3)
+        INSERT INTO users (username, hashed_password, is_active)
+        VALUES ($1, $2, TRUE)
         RETURNING *
         """,
         user_data.username,
         hashed_password,
-        user_role,
     )
+
+    userId = user_row["id"]
+
+    # Assign user to appropriate group
+    groupName = "administrator" if is_first_user else "media_manager"
+    group = await getGroupByName(conn, groupName)
+    if group:
+        await assignUserToGroup(conn, userId, group["id"])
 
     return User(**dict(user_row))
 
@@ -338,10 +397,10 @@ async def verify_two_factor(
     return Token(access_token=access_token, refresh_token=refresh_token)
 
 
-@router.get("/me", response_model=User)
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
+@router.get("/me", response_model=UserWithPermissions)
+async def get_current_user_info(current_user: UserWithPermissions = Depends(get_current_user)):
     """
-    Get current user information
+    Get current user information including groups and permissions
     """
     return current_user
 
@@ -358,7 +417,8 @@ async def get_or_create_user_from_provider(
     metadata: dict = None
 ) -> tuple[User, bool]:
     """
-    Get or create user from auth provider
+    Get or create user from auth provider.
+    First user is assigned to 'administrator' group, subsequent users to 'media_manager' group.
     Returns tuple of (User, is_new_user)
     """
     auth_provider = await conn.fetchrow(
@@ -416,17 +476,16 @@ async def get_or_create_user_from_provider(
             detail=f"Username '{username}' is already taken. Please link this provider to your existing account.",
         )
 
-    user_role = 'administrator' if is_first_user else 'user'
-
     user_row = await conn.fetchrow(
         """
-        INSERT INTO users (username, hashed_password, role, last_login_at)
-        VALUES ($1, NULL, $2, NOW())
+        INSERT INTO users (username, hashed_password, last_login_at)
+        VALUES ($1, NULL, NOW())
         RETURNING *
         """,
         username,
-        user_role,
     )
+
+    userId = user_row["id"]
 
     await conn.execute(
         """
@@ -434,13 +493,19 @@ async def get_or_create_user_from_provider(
         (user_id, provider_type, provider_name, provider_subject, provider_username, provider_metadata)
         VALUES ($1, $2, $3, $4, $5, $6)
         """,
-        user_row["id"],
+        userId,
         provider_type,
         provider_name,
         provider_subject,
         username,
         json.dumps(metadata) if metadata else None,
     )
+
+    # Assign user to appropriate group
+    groupName = "administrator" if is_first_user else "media_manager"
+    group = await getGroupByName(conn, groupName)
+    if group:
+        await assignUserToGroup(conn, userId, group["id"])
 
     return User(**dict(user_row)), True
 
@@ -499,11 +564,15 @@ async def forward_auth_login(
 # OIDC Provider Management (Admin only)
 
 
-async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+async def require_admin(
+    current_user: UserWithPermissions = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+) -> UserWithPermissions:
     """
-    Dependency to require administrator role
+    Dependency to require 'system.admin' permission
     """
-    if current_user.role != 'administrator':
+    hasAdmin = await userHasPermission(conn, current_user.id, "system.admin")
+    if not hasAdmin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator privileges required",
@@ -899,3 +968,50 @@ async def unlink_auth_provider(
         "DELETE FROM user_auth_providers WHERE id = $1",
         provider_id,
     )
+
+
+# Password Management
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+async def change_password(
+    password_data: PasswordChange,
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user: UserWithPermissions = Depends(get_current_user),
+):
+    """
+    Change current user's password. Requires users.password.self permission and current password verification.
+    """
+    has_permission = await userHasPermission(conn, current_user.id, "users.password.self")
+    if not has_permission:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission 'users.password.self' required to change your password",
+        )
+
+    user_row = await conn.fetchrow(
+        "SELECT hashed_password FROM users WHERE id = $1",
+        current_user.id,
+    )
+
+    if not user_row or not user_row["hashed_password"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change password for SSO-only accounts. Set a password first.",
+        )
+
+    if not verify_password(password_data.currentPassword, user_row["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    new_hashed_password = get_password_hash(password_data.newPassword)
+
+    await conn.execute(
+        "UPDATE users SET hashed_password = $1, updated_at = NOW() WHERE id = $2",
+        new_hashed_password,
+        current_user.id,
+    )
+
+    return {"message": "Password changed successfully"}

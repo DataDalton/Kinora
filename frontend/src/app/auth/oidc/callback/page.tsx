@@ -34,6 +34,7 @@ function OIDCCallbackContent() {
         document.cookie = `access_token=${access_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
         document.cookie = `refresh_token=${refresh_token}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax`;
 
+        window.dispatchEvent(new Event('auth:login'));
         router.push("/");
       } catch (err: any) {
         console.error("OIDC callback error:", err);

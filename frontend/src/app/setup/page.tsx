@@ -12,7 +12,7 @@ interface SetupStatus {
   hasDownloadClient: boolean;
   hasTmdbKey: boolean;
   hasRootFolders: boolean;
-  userRole: string;
+  isAdmin: boolean;
 }
 
 type SetupStep = 'qbittorrent' | 'tmdb' | 'folders' | 'complete';
@@ -189,7 +189,7 @@ export default function SetupPage() {
         hasDownloadClient: data.has_download_client,
         hasTmdbKey: data.has_tmdb_key,
         hasRootFolders: data.has_root_folders,
-        userRole: data.user_role,
+        isAdmin: data.is_admin,
       };
     },
   });
@@ -212,9 +212,9 @@ export default function SetupPage() {
     }
   }, [browserData]);
 
-  // Redirect if not administrator
+  // Redirect if not admin
   useEffect(() => {
-    if (setupStatus && setupStatus.userRole !== 'administrator') {
+    if (setupStatus && !setupStatus.isAdmin) {
       setIsRedirecting(true);
       router.push('/');
     }

@@ -17,6 +17,20 @@ from app.schemas.root_folder import (
     BrowseDirectoryRequest,
     BrowseDirectoryResponse,
 )
+from app.schemas.permission import (
+    Permission,
+    PermissionGroupBase,
+    PermissionGroupCreate,
+    PermissionGroupUpdate,
+    PermissionGroup,
+    PermissionGroupSimple,
+)
+from app.schemas.request import (
+    MediaRequestCreate,
+    MediaRequestResponse,
+    MediaRequestReview,
+    MediaRequestCount,
+)
 
 __all__ = [
     "User",
@@ -49,4 +63,14 @@ __all__ = [
     "FolderHealthSummary",
     "BrowseDirectoryRequest",
     "BrowseDirectoryResponse",
+    "Permission",
+    "PermissionGroupBase",
+    "PermissionGroupCreate",
+    "PermissionGroupUpdate",
+    "PermissionGroup",
+    "PermissionGroupSimple",
+    "MediaRequestCreate",
+    "MediaRequestResponse",
+    "MediaRequestReview",
+    "MediaRequestCount",
 ]

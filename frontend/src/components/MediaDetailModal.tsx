@@ -5,6 +5,8 @@ import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import Toast from './Toast';
 import { Folder, HardDrive } from 'lucide-react';
+import { usePermissions } from '@/contexts/PermissionContext';
+import { createRequest } from '@/lib/api/requests';
 
 interface Media {
   id: number;
@@ -47,7 +49,10 @@ const formatBytes = (bytes: number | null): string => {
 
 export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaType = 'movie' }: MediaDetailModalProps) {
   const queryClient = useQueryClient();
+  const { canManage, canRequest, canDownload } = usePermissions();
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestNotes, setRequestNotes] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [autoSearch, setAutoSearch] = useState(true);
@@ -55,9 +60,22 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
   const [navigationStack, setNavigationStack] = useState<Media[]>([]);
   const [currentMedia, setCurrentMedia] = useState<Media | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
   const displayMedia = currentMedia || media;
   const mediaType = displayMedia?.media_type || defaultMediaType;
+
+  // Permission-based action determination
+  // canManage/canDownload = direct add capability, canRequest = request-only capability
+  const getPermissionMediaType = () => {
+    if (mediaType === 'artist' || mediaType === 'album' || mediaType === 'track') return 'music';
+    if (mediaType === 'show') return 'shows';
+    if (mediaType === 'movie') return 'movies';
+    return mediaType;
+  };
+  const permissionMediaType = getPermissionMediaType();
+  const canDirectAdd = canManage(permissionMediaType) || canDownload(permissionMediaType);
+  const canRequestAdd = canRequest(permissionMediaType) && !canDirectAdd;
 
   const showToast = (message: string, type: 'success' | 'error' | 'info') => {
     setToast(null);
@@ -450,12 +468,30 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                       <p className="text-foreground/90 mb-6">{mediaDetails.overview}</p>
 
                       <div className="flex gap-4">
-                        <button
-                          onClick={() => setShowAddModal(true)}
-                          className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 cursor-pointer transition-all hover:scale-105"
-                        >
-                          Add to Library
-                        </button>
+                        {canDirectAdd && (
+                          <button
+                            onClick={() => setShowAddModal(true)}
+                            className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 cursor-pointer transition-all hover:scale-105"
+                          >
+                            Add to Library
+                          </button>
+                        )}
+                        {canRequestAdd && (
+                          <button
+                            onClick={() => setShowRequestModal(true)}
+                            className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 cursor-pointer transition-all hover:scale-105"
+                          >
+                            Request
+                          </button>
+                        )}
+                        {!canDirectAdd && !canRequestAdd && (
+                          <button
+                            disabled
+                            className="px-6 py-3 bg-muted text-muted-foreground rounded-lg cursor-not-allowed"
+                          >
+                            No Permission
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1011,6 +1047,76 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                     setAddCollection(false);
                     // Reset folder selection to automatic on cancel
                     setSelectedFolderId(null);
+                  }}
+                  className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition-all hover:scale-105"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Request Modal */}
+      {showRequestModal && mediaDetails && (
+        <div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-[60] flex items-center justify-center p-4">
+          <div className="bg-background rounded-lg max-w-md w-full border border-border shadow-2xl p-6">
+            <h2 className="text-2xl font-bold mb-2">Request {mediaDetails.title || mediaDetails.name}</h2>
+            <p className="text-muted-foreground text-sm mb-6">
+              Your request will be sent to an administrator for approval.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold mb-2">Notes (optional)</label>
+                <textarea
+                  value={requestNotes}
+                  onChange={(e) => setRequestNotes(e.target.value)}
+                  placeholder="Add a note for the approver..."
+                  className="w-full px-4 py-3 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary resize-none h-24"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={async () => {
+                    setIsSubmittingRequest(true);
+                    try {
+                      // Determine the correct media type for the request
+                      const requestMediaType = mediaType === 'show' ? 'show' :
+                                                mediaType === 'anime' ? 'anime' :
+                                                mediaType === 'album' ? 'album' : 'movie';
+
+                      await createRequest({
+                        mediaType: requestMediaType,
+                        externalId: mediaDetails.id,
+                        title: mediaDetails.title || mediaDetails.name,
+                        posterPath: mediaDetails.poster_path || mediaDetails.cover_xl || mediaDetails.picture_xl,
+                        year: mediaDetails.release_date ? new Date(mediaDetails.release_date).getFullYear() :
+                              mediaDetails.first_air_date ? new Date(mediaDetails.first_air_date).getFullYear() : undefined,
+                        overview: mediaDetails.overview,
+                        requestNotes: requestNotes || undefined,
+                      });
+                      showToast('Request submitted for approval', 'success');
+                      setShowRequestModal(false);
+                      setRequestNotes('');
+                      onClose();
+                    } catch (error: any) {
+                      showToast(error?.response?.data?.detail || 'Failed to submit request', 'error');
+                    } finally {
+                      setIsSubmittingRequest(false);
+                    }
+                  }}
+                  disabled={isSubmittingRequest}
+                  className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 cursor-pointer transition-all hover:scale-105"
+                >
+                  {isSubmittingRequest ? 'Submitting...' : 'Submit Request'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowRequestModal(false);
+                    setRequestNotes('');
                   }}
                   className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition-all hover:scale-105"
                 >

@@ -20,16 +20,19 @@ import {
   PlusCircle,
   Settings,
   FileVideo,
-  Wrench
+  Wrench,
+  Inbox
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
 import { useSidebar } from '@/contexts/SidebarContext';
+import { usePermissions } from '@/contexts/PermissionContext';
+import { getRequestCounts } from '@/lib/api/requests';
 
 export default function Navigation() {
   const router = useRouter();
   const pathname = usePathname();
   const { collapsed, toggleCollapsed } = useSidebar();
-  const [user, setUser] = useState<any>(null);
+  const { canView, hasAnyPermission, loading: permissionsLoading, user } = usePermissions();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,22 +41,28 @@ export default function Navigation() {
   const [isSearching, setIsSearching] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
+  // Permission checks for navigation visibility (only valid after permissions loaded)
+  const hasAnyApprovePermission = !permissionsLoading && hasAnyPermission(
+    'movies.approve', 'shows.approve', 'anime.approve', 'music.approve'
+  );
+  const hasAnyRequestOrApprovePermission = !permissionsLoading && hasAnyPermission(
+    'movies.request', 'shows.request', 'anime.request', 'music.request',
+    'movies.approve', 'shows.approve', 'anime.approve', 'music.approve'
+  );
+  const hasAnySystemPermission = !permissionsLoading && hasAnyPermission(
+    'system.admin', 'system.settings', 'system.users', 'system.logs'
+  );
+
+  // Fetch pending request counts for badge display
+  const { data: requestCounts } = useQuery({
+    queryKey: ['request-counts'],
+    queryFn: getRequestCounts,
+    refetchInterval: 30000,
+    enabled: !permissionsLoading && hasAnyApprovePermission,
+  });
+
   useEffect(() => {
     setMounted(true);
-
-    const fetchUser = async () => {
-      try {
-        const response = await api.get('/auth/me');
-        setUser(response.data);
-      } catch (error) {
-        console.error('Failed to fetch user:', error);
-      }
-    };
-
-    const token = document.cookie.split('; ').find(row => row.startsWith('access_token='));
-    if (token) {
-      fetchUser();
-    }
   }, []);
 
   useEffect(() => {
@@ -120,40 +129,46 @@ export default function Navigation() {
 
   const isActive = (path: string) => pathname === path;
 
+  // Build navigation sections with permission-based visibility
+  // While loading, show all items; after loaded, filter by permissions
   const navSections = [
     {
       label: 'General',
       links: [
-        { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-        { href: '/activity', label: 'Activity', icon: Activity },
+        { href: '/', label: 'Dashboard', icon: LayoutDashboard, visible: true },
+        { href: '/activity', label: 'Activity', icon: Activity, visible: true },
       ],
     },
     {
       label: 'Media',
       links: [
-        { href: '/movies', label: 'Movies', icon: Film },
-        { href: '/shows', label: 'TV Shows', icon: Tv },
-        { href: '/anime', label: 'Anime', icon: Sparkles },
-        { href: '/music', label: 'Music', icon: Music2 },
+        { href: '/movies', label: 'Movies', icon: Film, visible: permissionsLoading || canView('movies') },
+        { href: '/shows', label: 'TV Shows', icon: Tv, visible: permissionsLoading || canView('shows') },
+        { href: '/anime', label: 'Anime', icon: Sparkles, visible: permissionsLoading || canView('anime') },
+        { href: '/music', label: 'Music', icon: Music2, visible: permissionsLoading || canView('music') },
+        { href: '/requests', label: 'Requests', icon: Inbox, visible: permissionsLoading || hasAnyRequestOrApprovePermission, badge: hasAnyApprovePermission && requestCounts?.pending ? requestCounts.pending : undefined },
       ],
     },
     {
       label: 'Discovery',
       links: [
-        { href: '/discover', label: 'Discover', icon: Compass },
-        { href: '/discover-music', label: 'Discover Music', icon: Disc3 },
-        { href: '/search', label: 'Search', icon: PlusCircle },
+        { href: '/discover', label: 'Discover', icon: Compass, visible: true },
+        { href: '/discover-music', label: 'Discover Music', icon: Disc3, visible: true },
+        { href: '/search', label: 'Search', icon: PlusCircle, visible: true },
       ],
     },
     {
       label: 'Management',
       links: [
-        { href: '/transcoding', label: 'Transcoding', icon: Settings },
-        { href: '/media-profiles', label: 'Media Profiles', icon: FileVideo },
-        { href: '/settings', label: 'Settings', icon: Wrench },
+        { href: '/transcoding', label: 'Transcoding', icon: Settings, visible: permissionsLoading || hasAnySystemPermission },
+        { href: '/media-profiles', label: 'Media Profiles', icon: FileVideo, visible: permissionsLoading || hasAnySystemPermission },
+        { href: '/settings', label: 'Settings', icon: Wrench, visible: permissionsLoading || hasAnySystemPermission },
       ],
     },
-  ];
+  ].map(section => ({
+    ...section,
+    links: section.links.filter(link => link.visible)
+  })).filter(section => section.links.length > 0);
 
   if (!mounted) return null;
 
@@ -310,15 +325,31 @@ export default function Navigation() {
                     <Link
                       key={link.href}
                       href={link.href}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                      className={`relative flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                         isActive(link.href)
                           ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/50'
                           : 'text-foreground/70 hover:text-foreground hover:bg-accent/70'
                       }`}
                       title={collapsed ? link.label : undefined}
                     >
-                      <link.icon className="w-5 h-5" />
-                      {!collapsed && <span className="font-medium">{link.label}</span>}
+                      <div className="relative">
+                        <link.icon className="w-5 h-5" />
+                        {collapsed && link.badge !== undefined && link.badge > 0 && (
+                          <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center font-medium">
+                            {link.badge > 9 ? '9+' : link.badge}
+                          </span>
+                        )}
+                      </div>
+                      {!collapsed && (
+                        <>
+                          <span className="font-medium">{link.label}</span>
+                          {link.badge !== undefined && link.badge > 0 && (
+                            <span className="ml-auto bg-red-500 text-white text-xs rounded-full h-5 min-w-5 px-1.5 flex items-center justify-center font-medium">
+                              {link.badge > 99 ? '99+' : link.badge}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </Link>
                   ))}
                 </div>
@@ -344,13 +375,22 @@ export default function Navigation() {
                   <p className="text-sm font-semibold text-foreground truncate">
                     {user.username}
                   </p>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
-                    user.role === 'administrator'
-                      ? 'bg-primary/20 text-primary border border-primary/30'
-                      : 'bg-muted text-muted-foreground border border-border'
-                  }`}>
-                    {user.role === 'administrator' ? 'Admin' : 'User'}
-                  </span>
+                  {user.groups?.[0] ? (
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border"
+                      style={{
+                        backgroundColor: `${user.groups[0].color}20`,
+                        color: user.groups[0].color,
+                        borderColor: `${user.groups[0].color}50`,
+                      }}
+                    >
+                      {user.groups[0].displayName}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground border border-border">
+                      User
+                    </span>
+                  )}
                 </div>
               </div>
             </Link>
@@ -411,6 +451,11 @@ export default function Navigation() {
                       >
                         <link.icon className="w-5 h-5" />
                         <span className="font-medium">{link.label}</span>
+                        {link.badge !== undefined && link.badge > 0 && (
+                          <span className="ml-auto bg-red-500 text-white text-xs rounded-full h-5 min-w-5 px-1.5 flex items-center justify-center font-medium">
+                            {link.badge > 99 ? '99+' : link.badge}
+                          </span>
+                        )}
                       </Link>
                     ))}
                   </div>
@@ -433,13 +478,22 @@ export default function Navigation() {
                         <p className="text-sm font-semibold text-foreground truncate">
                           {user.username}
                         </p>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
-                          user.role === 'administrator'
-                            ? 'bg-primary/20 text-primary border border-primary/30'
-                            : 'bg-muted text-muted-foreground border border-border'
-                        }`}>
-                          {user.role === 'administrator' ? 'Admin' : 'User'}
-                        </span>
+                        {user.groups?.[0] ? (
+                          <span
+                            className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border"
+                            style={{
+                              backgroundColor: `${user.groups[0].color}20`,
+                              color: user.groups[0].color,
+                              borderColor: `${user.groups[0].color}50`,
+                            }}
+                          >
+                            {user.groups[0].displayName}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground border border-border">
+                            User
+                          </span>
+                        )}
                       </div>
                     </div>
                   </Link>

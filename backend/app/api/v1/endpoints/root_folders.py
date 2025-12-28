@@ -8,7 +8,8 @@ import os
 import platform
 
 from app.db import get_db
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_permission
+from app.schemas.user import UserWithPermissions
 from app.schemas.root_folder import (
     RootFolderCreate,
     RootFolderUpdate,
@@ -128,14 +129,9 @@ async def updateSelectionSettings(
     mediaType: str,
     settings: FolderSelectionSettingsUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    currentUser=Depends(get_current_user),
+    currentUser: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """Update folder selection settings for a media type."""
-    if currentUser.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can update settings",
-        )
 
     await folderSelector.setSelectionMode(conn, mediaType, settings.selection_mode)
 
@@ -182,7 +178,7 @@ async def getRootFolder(
 async def createRootFolder(
     folderData: RootFolderCreate,
     conn: asyncpg.Connection = Depends(get_db),
-    currentUser=Depends(get_current_user),
+    currentUser: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Create a new root folder.
@@ -190,11 +186,6 @@ async def createRootFolder(
     Validates same filesystem for hardlink support.
     Creates directories if they don't exist.
     """
-    if currentUser.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can create root folders",
-        )
 
     try:
         folder = await folderSelector.createFolder(
@@ -237,14 +228,9 @@ async def updateRootFolder(
     folderId: int,
     folderData: RootFolderUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    currentUser=Depends(get_current_user),
+    currentUser: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """Update an existing root folder."""
-    if currentUser.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can update root folders",
-        )
 
     try:
         folder = await folderSelector.updateFolder(
@@ -288,17 +274,12 @@ async def updateRootFolder(
 async def deleteRootFolder(
     folderId: int,
     conn: asyncpg.Connection = Depends(get_db),
-    currentUser=Depends(get_current_user),
+    currentUser: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Delete a root folder.
     Fails if media items are assigned to this folder.
     """
-    if currentUser.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can delete root folders",
-        )
 
     try:
         deleted = await folderSelector.deleteFolder(conn, folderId)
@@ -372,14 +353,9 @@ async def refreshFolderHealth(
 @router.post("/browse", response_model=BrowseDirectoryResponse)
 async def browseDirectory(
     browseData: BrowseDirectoryRequest,
-    currentUser=Depends(get_current_user),
+    currentUser: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """Browse filesystem directories for folder selection."""
-    if currentUser.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can browse directories",
-        )
 
     path = browseData.path
 

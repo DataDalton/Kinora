@@ -4,11 +4,14 @@ from pydantic import BaseModel
 import asyncpg
 import os
 import shutil
+import json
 
 from app.db import get_db
 from app.db.repositories import ShowRepository, SeasonRepository, EpisodeRepository
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_permission
+from app.schemas.user import UserWithPermissions
 from app.services.metadata.tmdb import tmdb_service
+from app.core.permissions import userHasPermission
 
 router = APIRouter()
 
@@ -41,7 +44,7 @@ async def get_shows(
     status: Optional[str] = None,
     monitored: Optional[bool] = None,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.view")),
 ):
     """Get all TV shows from library with pagination, filtering, and tags (single query)."""
     offset = (page - 1) * limit
@@ -92,7 +95,7 @@ async def get_shows(
 async def get_show(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.view")),
 ):
     """Get a specific TV show by ID."""
     repo = ShowRepository(conn)
@@ -111,29 +114,90 @@ async def get_show(
 async def add_show(
     show_data: ShowCreate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
-    """Add a TV show to library."""
+    """Add a TV show to library.
+
+    If user has shows.download permission, adds directly.
+    If user only has shows.request permission, creates a request for approval.
+    """
     repo = ShowRepository(conn)
 
-    if await repo.existsByTmdbId(show_data.tmdb_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Show already exists in library",
-        )
+    # Check if user can add directly (has download permission) or needs to create request
+    canDownload = await userHasPermission(conn, current_user.id, "shows.download")
 
+    # Fetch metadata from TMDB
     metadata = await tmdb_service.get_tv(show_data.tmdb_id)
     parsedData = tmdb_service.parse_tv_data(metadata)
 
-    showData = {
-        **parsedData,
-        "status": "wanted",
-        "monitored": show_data.monitored,
-        "media_profile_id": show_data.media_profile_id,
-        "season_monitoring": show_data.season_monitoring,
-    }
+    if canDownload:
+        # User can add directly
+        if await repo.existsByTmdbId(show_data.tmdb_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Show already exists in library",
+            )
 
-    return await repo.create(showData)
+        showData = {
+            **parsedData,
+            "status": "wanted",
+            "monitored": show_data.monitored,
+            "media_profile_id": show_data.media_profile_id,
+            "season_monitoring": show_data.season_monitoring,
+        }
+
+        return await repo.create(showData)
+    else:
+        # User needs to create a request for approval
+        existingRequest = await conn.fetchrow(
+            """
+            SELECT id FROM media_requests
+            WHERE media_type = 'show' AND external_id = $1 AND user_id = $2 AND status = 'pending'
+            """,
+            show_data.tmdb_id,
+            current_user.id,
+        )
+
+        if existingRequest:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A request for this show is already pending",
+            )
+
+        # Check if show already exists
+        if await repo.existsByTmdbId(show_data.tmdb_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Show already exists in library",
+            )
+
+        # Create a media request
+        request_row = await conn.fetchrow(
+            """
+            INSERT INTO media_requests (user_id, media_type, external_id, title, poster_path, year, overview, metadata, status)
+            VALUES ($1, 'show', $2, $3, $4, $5, $6, $7, 'pending')
+            RETURNING id, status, requested_at
+            """,
+            current_user.id,
+            show_data.tmdb_id,
+            parsedData.get("title"),
+            parsedData.get("poster_path"),
+            parsedData.get("year"),
+            parsedData.get("overview"),
+            json.dumps({
+                "monitored": show_data.monitored,
+                "media_profile_id": show_data.media_profile_id,
+                "season_monitoring": show_data.season_monitoring,
+            }),
+        )
+
+        return {
+            "request_id": request_row["id"],
+            "status": "pending",
+            "message": "Show request submitted for approval",
+            "title": parsedData.get("title"),
+            "requested_at": request_row["requested_at"],
+        }
 
 
 @router.put("/{show_id}")
@@ -141,7 +205,7 @@ async def update_show(
     show_id: int,
     updates: dict,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Update TV show in library."""
     repo = ShowRepository(conn)
@@ -160,7 +224,7 @@ async def update_show(
 async def delete_show(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Remove TV show from library."""
     repo = ShowRepository(conn)
@@ -180,7 +244,7 @@ async def update_show_monitoring(
     show_id: int,
     data: MonitoringUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Update show monitoring settings. Cascades monitored status to all seasons and episodes."""
     repo = ShowRepository(conn)
@@ -224,7 +288,7 @@ async def delete_show_with_files(
     show_id: int,
     delete_files: bool = Query(False, description="Also delete files from disk"),
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Delete show from library with option to delete files from disk."""
     repo = ShowRepository(conn)
@@ -264,7 +328,7 @@ async def delete_show_with_files(
 async def refresh_show_metadata(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Refresh show metadata from TMDB."""
     repo = ShowRepository(conn)
@@ -298,7 +362,7 @@ async def refresh_show_metadata(
 async def rescan_show_files(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Rescan show files on disk and update database."""
     repo = ShowRepository(conn)
@@ -327,7 +391,7 @@ async def rescan_show_files(
 async def get_show_credits(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.view")),
 ):
     """Get show cast and crew from TMDB."""
     repo = ShowRepository(conn)
@@ -380,7 +444,7 @@ async def get_show_credits(
 async def get_show_seasons(
     show_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.view")),
 ):
     """Get seasons for a show."""
     showRepo = ShowRepository(conn)
@@ -424,7 +488,7 @@ async def get_season_episodes(
     show_id: int,
     season_number: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.view")),
 ):
     """Get episodes for a specific season."""
     showRepo = ShowRepository(conn)
@@ -472,7 +536,7 @@ async def update_season_monitoring(
     season_number: int,
     data: SeasonMonitoringUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Update monitoring status for a season."""
     showRepo = ShowRepository(conn)
@@ -505,7 +569,7 @@ async def update_episode_monitoring(
     episode_id: int,
     data: EpisodeMonitoringUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("shows.manage")),
 ):
     """Update monitoring status for a single episode."""
     episodeRepo = EpisodeRepository(conn)

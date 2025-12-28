@@ -8,9 +8,10 @@ import shutil
 from app.db import get_db
 from app.db.repositories import MovieRepository
 from app.schemas.movie import Movie, MovieCreate, MovieUpdate
-from app.api.v1.endpoints.auth import get_current_user
-from app.schemas.user import User
+from app.api.v1.endpoints.auth import get_current_user, require_permission
+from app.schemas.user import UserWithPermissions
 from app.services.metadata.tmdb import tmdb_service
+from app.core.permissions import userHasPermission
 
 router = APIRouter()
 
@@ -31,7 +32,7 @@ async def get_movies(
     skip: int = 0,
     limit: int = 100,
     monitored_only: bool = False,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.view")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Get all movies from library with their tags (single query with JSON aggregation)."""
@@ -42,7 +43,7 @@ async def get_movies(
 @router.get("/{movie_id}")
 async def get_movie(
     movie_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.view")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Get a specific movie by ID with its tags."""
@@ -61,38 +62,95 @@ async def get_movie(
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def add_movie(
     movie_data: MovieAddRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """Add a movie to library by fetching metadata from TMDB."""
+    """Add a movie to library by fetching metadata from TMDB.
+
+    If user has movies.download permission, adds directly.
+    If user only has movies.request permission, creates a request for approval.
+    """
     repo = MovieRepository(conn)
 
-    if await repo.existsByTmdbId(movie_data.tmdb_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Movie already exists in library",
-        )
+    # Check if user can add directly (has download permission) or needs to create request
+    canDownload = await userHasPermission(conn, current_user.id, "movies.download")
 
     # Fetch metadata from TMDB
     metadata = await tmdb_service.get_movie(movie_data.tmdb_id)
     parsedData = tmdb_service.parse_movie_data(metadata)
 
-    movieData = {
-        **parsedData,
-        "status": "wanted",
-        "monitored": movie_data.monitored,
-        "media_profile_id": movie_data.media_profile_id,
-        "has_file": False,
-    }
+    if canDownload:
+        # User can add directly
+        if await repo.existsByTmdbId(movie_data.tmdb_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Movie already exists in library",
+            )
 
-    return await repo.create(movieData)
+        movieData = {
+            **parsedData,
+            "status": "wanted",
+            "monitored": movie_data.monitored,
+            "media_profile_id": movie_data.media_profile_id,
+            "has_file": False,
+        }
+
+        return await repo.create(movieData)
+    else:
+        # User needs to create a request for approval
+        existingRequest = await conn.fetchrow(
+            """
+            SELECT id FROM media_requests
+            WHERE media_type = 'movie' AND external_id = $1 AND user_id = $2 AND status = 'pending'
+            """,
+            movie_data.tmdb_id,
+            current_user.id,
+        )
+
+        if existingRequest:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A request for this movie is already pending",
+            )
+
+        # Check if movie already exists
+        if await repo.existsByTmdbId(movie_data.tmdb_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Movie already exists in library",
+            )
+
+        # Create a media request
+        import json
+        request_row = await conn.fetchrow(
+            """
+            INSERT INTO media_requests (user_id, media_type, external_id, title, poster_path, year, overview, metadata, status)
+            VALUES ($1, 'movie', $2, $3, $4, $5, $6, $7, 'pending')
+            RETURNING id, status, requested_at
+            """,
+            current_user.id,
+            movie_data.tmdb_id,
+            parsedData.get("title"),
+            parsedData.get("poster_path"),
+            parsedData.get("year"),
+            parsedData.get("overview"),
+            json.dumps({"monitored": movie_data.monitored, "media_profile_id": movie_data.media_profile_id}),
+        )
+
+        return {
+            "request_id": request_row["id"],
+            "status": "pending",
+            "message": "Movie request submitted for approval",
+            "title": parsedData.get("title"),
+            "requested_at": request_row["requested_at"],
+        }
 
 
 @router.put("/{movie_id}", response_model=Movie)
 async def update_movie(
     movie_id: int,
     movie_data: MovieUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Update a movie in library."""
@@ -118,7 +176,7 @@ async def update_movie(
 @router.delete("/{movie_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_movie(
     movie_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Remove a movie from library."""
@@ -138,7 +196,7 @@ async def delete_movie(
 async def update_movie_monitoring(
     movie_id: int,
     data: MovieMonitoringUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Update movie monitoring settings."""
@@ -173,7 +231,7 @@ async def update_movie_monitoring(
 async def delete_movie_with_files(
     movie_id: int,
     delete_files: bool = Query(False, description="Also delete files from disk"),
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Delete a movie from library with option to delete files from disk."""
@@ -219,7 +277,7 @@ async def delete_movie_with_files(
 @router.post("/{movie_id}/refresh-metadata")
 async def refresh_movie_metadata(
     movie_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Refresh movie metadata from TMDB."""
@@ -253,7 +311,7 @@ async def refresh_movie_metadata(
 @router.post("/{movie_id}/rescan")
 async def rescan_movie_files(
     movie_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Rescan movie files on disk and update database."""
@@ -289,7 +347,7 @@ async def rescan_movie_files(
 @router.get("/{movie_id}/credits")
 async def get_movie_credits(
     movie_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("movies.view")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Get movie cast and crew from TMDB."""

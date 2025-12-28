@@ -7,7 +7,8 @@ import base64
 import hashlib
 
 from app.db import get_db
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_permission
+from app.schemas.user import UserWithPermissions
 from app.core.config import settings as app_config
 
 router = APIRouter()
@@ -77,17 +78,12 @@ class DownloadClientUpdate(BaseModel):
 @router.get("/", response_model=List[SettingsGroupResponse])
 async def get_all_settings(
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Get all settings grouped by category from app_settings table
     Only administrators can access settings
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can access settings",
-        )
 
     rows = await conn.fetch("""
         SELECT key, value, category, description, is_encrypted, value_type
@@ -126,17 +122,12 @@ async def get_all_settings(
 @router.get("/download-clients", response_model=List[DownloadClientResponse])
 async def get_download_clients(
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Get all configured download clients
     Only administrators can access download clients
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can access download clients",
-        )
 
     rows = await conn.fetch("""
         SELECT id, name, client_type, host, port, username, use_ssl, is_enabled, is_default
@@ -165,17 +156,12 @@ async def update_download_client(
     client_id: int,
     update_data: DownloadClientUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Update a download client configuration
     Only administrators can update download clients
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can update download clients",
-        )
 
     # Check if client exists
     existing = await conn.fetchrow(
@@ -284,17 +270,12 @@ async def update_download_client(
 async def get_setting(
     key: str,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Get a specific setting by key from app_settings table
     Only administrators can access settings
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can access settings",
-        )
 
     row = await conn.fetchrow("""
         SELECT key, value, category, description, is_encrypted, value_type
@@ -326,17 +307,12 @@ async def update_setting(
     key: str,
     setting_update: SettingUpdate,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Update a setting value in app_settings table
     Only administrators can update settings
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can update settings",
-        )
 
     # Check if setting exists
     existing = await conn.fetchrow("""
@@ -370,17 +346,12 @@ async def update_setting(
 async def delete_setting(
     key: str,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Delete a setting (resets to empty/default) from app_settings table
     Only administrators can delete settings
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can delete settings",
-        )
 
     # Reset value to empty string instead of deleting the row
     result = await conn.execute("""
@@ -401,18 +372,13 @@ async def delete_setting(
 @router.post("/initialize-defaults")
 async def initialize_default_settings(
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
 ):
     """
     Initialize default settings if they don't exist in app_settings table
     Only administrators can initialize settings
     This is now mostly handled by the setup process, but kept for compatibility
     """
-    if current_user.role != 'administrator':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can initialize settings",
-        )
 
     # Check if settings already exist from setup process
     existing_count = await conn.fetchval("""
