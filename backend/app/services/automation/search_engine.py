@@ -85,25 +85,32 @@ class SearchEngine:
             indexers = self.general_indexers
 
         for indexer in indexers:
-            task = indexer.search(query, category, limit_per_indexer)
+            task = asyncio.create_task(indexer.search(query, category, limit_per_indexer))
             tasks.append(task)
 
-        # Run with timeout
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            print(f"Search timeout after {timeout}s")
-            results = []
+        # Run with timeout, preserving partial results
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=timeout,
+            return_when=asyncio.ALL_COMPLETED
+        )
 
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+
+        if pending:
+            print(f"Search timeout after {timeout}s - {len(done)} indexers completed, {len(pending)} cancelled")
+
+        # Collect results from completed tasks
         all_releases = []
-        for result in results:
-            if isinstance(result, Exception):
-                print(f"Indexer error: {result}")
-                continue
-            all_releases.extend(result)
+        for task in done:
+            try:
+                result = task.result()
+                if not isinstance(result, Exception):
+                    all_releases.extend(result)
+            except Exception as e:
+                print(f"Indexer error: {e}")
 
         # Deduplicate by info_hash
         seen_hashes = set()

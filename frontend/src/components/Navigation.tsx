@@ -27,6 +27,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { usePermissions } from '@/contexts/PermissionContext';
 import { getRequestCounts } from '@/lib/api/requests';
+import { api } from '@/lib/api';
 
 export default function Navigation() {
   const router = useRouter();
@@ -86,28 +87,18 @@ export default function Navigation() {
 
       setIsSearching(true);
       try {
-        const [moviesRes, showsRes, animeRes, artistsRes, albumsRes] = await Promise.all([
-          api.get('/movies').catch(() => ({ data: { movies: [] } })),
-          api.get('/shows').catch(() => ({ data: { shows: [] } })),
-          api.get('/anime').catch(() => ({ data: { anime: [] } })),
-          api.get('/music/artists').catch(() => ({ data: [] })),
-          api.get('/music/albums').catch(() => ({ data: [] })),
-        ]);
+        const response = await api.get('/library-search', {
+          params: { query: searchQuery, limit: 5 }
+        });
 
-        const allItems = [
-          ...(moviesRes.data?.movies || []).map((item: any) => ({ ...item, media_type: 'movie' })),
-          ...(showsRes.data?.shows || []).map((item: any) => ({ ...item, media_type: 'show' })),
-          ...(animeRes.data?.anime || []).map((item: any) => ({ ...item, media_type: 'anime' })),
-          ...(artistsRes.data || []).map((item: any) => ({ ...item, media_type: 'artist', title: item.name })),
-          ...(albumsRes.data || []).map((item: any) => ({ ...item, media_type: 'album' })),
-        ];
+        // Transform results to match existing format
+        const results = response.data.map((item: any) => ({
+          ...item,
+          title: item.title,
+          name: item.media_type === 'artist' ? item.title : undefined,
+        }));
 
-        const filtered = allItems.filter((item: any) =>
-          item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.name?.toLowerCase().includes(searchQuery.toLowerCase())
-        ).slice(0, 5);
-
-        setSearchResults(filtered);
+        setSearchResults(results);
         setShowDropdown(true);
       } catch (error) {
         console.error('Search error:', error);

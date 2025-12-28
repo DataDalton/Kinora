@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from pathlib import Path
 from datetime import datetime
 from app.tasks.celery_app import celery_app, runAsync
@@ -10,6 +11,7 @@ from app.core.webtransport import webtransport_manager
 from app.services.file_manager import FileManager
 from app.services.metadata_extractor import MetadataExtractor
 from app.services.folder_selector import folderSelector
+from app.core.cache import cacheSet
 
 
 async def get_file_operation(conn, media_id: int, media_type: str) -> str:
@@ -147,6 +149,10 @@ async def async_check_downloads():
     """
     Async implementation of download monitoring
     """
+    taskName = "download_monitor"
+    startTime = time.time()
+    status = "success"
+
     try:
         # Get qBittorrent client instance
         client = await get_qbittorrent_client()
@@ -198,7 +204,8 @@ async def async_check_downloads():
                 # Handle completed downloads
                 if torrent.state == TorrentState.SEEDING or torrent.progress >= 1.0:
                     if download_dict["status"] != "completed":
-                        await handle_completed_download(conn, download_dict, torrent)
+                        async with conn.transaction():
+                            await handle_completed_download(conn, download_dict, torrent)
                         completed_count += 1
 
                 # Handle failed downloads
@@ -217,12 +224,21 @@ async def async_check_downloads():
             "status": "success",
             "active_downloads": len(torrents),
             "completed": completed_count,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
     except Exception as e:
+        status = "failed"
         print(f"Download monitoring error: {e}")
         return {"status": "error", "message": str(e)}
+
+    finally:
+        elapsedMs = int((time.time() - startTime) * 1000)
+        await cacheSet(f"task:last_run:{taskName}", {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "status": status,
+            "durationMs": elapsedMs,
+        }, expire=86400)
 
 
 async def handle_completed_download(conn, download_record, torrent):

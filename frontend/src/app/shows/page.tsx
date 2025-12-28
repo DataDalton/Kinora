@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Search, Plus, Upload, Check } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import LibraryImportModal from '@/components/LibraryImportModal';
 import PageHeader from '@/components/PageHeader';
 import BulkSelectionToolbar from '@/components/BulkSelectionToolbar';
@@ -69,6 +70,10 @@ export default function ShowsPage() {
   const filteredShows = data?.shows?.filter((show: Show) =>
     show.title.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
+
+  const totalItems = data?.total || 0;
+  const limit = 20;
+  const totalPages = totalItems > 0 ? Math.ceil(totalItems / limit) : 1;
 
   const handleToggleSelection = (showId: number) => {
     setSelectedIds(prev =>
@@ -224,11 +229,13 @@ export default function ShowsPage() {
                         : 'border-border hover:border-primary/50'
                     }`}
                   >
-                    <div className="relative aspect-[2/3]">
-                      <img
+                    <div className="relative aspect-2/3">
+                      <Image
                         src={getPosterUrl(show.poster_path)}
                         alt={show.title}
-                        className="w-full h-full object-cover"
+                        fill
+                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+                        className="object-cover"
                       />
                       {isSelectionMode && (
                         <div className="absolute top-2 left-2">
@@ -301,22 +308,31 @@ export default function ShowsPage() {
               })}
             </div>
 
-            <div className="mt-8 flex justify-center gap-2">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition cursor-pointer"
-              >
-                Previous
-              </button>
-              <span className="px-4 py-2 text-muted-foreground">Page {page}</span>
-              <button
-                onClick={() => setPage(p => p + 1)}
-                disabled={!data?.shows || data.shows.length < 20}
-                className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition cursor-pointer"
-              >
-                Next
-              </button>
+            <div className="mt-8 flex flex-col items-center gap-2">
+              <div className="flex justify-center gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition cursor-pointer"
+                >
+                  Previous
+                </button>
+                <span className="px-4 py-2 text-muted-foreground">
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={page >= totalPages}
+                  className="px-4 py-2 bg-card border border-border text-foreground rounded-lg disabled:opacity-50 hover:bg-accent transition cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
+              {totalItems > 0 && (
+                <span className="text-sm text-muted-foreground">
+                  Showing {filteredShows.length} of {totalItems} shows
+                </span>
+              )}
             </div>
           </>
         )}

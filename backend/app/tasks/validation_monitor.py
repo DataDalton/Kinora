@@ -10,12 +10,14 @@ This task runs every 5 minutes to catch edge cases:
 - Any other scenario where immediate validation didn't complete
 """
 
+import time
 from datetime import datetime
 
 from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.torrent_validator import torrent_validator, ValidationResult
+from app.core.cache import cacheSet
 
 
 @celery_app.task(name="app.tasks.validation_monitor.check_validating_torrents")
@@ -31,6 +33,10 @@ async def async_check_validating_torrents():
     """
     Async implementation of validation monitoring.
     """
+    taskName = "validation_monitor"
+    startTime = time.time()
+    status = "success"
+
     try:
         client = await get_qbittorrent_client()
         if not client:
@@ -123,12 +129,21 @@ async def async_check_validating_torrents():
             "pending": pending_count,
             "validated": validated_count,
             "failed": failed_count,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
     except Exception as e:
+        status = "failed"
         print(f"Validation monitoring error: {e}")
         return {"status": "error", "message": str(e)}
+
+    finally:
+        elapsedMs = int((time.time() - startTime) * 1000)
+        await cacheSet(f"task:last_run:{taskName}", {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "status": status,
+            "durationMs": elapsedMs,
+        }, expire=86400)
 
 
 async def _mark_validated(client, torrent):

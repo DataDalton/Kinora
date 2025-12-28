@@ -66,6 +66,11 @@ async def get_shows(
 
     whereClause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+    # Count query for total
+    countQuery = f"SELECT COUNT(*) FROM shows s {whereClause}"
+    totalRow = await conn.fetchrow(countQuery, *params)
+    total = totalRow["count"] if totalRow else 0
+
     # Single query with JSON aggregation for tags
     query = f"""
         SELECT s.*,
@@ -88,7 +93,7 @@ async def get_shows(
     rows = await conn.fetch(query, *params)
     shows = [dict(row) for row in rows]
 
-    return {"shows": shows, "page": page, "limit": limit}
+    return {"shows": shows, "page": page, "limit": limit, "total": total}
 
 
 @router.get("/{show_id}")

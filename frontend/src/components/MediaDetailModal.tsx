@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Toast from './Toast';
 import { Folder, HardDrive } from 'lucide-react';
 import { usePermissions } from '@/contexts/PermissionContext';
@@ -354,10 +355,12 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
               <>
                 {mediaDetails.backdrop_path ? (
                   <div className="relative h-96">
-                    <img
+                    <Image
                       src={getImageUrl(mediaDetails.backdrop_path, 'original') || ''}
                       alt={mediaDetails.title || mediaDetails.name}
-                      className="w-full h-full object-cover"
+                      fill
+                      sizes="100vw"
+                      className="object-cover"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
                   </div>
@@ -374,11 +377,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
 
                 <div className="p-8 relative z-10">
                   <div className="flex gap-6">
-                    <img
-                      src={getPosterUrl(mediaDetails.poster_path)}
-                      alt={mediaDetails.title || mediaDetails.name}
-                      className="w-64 h-96 object-cover rounded-lg shadow-2xl"
-                    />
+                    <div className="relative w-64 h-96 shrink-0">
+                      <Image
+                        src={getPosterUrl(mediaDetails.poster_path)}
+                        alt={mediaDetails.title || mediaDetails.name}
+                        fill
+                        sizes="256px"
+                        className="object-cover rounded-lg shadow-2xl"
+                      />
+                    </div>
 
                     <div className="flex-1">
                       <h1 className="text-4xl font-bold mb-2">{mediaDetails.title || mediaDetails.name}</h1>
@@ -508,11 +515,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                                 {index + 1}
                               </span>
                               {track.album?.cover_medium && (
-                                <img
-                                  src={track.album.cover_medium}
-                                  alt={track.album.title}
-                                  className="w-12 h-12 rounded object-cover"
-                                />
+                                <div className="relative w-12 h-12 shrink-0">
+                                  <Image
+                                    src={track.album.cover_medium}
+                                    alt={track.album.title}
+                                    fill
+                                    sizes="48px"
+                                    className="rounded object-cover"
+                                  />
+                                </div>
                               )}
                               <div className="flex-1 min-w-0">
                                 <h3 className="font-medium text-sm truncate">{track.title}</h3>
@@ -553,11 +564,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                               });
                             }}
                           >
-                            <img
-                              src={album.cover_xl || album.cover || '/placeholder-poster.svg'}
-                              alt={album.title}
-                              className="w-full aspect-square object-cover rounded-lg mb-2 group-hover:scale-105 transition-transform"
-                            />
+                            <div className="relative aspect-square mb-2 overflow-hidden rounded-lg">
+                              <Image
+                                src={album.cover_xl || album.cover || '/placeholder-poster.svg'}
+                                alt={album.title}
+                                fill
+                                sizes="(max-width: 768px) 33vw, 16vw"
+                                className="object-cover group-hover:scale-105 transition-transform"
+                              />
+                            </div>
                             <p className="font-semibold text-xs line-clamp-2">{album.title}</p>
                             {album.release_date && (
                               <p className="text-xs text-muted-foreground">{new Date(album.release_date).getFullYear()}</p>
@@ -618,11 +633,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         }}
                       >
                         {mediaDetails.artist.picture && (
-                          <img
-                            src={mediaDetails.artist.picture_xl || mediaDetails.artist.picture}
-                            alt={mediaDetails.artist.name}
-                            className="w-16 h-16 rounded-full object-cover"
-                          />
+                          <div className="relative w-16 h-16 shrink-0">
+                            <Image
+                              src={mediaDetails.artist.picture_xl || mediaDetails.artist.picture}
+                              alt={mediaDetails.artist.name}
+                              fill
+                              sizes="64px"
+                              className="rounded-full object-cover"
+                            />
+                          </div>
                         )}
                         <div>
                           <h3 className="font-semibold">{mediaDetails.artist.name}</h3>
@@ -653,11 +672,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         }}
                       >
                         {mediaDetails.album.cover && (
-                          <img
-                            src={mediaDetails.album.cover_xl || mediaDetails.album.cover}
-                            alt={mediaDetails.album.title}
-                            className="w-16 h-16 rounded object-cover"
-                          />
+                          <div className="relative w-16 h-16 shrink-0">
+                            <Image
+                              src={mediaDetails.album.cover_xl || mediaDetails.album.cover}
+                              alt={mediaDetails.album.title}
+                              fill
+                              sizes="64px"
+                              className="rounded object-cover"
+                            />
+                          </div>
                         )}
                         <div>
                           <h3 className="font-semibold">{mediaDetails.album.title}</h3>
@@ -690,11 +713,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         }}
                       >
                         {mediaDetails.artist.picture && (
-                          <img
-                            src={mediaDetails.artist.picture_xl || mediaDetails.artist.picture}
-                            alt={mediaDetails.artist.name}
-                            className="w-16 h-16 rounded-full object-cover"
-                          />
+                          <div className="relative w-16 h-16 shrink-0">
+                            <Image
+                              src={mediaDetails.artist.picture_xl || mediaDetails.artist.picture}
+                              alt={mediaDetails.artist.name}
+                              fill
+                              sizes="64px"
+                              className="rounded-full object-cover"
+                            />
+                          </div>
                         )}
                         <div>
                           <h3 className="font-semibold">{mediaDetails.artist.name}</h3>
@@ -713,13 +740,17 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                             {mediaDetails.cast.map((person: any) => (
                               <div key={person.id || person.name?.full} className="text-center">
                                 {person.profile_path || person.image?.large ? (
-                                  <img
-                                    src={person.profile_path ? getImageUrl(person.profile_path, 'w185') || '' : person.image?.large}
-                                    alt={person.name || person.name?.full}
-                                    className="w-full aspect-[2/3] object-cover rounded-lg mb-2"
-                                  />
+                                  <div className="relative w-full aspect-2/3 mb-2">
+                                    <Image
+                                      src={person.profile_path ? getImageUrl(person.profile_path, 'w185') || '' : person.image?.large}
+                                      alt={person.name || person.name?.full}
+                                      fill
+                                      sizes="(max-width: 768px) 50vw, 20vw"
+                                      className="object-cover rounded-lg"
+                                    />
+                                  </div>
                                 ) : (
-                                  <div className="w-full aspect-[2/3] bg-muted rounded-lg mb-2 flex items-center justify-center">
+                                  <div className="w-full aspect-2/3 bg-muted rounded-lg mb-2 flex items-center justify-center">
                                     <span className="text-muted-foreground text-4xl">👤</span>
                                   </div>
                                 )}
@@ -746,13 +777,17 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                             {mediaDetails.characters.map((character: any) => (
                               <div key={character.id} className="text-center">
                                 {character.image?.large ? (
-                                  <img
-                                    src={character.image.large}
-                                    alt={character.name?.full}
-                                    className="w-full aspect-[2/3] object-cover rounded-lg mb-2"
-                                  />
+                                  <div className="relative w-full aspect-2/3 mb-2">
+                                    <Image
+                                      src={character.image.large}
+                                      alt={character.name?.full}
+                                      fill
+                                      sizes="(max-width: 768px) 50vw, 20vw"
+                                      className="object-cover rounded-lg"
+                                    />
+                                  </div>
                                 ) : (
-                                  <div className="w-full aspect-[2/3] bg-muted rounded-lg mb-2 flex items-center justify-center">
+                                  <div className="w-full aspect-2/3 bg-muted rounded-lg mb-2 flex items-center justify-center">
                                     <span className="text-muted-foreground text-4xl">👤</span>
                                   </div>
                                 )}
@@ -779,11 +814,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                             className="cursor-pointer group"
                             onClick={() => handleRecommendationClick(item)}
                           >
-                            <img
-                              src={getPosterUrl(item.poster_path)}
-                              alt={item.title || item.name}
-                              className="w-full aspect-[2/3] object-cover rounded-lg mb-2 group-hover:scale-105 transition-transform"
-                            />
+                            <div className="relative w-full aspect-2/3 mb-2 overflow-hidden rounded-lg">
+                              <Image
+                                src={getPosterUrl(item.poster_path)}
+                                alt={item.title || item.name}
+                                fill
+                                sizes="(max-width: 768px) 33vw, 16vw"
+                                className="object-cover group-hover:scale-105 transition-transform"
+                              />
+                            </div>
                             <p className="font-semibold text-xs line-clamp-2">{item.title || item.name}</p>
                           </div>
                         ))}
@@ -920,11 +959,15 @@ export default function MediaDetailModal({ media, isOpen, onClose, defaultMediaT
                         {collectionDetails.parts?.map((movie: any) => (
                           <div key={movie.id} className="flex items-center gap-3 p-2 bg-background/50 rounded">
                             {movie.poster_path && (
-                              <img
-                                src={getImageUrl(movie.poster_path, 'w92') || ''}
-                                alt={movie.title}
-                                className="w-8 h-12 object-cover rounded"
-                              />
+                              <div className="relative w-8 h-12 shrink-0">
+                                <Image
+                                  src={getImageUrl(movie.poster_path, 'w92') || ''}
+                                  alt={movie.title}
+                                  fill
+                                  sizes="32px"
+                                  className="object-cover rounded"
+                                />
+                              </div>
                             )}
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-sm truncate">{movie.title}</p>

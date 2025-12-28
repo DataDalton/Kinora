@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import Link from 'next/link';
+import Image from 'next/image';
 import PageHeader from '@/components/PageHeader';
 import { Film, Tv, Sparkles, Music2 } from 'lucide-react';
 
@@ -163,11 +164,13 @@ export default function HomePage() {
                 href={getMediaLink(item)}
                 className="bg-card/50 rounded-lg overflow-hidden border border-border hover:shadow-lg hover:border-primary/50 transition"
               >
-                <div className="relative">
-                  <img
+                <div className="relative aspect-2/3">
+                  <Image
                     src={getPosterUrl(item)}
                     alt={item.title}
-                    className="w-full aspect-2/3 object-cover"
+                    fill
+                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+                    className="object-cover"
                   />
                   <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-background/80 rounded text-xs flex items-center gap-1">
                     {getMediaIcon(item.mediaType)}

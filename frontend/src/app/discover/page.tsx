@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import Link from 'next/link';
+import Image from 'next/image';
 import MediaDetailModal from '@/components/MediaDetailModal';
 import PageHeader from '@/components/PageHeader';
 
@@ -207,10 +208,12 @@ export default function DiscoverPage() {
                 className="bg-card text-card-foreground rounded-lg shadow overflow-hidden hover:shadow-lg transition cursor-pointer"
               >
                 <div className="relative aspect-2/3">
-                  <img
+                  <Image
                     src={getPosterUrl(item.poster_path, isAnime)}
                     alt={getTitle(item)}
-                    className="w-full h-full object-cover"
+                    fill
+                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+                    className="object-cover"
                   />
                 </div>
                 <div className="p-3">

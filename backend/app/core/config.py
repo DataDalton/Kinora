@@ -5,6 +5,20 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def isRunningInDocker() -> bool:
+    """Detect if running inside a Docker container."""
+    # Check for .dockerenv file
+    if Path("/.dockerenv").exists():
+        return True
+    # Check cgroup for docker
+    try:
+        with open("/proc/1/cgroup", "r") as f:
+            return "docker" in f.read()
+    except:
+        pass
+    return False
+
+
 class Settings(BaseSettings):
     """
     Application settings loaded from environment variables
@@ -36,6 +50,13 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     DATABASE_URL: str = ""
+
+    # PgBouncer (connection pooler) - auto-configured based on environment detection
+    # Docker: pgbouncer:5432 (internal). Local dev: localhost:6432 (exposed port).
+    PGBOUNCER_ENABLED: bool = False
+    PGBOUNCER_HOST: str = "pgbouncer"
+    PGBOUNCER_PORT: int = 5432
+    # Admin credentials default to PostgreSQL credentials (set in model_validator)
 
     # Dragonfly (with defaults)
     DRAGONFLY_HOST: str = "localhost"
@@ -91,6 +112,21 @@ class Settings(BaseSettings):
             self.CELERY_BROKER_URL = self.DRAGONFLY_URL
         if not self.CELERY_RESULT_BACKEND:
             self.CELERY_RESULT_BACKEND = self.DRAGONFLY_URL
+
+        # Auto-configure PgBouncer based on environment
+        # In Docker: use internal hostname pgbouncer:5432
+        # Local dev: use exposed port localhost:6432
+        inDocker = isRunningInDocker()
+        if inDocker:
+            # Running inside Docker - use internal network
+            if self.PGBOUNCER_HOST == "pgbouncer":
+                self.PGBOUNCER_ENABLED = True
+                self.PGBOUNCER_PORT = 5432
+        else:
+            # Running locally - use exposed Docker port
+            self.PGBOUNCER_ENABLED = True
+            self.PGBOUNCER_HOST = "localhost"
+            self.PGBOUNCER_PORT = 6432
 
         return self
 

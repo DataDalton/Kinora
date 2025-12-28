@@ -108,10 +108,8 @@ def require_permission(permission: str):
     """Factory function to create permission-checking dependency."""
     async def dependency(
         current_user: UserWithPermissions = Depends(get_current_user),
-        conn: asyncpg.Connection = Depends(get_db),
     ) -> UserWithPermissions:
-        hasPerm = await userHasPermission(conn, current_user.id, permission)
-        if not hasPerm:
+        if permission not in current_user.permissions:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission '{permission}' required",
@@ -124,10 +122,9 @@ def require_any_permission(*permissions: str):
     """Factory function requiring any one of multiple permissions."""
     async def dependency(
         current_user: UserWithPermissions = Depends(get_current_user),
-        conn: asyncpg.Connection = Depends(get_db),
     ) -> UserWithPermissions:
-        userPerms = await getUserPermissions(conn, current_user.id)
-        if not any(p in userPerms for p in permissions):
+        userPermsSet = set(current_user.permissions)
+        if not any(p in userPermsSet for p in permissions):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"One of {permissions} required",
@@ -566,13 +563,11 @@ async def forward_auth_login(
 
 async def require_admin(
     current_user: UserWithPermissions = Depends(get_current_user),
-    conn: asyncpg.Connection = Depends(get_db),
 ) -> UserWithPermissions:
     """
     Dependency to require 'system.admin' permission
     """
-    hasAdmin = await userHasPermission(conn, current_user.id, "system.admin")
-    if not hasAdmin:
+    if "system.admin" not in current_user.permissions:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator privileges required",
@@ -982,8 +977,7 @@ async def change_password(
     """
     Change current user's password. Requires users.password.self permission and current password verification.
     """
-    has_permission = await userHasPermission(conn, current_user.id, "users.password.self")
-    if not has_permission:
+    if "users.password.self" not in current_user.permissions:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission 'users.password.self' required to change your password",

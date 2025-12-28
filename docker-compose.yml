@@ -33,6 +33,8 @@ services:
       MAX_DB_CONNECTIONS: 100
       SERVER_IDLE_TIMEOUT: 600
       QUERY_TIMEOUT: 300
+      STATS_USERS: ${POSTGRES_USER:-nexarr}
+      ADMIN_USERS: ${POSTGRES_USER:-nexarr}
     ports:
       - "6432:5432"
     depends_on:
@@ -92,8 +94,9 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 7
       # PgBouncer connection (for application queries)
+      PGBOUNCER_ENABLED: "true"
       PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 6432
+      PGBOUNCER_PORT: 5432
       # Direct PostgreSQL connection (for migrations)
       POSTGRES_USER: ${POSTGRES_USER:-nexarr}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexarr_password}
@@ -153,8 +156,9 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production-please}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-jwt-secret-key-in-production-please}
       # PgBouncer connection (for application queries)
+      PGBOUNCER_ENABLED: "true"
       PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 6432
+      PGBOUNCER_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-nexarr}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexarr_password}
       POSTGRES_DB: ${POSTGRES_DB:-nexarr}
@@ -194,8 +198,9 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production-please}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-jwt-secret-key-in-production-please}
       # PgBouncer connection (for application queries)
+      PGBOUNCER_ENABLED: "true"
       PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 6432
+      PGBOUNCER_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-nexarr}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexarr_password}
       POSTGRES_DB: ${POSTGRES_DB:-nexarr}

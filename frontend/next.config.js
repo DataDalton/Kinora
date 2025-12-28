@@ -35,6 +35,21 @@ const nextConfig = {
         hostname: 's4.anilist.co',
         pathname: '/file/**',
       },
+      {
+        protocol: 'https',
+        hostname: 'e-cdns-images.dzcdn.net',
+        pathname: '/images/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'cdns-images.dzcdn.net',
+        pathname: '/images/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'cdn-images.dzcdn.net',
+        pathname: '/images/**',
+      },
     ],
     // Next.js 16 defaults: quality 75 for better performance
     // minimumCacheTTL defaults to 4 hours (14400 seconds)

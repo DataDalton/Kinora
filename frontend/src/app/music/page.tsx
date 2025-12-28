@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Search, Plus, Music2, Upload, Check } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import PageHeader from '@/components/PageHeader';
 import LibraryImportModal from '@/components/LibraryImportModal';
 import BulkSelectionToolbar from '@/components/BulkSelectionToolbar';
@@ -400,10 +401,12 @@ export default function MusicPage() {
                       }`}
                     >
                       <div className="relative aspect-square">
-                        <img
+                        <Image
                           src={getPictureUrl(artist)}
                           alt={artist.name}
-                          className="w-full h-full object-cover"
+                          fill
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+                          className="object-cover"
                         />
                         {isSelectionMode && (
                           <div className="absolute top-2 left-2">
@@ -500,10 +503,12 @@ export default function MusicPage() {
                       }`}
                     >
                       <div className="relative aspect-square">
-                        <img
+                        <Image
                           src={getCoverUrl(album)}
                           alt={album.title}
-                          className="w-full h-full object-cover"
+                          fill
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+                          className="object-cover"
                         />
                         {isSelectionMode && (
                           <div className="absolute top-2 left-2">
@@ -607,10 +612,12 @@ export default function MusicPage() {
                     >
                       <div className="relative aspect-square">
                         {getTrackCoverUrl(track) ? (
-                          <img
+                          <Image
                             src={getTrackCoverUrl(track)!}
                             alt={track.title}
-                            className="w-full h-full object-cover"
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+                            className="object-cover"
                           />
                         ) : (
                           <div className="w-full h-full bg-accent/50 flex items-center justify-center">

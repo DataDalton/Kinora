@@ -1,10 +1,12 @@
 import asyncio
+import time
 from datetime import datetime
 from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile
 from app.services.metadata.deezer import deezer_service
+from app.core.cache import cacheSet
 
 
 def parse_release_date(date_str: str | None):
@@ -40,6 +42,10 @@ async def async_search_wanted_music():
     Async implementation of wanted music search
     Searches for all albums with status='wanted' and monitored=TRUE
     """
+    taskName = "music_wanted_search"
+    startTime = time.time()
+    status = "success"
+
     try:
         grabbed_count = 0
         searched_count = 0
@@ -137,12 +143,21 @@ async def async_search_wanted_music():
             "status": "success",
             "items_searched": searched_count,
             "items_grabbed": grabbed_count,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
     except Exception as e:
+        status = "failed"
         print(f"Wanted music search error: {e}")
         return {"status": "error", "message": str(e)}
+
+    finally:
+        elapsedMs = int((time.time() - startTime) * 1000)
+        await cacheSet(f"task:last_run:{taskName}", {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "status": status,
+            "durationMs": elapsedMs,
+        }, expire=86400)
 
 
 async def async_check_new_releases():
@@ -150,6 +165,10 @@ async def async_check_new_releases():
     Async implementation of new release checking
     Checks Deezer for new albums from monitored artists
     """
+    taskName = "music_new_releases"
+    startTime = time.time()
+    status = "success"
+
     try:
         new_albums_added = 0
         artists_checked = 0
@@ -233,12 +252,21 @@ async def async_check_new_releases():
             "status": "success",
             "artists_checked": artists_checked,
             "new_albums_added": new_albums_added,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
     except Exception as e:
+        status = "failed"
         print(f"New release check error: {e}")
         return {"status": "error", "message": str(e)}
+
+    finally:
+        elapsedMs = int((time.time() - startTime) * 1000)
+        await cacheSet(f"task:last_run:{taskName}", {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "status": status,
+            "durationMs": elapsedMs,
+        }, expire=86400)
 
 
 @celery_app.task(name="app.tasks.music_monitor.search_discography")
@@ -335,7 +363,7 @@ async def async_search_discography(artist_id: int):
             "artist": artist["name"],
             "items_searched": searched_count,
             "items_grabbed": grabbed_count,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
     except Exception as e:

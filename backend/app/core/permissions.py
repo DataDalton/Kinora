@@ -302,10 +302,10 @@ DEFAULT_GROUPS: List[Dict[str, Any]] = [
 
 def expandPermissions(permissions: Set[str]) -> Set[str]:
     """
-    Recursively expand permissions based on hierarchy.
+    Expand permissions based on hierarchy using depth-first search.
 
     If a user has a parent permission, they implicitly have all child permissions.
-    Continues recursively until no new permissions are added.
+    Uses DFS traversal for efficient single-pass expansion.
 
     Args:
         permissions: Set of permission names to expand
@@ -313,20 +313,16 @@ def expandPermissions(permissions: Set[str]) -> Set[str]:
     Returns:
         Expanded set containing original permissions plus all implied child permissions
     """
-    expanded = set(permissions)
-    changed = True
+    expanded = set()
+    stack = list(permissions)
 
-    while changed:
-        changed = False
-        currentPermissions = list(expanded)
-
-        for perm in currentPermissions:
-            if perm in PERMISSION_HIERARCHY:
-                childPermissions = PERMISSION_HIERARCHY[perm]
-                for child in childPermissions:
-                    if child not in expanded:
-                        expanded.add(child)
-                        changed = True
+    while stack:
+        perm = stack.pop()
+        if perm in expanded:
+            continue
+        expanded.add(perm)
+        if perm in PERMISSION_HIERARCHY:
+            stack.extend(child for child in PERMISSION_HIERARCHY[perm] if child not in expanded)
 
     return expanded
 

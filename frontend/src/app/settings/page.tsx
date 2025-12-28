@@ -12,6 +12,7 @@ import ForwardAuthSettings from '@/components/ForwardAuthSettings';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import RootFoldersSection from '@/components/settings/RootFoldersSection';
 import FolderHealthSection from '@/components/settings/FolderHealthSection';
+import SystemStatusSection from '@/components/settings/SystemStatusSection';
 import { getPermissions, getPermissionGroups, createPermissionGroup, updatePermissionGroup, deletePermissionGroup } from '@/lib/api/permissions';
 import { Permission, PermissionGroup, PermissionGroupCreate, PermissionGroupUpdate } from '@/types/permission';
 
@@ -141,7 +142,7 @@ function getImpliedPermissions(permissionName: string): string[] {
   return Array.from(implied);
 }
 
-type SettingsSection = 'users' | 'permission-groups' | 'authentication' | 'oidc-providers' | 'forward-auth' | 'download-clients' | 'api-keys' | 'root-folders' | 'folder-health' | 'system';
+type SettingsSection = 'users' | 'permission-groups' | 'authentication' | 'oidc-providers' | 'forward-auth' | 'download-clients' | 'api-keys' | 'root-folders' | 'folder-health' | 'system' | 'system-status';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -650,6 +651,7 @@ export default function SettingsPage() {
         { id: 'download-clients' as SettingsSection, name: 'Download Clients', count: downloadClients?.length || 0 },
         { id: 'api-keys' as SettingsSection, name: 'API Keys', count: settingsGroups?.find(g => g.category === 'api_keys')?.settings.length || 0 },
         { id: 'system' as SettingsSection, name: 'System', count: settingsGroups?.find(g => g.category === 'system')?.settings.length || 0 },
+        { id: 'system-status' as SettingsSection, name: 'System Status', count: 0 },
       ]
     },
     {
@@ -1216,6 +1218,11 @@ export default function SettingsPage() {
           {/* Folder Health Section */}
           {selectedSection === 'folder-health' && (
             <FolderHealthSection />
+          )}
+
+          {/* System Status Section */}
+          {selectedSection === 'system-status' && (
+            <SystemStatusSection />
           )}
         </div>
       </div>
