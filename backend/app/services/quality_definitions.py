@@ -101,6 +101,7 @@ class HDR(str, Enum):
     HDR = "HDR"
     HDR10 = "HDR10"
     HDR10_PLUS = "HDR10+"
+    DV_HDR = "DV HDR"
     DOLBY_VISION = "Dolby Vision"
     HLG = "HLG"
 
@@ -244,6 +245,7 @@ class QualityHierarchy:
         HDR.HLG.value: 40,
         HDR.HDR10.value: 50,
         HDR.HDR10_PLUS.value: 70,
+        HDR.DV_HDR.value: 85,
         HDR.DOLBY_VISION.value: 100,
     }
 

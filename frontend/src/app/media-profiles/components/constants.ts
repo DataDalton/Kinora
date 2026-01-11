@@ -110,7 +110,7 @@ export const SOURCES = ['REMUX', 'BLURAY', 'WEB-DL', 'WEBRIP', 'DVD', 'HDTV', 'S
 export const VIDEO_CODECS = ['AV1', 'HEVC', 'x265', 'H265', 'x264', 'H264', 'XVID'];
 export const AUDIO_CODECS = ['FLAC', 'TrueHD', 'Dolby Atmos', 'DTS-HD MA', 'DTS', 'AC3', 'AAC', 'MP3'];
 export const AUDIO_CHANNELS = ['Atmos', '7.1', '5.1', '2.0'];
-export const HDR_FORMATS = ['Dolby Vision', 'HDR10+', 'HDR10', 'SDR'];
+export const HDR_FORMATS = ['Dolby Vision', 'DV HDR', 'HDR10+', 'HDR10', 'SDR'];
 export const SPECIAL_EDITIONS = ['IMAX', 'Remastered', "Director's Cut", 'Unrated', 'Extended', 'Theatrical'];
 export const MUSIC_QUALITY = ['flac', 'mp3_320', 'mp3_256', 'mp3_128', 'aac', 'ogg'];
 

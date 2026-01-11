@@ -768,12 +768,21 @@ class MediaProfileService:
         """Extract HDR format from title"""
         title_upper = title.upper()
 
-        # Check in order of specificity
-        if 'DOLBY VISION' in title_upper or 'DV' in title_upper or 'DOVI' in title_upper:
+        # Check for Dolby Vision with HDR fallback (DV HDR / hybrid) first
+        # These releases have HDR10 base layer for non-DV devices
+        hasDv = 'DOLBY VISION' in title_upper or 'DV' in title_upper or 'DOVI' in title_upper
+        hasHdr = 'HDR10' in title_upper or 'HDR' in title_upper
+
+        if hasDv and hasHdr:
+            return 'DV HDR'
+
+        # Pure Dolby Vision (no HDR fallback)
+        if hasDv:
             return 'Dolby Vision'
+
         if 'HDR10+' in title_upper or 'HDR10PLUS' in title_upper:
             return 'HDR10+'
-        if 'HDR10' in title_upper or 'HDR' in title_upper:
+        if hasHdr:
             return 'HDR10'
         if 'SDR' in title_upper:
             return 'SDR'
