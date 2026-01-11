@@ -5,21 +5,21 @@ description = "Nexarr media automation backend"
 requires-python = ">=3.14"
 dependencies = [
     # Web Framework
-    "fastapi>=0.126.0",
-    "granian[reload]>=2.6.0",
+    "fastapi>=0.128.0",
+    "granian[reload]>=2.6.1",
 
     # Database
     "asyncpg>=0.31.0",
-    "psycopg2-binary>=2.9.10",
-    "sqlalchemy>=2.0.41",
-    "alembic>=1.17.0",
+    "psycopg2-binary>=2.9.11",
+    "sqlalchemy>=2.0.45",
+    "alembic>=1.18.0",
 
     # Dragonfly (redis-compatible client)
     "redis>=7.1.0",
     "hiredis>=3.3.0",
 
     # Celery
-    "celery>=5.6.0",
+    "celery>=5.6.2",
     "flower>=2.0.1",
 
     # Authentication & Security
