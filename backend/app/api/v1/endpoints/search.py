@@ -53,7 +53,7 @@ class DownloadReleaseRequest(BaseModel):
 @router.get("/")
 async def search_media(
     query: str = Query(..., min_length=1),
-    media_type: str = Query("all", regex="^(all|movie|show|anime|music)$"),
+    media_type: str = Query("all", pattern="^(all|movie|show|anime|music)$"),
     current_user: User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """
