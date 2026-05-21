@@ -15,7 +15,7 @@ async def waitForPostgres(maxRetries: int = 30, delay: float = 1.0) -> None:
 
     dsn = os.environ.get(
         "DATABASE_URL",
-        "postgresql://nexarr:nexarr_password@postgres:5432/nexarr"
+        "postgresql://kinora:kinora_password@postgres:5432/kinora"
     )
 
     for i in range(maxRetries):

@@ -33,8 +33,7 @@ async def async_search_wanted_media():
 
         async with pool.acquire() as conn:
             # Get all wanted movies with their media profiles using JOIN
-            wantedMoviesWithProfiles = await conn.fetch(
-                """
+            wantedMoviesWithProfiles = await conn.fetch("""
                 SELECT m.id, m.title, m.release_date, m.media_profile_id,
                        mp.id as mp_id, mp.name as mp_name, mp.resolutions,
                        mp.sources, mp.codecs, mp.uploaders, mp.min_seeds,
@@ -45,8 +44,7 @@ async def async_search_wanted_media():
                   AND m.status NOT IN ('downloading', 'processing')
                 ORDER BY m.popularity DESC NULLS LAST
                 LIMIT 50
-                """
-            )
+                """)
 
             for row in wantedMoviesWithProfiles:
                 movie = dict(row)
@@ -79,7 +77,7 @@ async def async_search_wanted_media():
                         query=query,
                         profile=profile,
                         category="movies",
-                        tags=["nexarr", f"movie-{movie['id']}"],
+                        tags=["kinora", f"movie-{movie['id']}"],
                     )
 
                     if torrent_hash:
@@ -92,8 +90,13 @@ async def async_search_wanted_media():
                             )
                             VALUES ($1, $2, $3, $4, $5, $6, $7)
                             """,
-                            movie["id"], "movie", torrent_hash, query,
-                            "multiple", "downloading", "qbittorrent"
+                            movie["id"],
+                            "movie",
+                            torrent_hash,
+                            query,
+                            "multiple",
+                            "downloading",
+                            "qbittorrent",
                         )
 
                         # Update movie status
@@ -103,7 +106,7 @@ async def async_search_wanted_media():
                             SET status = 'downloading', updated_at = NOW()
                             WHERE id = $1
                             """,
-                            movie["id"]
+                            movie["id"],
                         )
 
                         grabbed_count += 1
@@ -129,8 +132,12 @@ async def async_search_wanted_media():
 
     finally:
         elapsedMs = int((time.time() - startTime) * 1000)
-        await cacheSet(f"task:last_run:{taskName}", {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "status": status,
-            "durationMs": elapsedMs,
-        }, expire=86400)
+        await cacheSet(
+            f"task:last_run:{taskName}",
+            {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "status": status,
+                "durationMs": elapsedMs,
+            },
+            expire=86400,
+        )

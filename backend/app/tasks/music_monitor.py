@@ -15,7 +15,7 @@ def parse_release_date(date_str: str | None):
         return None
     try:
         return datetime.strptime(date_str, "%Y-%m-%d").date()
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 
@@ -54,8 +54,7 @@ async def async_search_wanted_music():
 
         async with pool.acquire() as conn:
             # Get all wanted albums (monitored but not downloaded)
-            wanted_albums = await conn.fetch(
-                """
+            wanted_albums = await conn.fetch("""
                 SELECT a.*, ar.name as artist_name, ar.root_folder_path as artist_root_folder
                 FROM albums a
                 LEFT JOIN artists ar ON a.artist_id = ar.id
@@ -63,8 +62,7 @@ async def async_search_wanted_music():
                 AND a.status = 'wanted'
                 ORDER BY a.release_date DESC NULLS LAST
                 LIMIT 50
-                """
-            )
+                """)
 
             for album_row in wanted_albums:
                 album = dict(album_row)
@@ -79,8 +77,7 @@ async def async_search_wanted_music():
                 profile = None
                 if album["media_profile_id"]:
                     profile_row = await conn.fetchrow(
-                        "SELECT * FROM quality_profiles WHERE id = $1",
-                        album["media_profile_id"]
+                        "SELECT * FROM quality_profiles WHERE id = $1", album["media_profile_id"]
                     )
                     if profile_row:
                         profile = MediaProfile(**dict(profile_row))
@@ -102,7 +99,7 @@ async def async_search_wanted_music():
                         query=query,
                         profile=profile,
                         save_path=save_path,
-                        tags=["nexarr", "music", f"album-{album['id']}"],
+                        tags=["kinora", "music", f"album-{album['id']}"],
                     )
 
                     if torrent_hash:
@@ -115,8 +112,13 @@ async def async_search_wanted_music():
                             )
                             VALUES ($1, $2, $3, $4, $5, $6, $7)
                             """,
-                            album["id"], "album", torrent_hash, query,
-                            "1337x", "downloading", "qbittorrent"
+                            album["id"],
+                            "album",
+                            torrent_hash,
+                            query,
+                            "1337x",
+                            "downloading",
+                            "qbittorrent",
                         )
 
                         # Update album status
@@ -126,7 +128,7 @@ async def async_search_wanted_music():
                             SET status = 'downloading', updated_at = NOW()
                             WHERE id = $1
                             """,
-                            album["id"]
+                            album["id"],
                         )
 
                         grabbed_count += 1
@@ -153,11 +155,15 @@ async def async_search_wanted_music():
 
     finally:
         elapsedMs = int((time.time() - startTime) * 1000)
-        await cacheSet(f"task:last_run:{taskName}", {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "status": status,
-            "durationMs": elapsedMs,
-        }, expire=86400)
+        await cacheSet(
+            f"task:last_run:{taskName}",
+            {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "status": status,
+                "durationMs": elapsedMs,
+            },
+            expire=86400,
+        )
 
 
 async def async_check_new_releases():
@@ -177,15 +183,13 @@ async def async_check_new_releases():
 
         async with pool.acquire() as conn:
             # Get all monitored artists with Deezer IDs
-            monitored_artists = await conn.fetch(
-                """
+            monitored_artists = await conn.fetch("""
                 SELECT * FROM artists
                 WHERE monitored = TRUE
                 AND deezer_id IS NOT NULL
                 ORDER BY updated_at ASC
                 LIMIT 20
-                """
-            )
+                """)
 
             for artist_row in monitored_artists:
                 artist = dict(artist_row)
@@ -193,17 +197,11 @@ async def async_check_new_releases():
 
                 try:
                     # Fetch latest albums from Deezer
-                    albums_data = await deezer_service.get_artist_albums(
-                        artist["deezer_id"],
-                        limit=10
-                    )
+                    albums_data = await deezer_service.get_artist_albums(artist["deezer_id"], limit=10)
 
                     for album_info in albums_data:
                         # Check if album already exists
-                        existing = await conn.fetchrow(
-                            "SELECT id FROM albums WHERE deezer_id = $1",
-                            album_info["id"]
-                        )
+                        existing = await conn.fetchrow("SELECT id FROM albums WHERE deezer_id = $1", album_info["id"])
 
                         if existing:
                             continue
@@ -236,10 +234,7 @@ async def async_check_new_releases():
                         print(f"Music: New album found: {album_info.get('title')} by {artist['name']}")
 
                     # Update artist's last check time
-                    await conn.execute(
-                        "UPDATE artists SET updated_at = NOW() WHERE id = $1",
-                        artist["id"]
-                    )
+                    await conn.execute("UPDATE artists SET updated_at = NOW() WHERE id = $1", artist["id"])
 
                 except Exception as e:
                     print(f"Error checking new releases for {artist['name']}: {e}")
@@ -262,11 +257,15 @@ async def async_check_new_releases():
 
     finally:
         elapsedMs = int((time.time() - startTime) * 1000)
-        await cacheSet(f"task:last_run:{taskName}", {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "status": status,
-            "durationMs": elapsedMs,
-        }, expire=86400)
+        await cacheSet(
+            f"task:last_run:{taskName}",
+            {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "status": status,
+                "durationMs": elapsedMs,
+            },
+            expire=86400,
+        )
 
 
 @celery_app.task(name="app.tasks.music_monitor.search_discography")
@@ -290,10 +289,7 @@ async def async_search_discography(artist_id: int):
 
         async with pool.acquire() as conn:
             # Get artist
-            artist = await conn.fetchrow(
-                "SELECT * FROM artists WHERE id = $1",
-                artist_id
-            )
+            artist = await conn.fetchrow("SELECT * FROM artists WHERE id = $1", artist_id)
 
             if not artist:
                 return {"status": "error", "message": "Artist not found"}
@@ -309,7 +305,7 @@ async def async_search_discography(artist_id: int):
                 AND monitored = TRUE
                 ORDER BY release_date DESC
                 """,
-                artist_id
+                artist_id,
             )
 
             for album_row in wanted_albums:
@@ -327,8 +323,7 @@ async def async_search_discography(artist_id: int):
 
                 if album["media_profile_id"]:
                     profile_row = await conn.fetchrow(
-                        "SELECT * FROM quality_profiles WHERE id = $1",
-                        album["media_profile_id"]
+                        "SELECT * FROM quality_profiles WHERE id = $1", album["media_profile_id"]
                     )
                     if profile_row:
                         profile = MediaProfile(**dict(profile_row))
@@ -338,7 +333,7 @@ async def async_search_discography(artist_id: int):
                         query=query,
                         profile=profile,
                         save_path=album.get("root_folder_path") or artist.get("root_folder_path"),
-                        tags=["nexarr", "music", "discography", f"album-{album['id']}"],
+                        tags=["kinora", "music", "discography", f"album-{album['id']}"],
                     )
 
                     if torrent_hash:
@@ -348,7 +343,7 @@ async def async_search_discography(artist_id: int):
                             SET status = 'downloading', updated_at = NOW()
                             WHERE id = $1
                             """,
-                            album["id"]
+                            album["id"],
                         )
                         grabbed_count += 1
 

@@ -5,7 +5,6 @@ import asyncpg
 
 from app.core.config import settings
 
-
 # Persistent event loop for Celery tasks - avoids creating/destroying loops
 _celeryLoop: asyncio.AbstractEventLoop | None = None
 
@@ -21,7 +20,7 @@ def runAsync(coro):
 
 # Initialize Celery app
 celery_app = Celery(
-    "nexarr",
+    "kinora",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
@@ -64,18 +63,17 @@ def get_schedule_intervals():
     Returns default values if database is not accessible
     """
     try:
+
         async def fetch_settings():
             conn = await asyncpg.connect(settings.DATABASE_URL)
             try:
-                rss_interval = await conn.fetchval(
-                    "SELECT value FROM app_settings WHERE key = 'rss_sync_interval'"
-                )
+                rss_interval = await conn.fetchval("SELECT value FROM app_settings WHERE key = 'rss_sync_interval'")
                 auto_search_interval = await conn.fetchval(
                     "SELECT value FROM app_settings WHERE key = 'auto_search_interval'"
                 )
                 return (
                     int(rss_interval) if rss_interval else 15,
-                    int(auto_search_interval) if auto_search_interval else 60
+                    int(auto_search_interval) if auto_search_interval else 60,
                 )
             finally:
                 await conn.close()

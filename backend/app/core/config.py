@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     )
 
     # Application
-    APP_NAME: str = "Nexarr"
+    APP_NAME: str = "Kinora"
     APP_VERSION: str = "1.0.0"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
@@ -44,9 +44,9 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Database (with defaults)
-    POSTGRES_USER: str = "nexarr"
-    POSTGRES_PASSWORD: str = "nexarr_password"
-    POSTGRES_DB: str = "nexarr"
+    POSTGRES_USER: str = "kinora"
+    POSTGRES_PASSWORD: str = "kinora_password"
+    POSTGRES_DB: str = "kinora"
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     DATABASE_URL: str = ""

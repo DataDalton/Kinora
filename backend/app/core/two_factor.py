@@ -17,7 +17,7 @@ def generate_totp_secret() -> str:
     return pyotp.random_base32()
 
 
-def generate_totp_uri(secret: str, username: str, issuer: str = "Nexarr") -> str:
+def generate_totp_uri(secret: str, username: str, issuer: str = "Kinora") -> str:
     """
     Generate TOTP provisioning URI for QR code
     """

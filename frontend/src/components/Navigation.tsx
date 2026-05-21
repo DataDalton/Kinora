@@ -177,7 +177,7 @@ export default function Navigation() {
         <div className="flex items-center justify-between p-4 border-b-2 border-border">
           {!collapsed && (
             <Link href="/" className="text-2xl font-bold logo-gradient">
-              Nexarr
+              Kinora
             </Link>
           )}
           <button
@@ -402,7 +402,7 @@ export default function Navigation() {
       <nav className="md:hidden bg-background text-card-foreground shadow-lg border-b-2 border-border fixed top-0 left-0 right-0 z-50">
         <div className="flex justify-between items-center h-16 px-4">
           <Link href="/" className="text-xl font-bold logo-gradient">
-            Nexarr
+            Kinora
           </Link>
 
           <button

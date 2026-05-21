@@ -4,12 +4,12 @@ Database connection pool management with PgBouncer support.
 Connections go through PgBouncer (port 6432) in transaction pooling mode
 for maximum performance. Migrations run directly against PostgreSQL.
 """
+
 from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 import asyncpg
 import orjson
 import os
-
 
 _pool: Optional[asyncpg.Pool] = None
 
@@ -20,11 +20,11 @@ def getDsn() -> str:
     Defaults to localhost:6432 for local development (Docker exposes pgbouncer on 6432).
     In Docker, set PGBOUNCER_HOST=pgbouncer to use the internal network.
     """
-    user = os.environ.get("POSTGRES_USER", "nexarr")
-    password = os.environ.get("POSTGRES_PASSWORD", "nexarr_password")
+    user = os.environ.get("POSTGRES_USER", "kinora")
+    password = os.environ.get("POSTGRES_PASSWORD", "kinora_password")
     host = os.environ.get("PGBOUNCER_HOST", "localhost")
     port = os.environ.get("PGBOUNCER_PORT", "6432")
-    db = os.environ.get("POSTGRES_DB", "nexarr")
+    db = os.environ.get("POSTGRES_DB", "kinora")
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
@@ -34,10 +34,7 @@ def getDirectDsn() -> str:
     Defaults to localhost:5432 for local development.
     In Docker, DATABASE_URL points to the postgres container.
     """
-    return os.environ.get(
-        "DATABASE_URL",
-        "postgresql://nexarr:nexarr_password@localhost:5432/nexarr"
-    )
+    return os.environ.get("DATABASE_URL", "postgresql://kinora:kinora_password@localhost:5432/kinora")
 
 
 async def initPool() -> asyncpg.Pool:
@@ -67,16 +64,10 @@ async def initPool() -> asyncpg.Pool:
 async def _setupConnection(conn: asyncpg.Connection) -> None:
     """Configure JSON codecs using orjson for each connection."""
     await conn.set_type_codec(
-        'jsonb',
-        encoder=lambda v: orjson.dumps(v).decode('utf-8'),
-        decoder=orjson.loads,
-        schema='pg_catalog'
+        "jsonb", encoder=lambda v: orjson.dumps(v).decode("utf-8"), decoder=orjson.loads, schema="pg_catalog"
     )
     await conn.set_type_codec(
-        'json',
-        encoder=lambda v: orjson.dumps(v).decode('utf-8'),
-        decoder=orjson.loads,
-        schema='pg_catalog'
+        "json", encoder=lambda v: orjson.dumps(v).decode("utf-8"), decoder=orjson.loads, schema="pg_catalog"
     )
 
 

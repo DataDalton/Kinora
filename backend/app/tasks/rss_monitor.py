@@ -39,27 +39,23 @@ async def async_monitor_rss_feeds():
 
         async with pool.acquire() as conn:
             # Get all monitored media with their profiles using JOIN
-            monitoredMoviesWithProfiles = await conn.fetch(
-                """
+            monitoredMoviesWithProfiles = await conn.fetch("""
                 SELECT m.*, mp.id as mp_id, mp.name as mp_name, mp.resolutions,
                        mp.sources, mp.codecs, mp.uploaders, mp.min_seeds,
                        mp.min_size, mp.max_size, mp.search_timeout, mp.max_results
                 FROM movies m
                 INNER JOIN media_profiles mp ON m.media_profile_id = mp.id
                 WHERE m.monitored = TRUE AND m.has_file = FALSE
-                """
-            )
+                """)
 
-            monitoredShowsWithProfiles = await conn.fetch(
-                """
+            monitoredShowsWithProfiles = await conn.fetch("""
                 SELECT s.*, mp.id as mp_id, mp.name as mp_name, mp.resolutions,
                        mp.sources, mp.codecs, mp.uploaders, mp.min_seeds,
                        mp.min_size, mp.max_size, mp.search_timeout, mp.max_results
                 FROM shows s
                 INNER JOIN media_profiles mp ON s.media_profile_id = mp.id
                 WHERE s.monitored = TRUE
-                """
-            )
+                """)
 
             # Check each release against wanted media
             for release in releases:
@@ -96,11 +92,15 @@ async def async_monitor_rss_feeds():
 
     finally:
         elapsedMs = int((time.time() - startTime) * 1000)
-        await cacheSet(f"task:last_run:{taskName}", {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "status": status,
-            "durationMs": elapsedMs,
-        }, expire=86400)
+        await cacheSet(
+            f"task:last_run:{taskName}",
+            {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "status": status,
+                "durationMs": elapsedMs,
+            },
+            expire=86400,
+        )
 
 
 async def check_and_grab_movie(conn, release, movie):
@@ -142,7 +142,7 @@ async def check_and_grab_movie(conn, release, movie):
     profile = MediaProfile(**profileData)
 
     # Score the release with movie-specific settings
-    score = media_profile_service.score_release(release, profile, media_type='movie')
+    score = media_profile_service.score_release(release, profile, media_type="movie")
 
     if score < 0:
         return False  # Release doesn't meet requirements
@@ -158,7 +158,7 @@ async def check_and_grab_movie(conn, release, movie):
             torrent_hash = await client.add_torrent(
                 torrent=release.magnet,
                 category="movies",
-                tags=["nexarr", "validating", f"movie-{movie['id']}"],
+                tags=["kinora", "validating", f"movie-{movie['id']}"],
                 paused=True,
             )
 
@@ -179,15 +179,20 @@ async def check_and_grab_movie(conn, release, movie):
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 """,
-                movie["id"], "movie", torrent_hash, release.title,
-                release.indexer, release.quality, release.size,
-                "downloading", "qbittorrent"
+                movie["id"],
+                "movie",
+                torrent_hash,
+                release.title,
+                release.indexer,
+                release.quality,
+                release.size,
+                "downloading",
+                "qbittorrent",
             )
 
             # Update movie status
             await conn.execute(
-                "UPDATE movies SET status = 'downloading', updated_at = NOW() WHERE id = $1",
-                movie["id"]
+                "UPDATE movies SET status = 'downloading', updated_at = NOW() WHERE id = $1", movie["id"]
             )
 
             return True
@@ -213,9 +218,9 @@ async def check_and_grab_show(conn, release, show):
 
     # Parse season and episode from release title (supports S##E##, ##x##, etc.)
     seasonEpisodePatterns = [
-        r's(\d{1,2})e(\d{1,2})',  # S01E01
-        r'(\d{1,2})x(\d{1,2})',    # 1x01
-        r'season\s*(\d{1,2})\s*episode\s*(\d{1,2})',  # Season 1 Episode 01
+        r"s(\d{1,2})e(\d{1,2})",  # S01E01
+        r"(\d{1,2})x(\d{1,2})",  # 1x01
+        r"season\s*(\d{1,2})\s*episode\s*(\d{1,2})",  # Season 1 Episode 01
     ]
 
     matchedSeason = None
@@ -252,7 +257,7 @@ async def check_and_grab_show(conn, release, show):
     profile = MediaProfile(**profileData)
 
     # Score the release with show-specific settings
-    score = media_profile_service.score_release(release, profile, media_type='show')
+    score = media_profile_service.score_release(release, profile, media_type="show")
 
     if score < 0:
         return False
@@ -268,7 +273,7 @@ async def check_and_grab_show(conn, release, show):
             torrentHash = await client.add_torrent(
                 torrent=release.magnet,
                 category="tv",
-                tags=["nexarr", "validating", f"show-{show['id']}", f"s{matchedSeason:02d}e{matchedEpisode:02d}"],
+                tags=["kinora", "validating", f"show-{show['id']}", f"s{matchedSeason:02d}e{matchedEpisode:02d}"],
                 paused=True,
             )
 
@@ -293,7 +298,7 @@ async def check_and_grab_show(conn, release, show):
                 "show",
                 torrentHash,
                 release.title,
-                release.indexer if hasattr(release, 'indexer') else 'unknown',
+                release.indexer if hasattr(release, "indexer") else "unknown",
                 release.quality,
                 release.size,
                 "downloading",

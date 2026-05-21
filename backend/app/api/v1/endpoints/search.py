@@ -755,7 +755,7 @@ async def download_release(
                 )
 
             # Add torrent paused with validating tag
-            baseTags = ["nexarr", "validating"]
+            baseTags = ["kinora", "validating"]
             if data.indexer:
                 baseTags.append(data.indexer)
             # Add folder identifier tag for traceability in qBittorrent

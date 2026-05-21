@@ -1,7 +1,7 @@
 [project]
-name = "nexarr-backend"
+name = "kinora-backend"
 version = "1.0.0"
-description = "Nexarr media automation backend"
+description = "Kinora media automation backend"
 requires-python = ">=3.14"
 dependencies = [
     # Web Framework

@@ -4,7 +4,7 @@ from functools import wraps
 import asyncio
 
 # Type variable for generic return types
-T = TypeVar('T')
+T = TypeVar("T")
 
 # Global shared HTTP client
 _client: Optional[AsyncSession] = None
@@ -22,6 +22,7 @@ def retryWithBackoff(func: Callable[..., T]) -> Callable[..., T]:
     Decorator that adds retry logic with exponential backoff.
     Retries on connection errors, timeouts, and specific HTTP status codes.
     """
+
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> T:
         lastException = None
@@ -32,9 +33,11 @@ def retryWithBackoff(func: Callable[..., T]) -> Callable[..., T]:
                 response = await func(*args, **kwargs)
 
                 # Check if response status code should trigger retry
-                if hasattr(response, 'status_code') and response.status_code in RETRY_STATUS_CODES:
+                if hasattr(response, "status_code") and response.status_code in RETRY_STATUS_CODES:
                     if attempt < RETRY_MAX_ATTEMPTS - 1:
-                        print(f"HTTP {response.status_code} - retrying in {backoff}s (attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS})")
+                        print(
+                            f"HTTP {response.status_code} - retrying in {backoff}s (attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS})"
+                        )
                         await asyncio.sleep(backoff)
                         backoff = min(backoff * RETRY_BACKOFF_MULTIPLIER, RETRY_MAX_BACKOFF)
                         continue
@@ -44,7 +47,9 @@ def retryWithBackoff(func: Callable[..., T]) -> Callable[..., T]:
             except (ConnectionError, TimeoutError, OSError) as e:
                 lastException = e
                 if attempt < RETRY_MAX_ATTEMPTS - 1:
-                    print(f"Connection error: {e} - retrying in {backoff}s (attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS})")
+                    print(
+                        f"Connection error: {e} - retrying in {backoff}s (attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS})"
+                    )
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * RETRY_BACKOFF_MULTIPLIER, RETRY_MAX_BACKOFF)
                 else:
@@ -53,10 +58,12 @@ def retryWithBackoff(func: Callable[..., T]) -> Callable[..., T]:
             except Exception as e:
                 # Check for curl_cffi specific timeout/connection errors
                 errorStr = str(e).lower()
-                if 'timeout' in errorStr or 'connection' in errorStr or 'refused' in errorStr:
+                if "timeout" in errorStr or "connection" in errorStr or "refused" in errorStr:
                     lastException = e
                     if attempt < RETRY_MAX_ATTEMPTS - 1:
-                        print(f"Request error: {e} - retrying in {backoff}s (attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS})")
+                        print(
+                            f"Request error: {e} - retrying in {backoff}s (attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS})"
+                        )
                         await asyncio.sleep(backoff)
                         backoff = min(backoff * RETRY_BACKOFF_MULTIPLIER, RETRY_MAX_BACKOFF)
                     else:
@@ -69,9 +76,10 @@ def retryWithBackoff(func: Callable[..., T]) -> Callable[..., T]:
 
     return wrapper
 
+
 # Default headers for API requests
 DEFAULT_HEADERS = {
-    "User-Agent": "Nexarr/1.0",
+    "User-Agent": "Kinora/1.0",
     "Accept": "application/json",
 }
 

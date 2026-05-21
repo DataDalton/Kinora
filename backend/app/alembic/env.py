@@ -3,6 +3,7 @@ Alembic environment configuration for database migrations.
 
 Uses SQLAlchemy Core metadata for autogenerate, runs migrations synchronously.
 """
+
 import os
 from logging.config import fileConfig
 
@@ -32,10 +33,7 @@ def getUrl() -> str:
     Defaults to localhost:5432 for local development.
     In Docker, DATABASE_URL points to the postgres container.
     """
-    return os.environ.get(
-        "DATABASE_URL",
-        "postgresql://nexarr:nexarr_password@localhost:5432/nexarr"
-    )
+    return os.environ.get("DATABASE_URL", "postgresql://kinora:kinora_password@localhost:5432/kinora")
 
 
 def runMigrationsOffline() -> None:

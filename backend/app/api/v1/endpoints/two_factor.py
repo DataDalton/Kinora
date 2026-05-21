@@ -105,9 +105,7 @@ async def setup_totp(
             json.dumps(backup_codes),
         )
 
-    return TOTPSetupResponse(
-        secret=secret, qr_code_url=qr_code_url, backup_codes=backup_codes
-    )
+    return TOTPSetupResponse(secret=secret, qr_code_url=qr_code_url, backup_codes=backup_codes)
 
 
 @router.post("/totp/verify")
@@ -228,14 +226,13 @@ async def start_webauthn_registration(
     )
 
     exclude_credentials = [
-        PublicKeyCredentialDescriptor(id=bytes.fromhex(cred["credential_id"]))
-        for cred in existing_credentials
+        PublicKeyCredentialDescriptor(id=bytes.fromhex(cred["credential_id"])) for cred in existing_credentials
     ]
 
     options = generate_registration_options(
         rp_id="localhost",
-        rp_name="Nexarr",
-        user_id=str(current_user.id).encode('utf-8'),
+        rp_name="Kinora",
+        user_id=str(current_user.id).encode("utf-8"),
         user_name=current_user.username,
         user_display_name=current_user.username,
         exclude_credentials=exclude_credentials,

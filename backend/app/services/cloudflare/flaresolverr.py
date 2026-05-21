@@ -40,7 +40,7 @@ class FlareSolverrBypass(BaseCloudflareBypass):
         Create a new FlareSolverr browser session.
         Returns the session ID.
         """
-        new_session_id = session_id or f"nexarr-{uuid.uuid4().hex[:8]}"
+        new_session_id = session_id or f"kinora-{uuid.uuid4().hex[:8]}"
 
         response = await http_post(
             f"{self.api_url}/v1",
