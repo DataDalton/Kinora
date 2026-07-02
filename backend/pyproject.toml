@@ -30,7 +30,7 @@ dependencies = [
     "bcrypt>=5.0.0",
     "pyotp>=2.9.0",
     "webauthn>=2.7.1",
-    "qrcode>=8.2",
+    "qrcode[pil]>=8.2",
 
     # Validation
     "pydantic>=2.13.4",

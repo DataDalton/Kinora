@@ -55,11 +55,10 @@ async def get_registration_status(conn: asyncpg.Connection = Depends(get_db)):
     """
     try:
         registration_enabled = await conn.fetchval(
-            "SELECT value FROM app_settings WHERE key = $1",
-            "allow_user_registration"
+            "SELECT value FROM app_settings WHERE key = $1", "allow_user_registration"
         )
         # Default to enabled if value doesn't exist or is not explicitly 'false'
-        return {"enabled": registration_enabled != 'false'}
+        return {"enabled": registration_enabled != "false"}
     except Exception:
         return {"enabled": True}
 
@@ -106,6 +105,7 @@ async def get_current_user(
 
 def require_permission(permission: str):
     """Factory function to create permission-checking dependency."""
+
     async def dependency(
         current_user: UserWithPermissions = Depends(get_current_user),
     ) -> UserWithPermissions:
@@ -115,11 +115,13 @@ def require_permission(permission: str):
                 detail=f"Permission '{permission}' required",
             )
         return current_user
+
     return dependency
 
 
 def require_any_permission(*permissions: str):
     """Factory function requiring any one of multiple permissions."""
+
     async def dependency(
         current_user: UserWithPermissions = Depends(get_current_user),
     ) -> UserWithPermissions:
@@ -130,6 +132,7 @@ def require_any_permission(*permissions: str):
                 detail=f"One of {permissions} required",
             )
         return current_user
+
     return dependency
 
 
@@ -146,10 +149,9 @@ async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get
     # Check if registration is disabled (unless this is the first user)
     if not is_first_user:
         registration_enabled = await conn.fetchval(
-            "SELECT value FROM app_settings WHERE key = $1",
-            "allow_user_registration"
+            "SELECT value FROM app_settings WHERE key = $1", "allow_user_registration"
         )
-        if registration_enabled == 'false':
+        if registration_enabled == "false":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User registration is currently disabled",
@@ -192,17 +194,12 @@ async def register(user_data: UserCreate, conn: asyncpg.Connection = Depends(get
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    conn: asyncpg.Connection = Depends(get_db)
-):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), conn: asyncpg.Connection = Depends(get_db)):
     """
     Login with username and password
     Returns tokens directly if no 2FA, or 2FA challenge if 2FA is enabled
     """
-    user_row = await conn.fetchrow(
-        "SELECT * FROM users WHERE username = $1", form_data.username
-    )
+    user_row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", form_data.username)
 
     if not user_row:
         raise HTTPException(
@@ -240,8 +237,8 @@ async def login(
         challenge = secrets.token_urlsafe(32)
         await conn.execute(
             """
-            INSERT INTO app_settings (key, value, value_type, category)
-            VALUES ($1, $2, 'string', '2fa_challenge')
+            INSERT INTO app_settings (key, value, value_type, category, is_encrypted)
+            VALUES ($1, $2, 'string', '2fa_challenge', FALSE)
             ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
             """,
             f"2fa_challenge_{user['username']}",
@@ -255,12 +252,8 @@ async def login(
             challenge=challenge,
         )
 
-    access_token = create_access_token(
-        data={"sub": user["username"], "user_id": user["id"]}
-    )
-    refresh_token = create_refresh_token(
-        data={"sub": user["username"], "user_id": user["id"]}
-    )
+    access_token = create_access_token(data={"sub": user["username"], "user_id": user["id"]})
+    refresh_token = create_refresh_token(data={"sub": user["username"], "user_id": user["id"]})
 
     await conn.execute(
         "UPDATE users SET last_login_at = NOW() WHERE id = $1",
@@ -275,16 +268,11 @@ async def login(
 
 
 @router.post("/verify-2fa", response_model=Token)
-async def verify_two_factor(
-    challenge_data: TwoFactorChallengeRequest,
-    conn: asyncpg.Connection = Depends(get_db)
-):
+async def verify_two_factor(challenge_data: TwoFactorChallengeRequest, conn: asyncpg.Connection = Depends(get_db)):
     """
     Verify 2FA code (TOTP or WebAuthn) and return authentication tokens
     """
-    user_row = await conn.fetchrow(
-        "SELECT * FROM users WHERE username = $1", challenge_data.username
-    )
+    user_row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", challenge_data.username)
 
     if not user_row:
         raise HTTPException(
@@ -379,12 +367,8 @@ async def verify_two_factor(
         f"2fa_challenge_{challenge_data.username}",
     )
 
-    access_token = create_access_token(
-        data={"sub": user["username"], "user_id": user["id"]}
-    )
-    refresh_token = create_refresh_token(
-        data={"sub": user["username"], "user_id": user["id"]}
-    )
+    access_token = create_access_token(data={"sub": user["username"], "user_id": user["id"]})
+    refresh_token = create_refresh_token(data={"sub": user["username"], "user_id": user["id"]})
 
     await conn.execute(
         "UPDATE users SET last_login_at = NOW() WHERE id = $1",
@@ -411,7 +395,7 @@ async def get_or_create_user_from_provider(
     provider_name: str,
     provider_subject: str,
     username: str,
-    metadata: dict = None
+    metadata: dict = None,
 ) -> tuple[User, bool]:
     """
     Get or create user from auth provider.
@@ -423,14 +407,13 @@ async def get_or_create_user_from_provider(
         SELECT user_id FROM user_auth_providers
         WHERE provider_type = $1 AND provider_name = $2 AND provider_subject = $3
         """,
-        provider_type, provider_name, provider_subject
+        provider_type,
+        provider_name,
+        provider_subject,
     )
 
     if auth_provider:
-        user_row = await conn.fetchrow(
-            "SELECT * FROM users WHERE id = $1",
-            auth_provider["user_id"]
-        )
+        user_row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", auth_provider["user_id"])
 
         await conn.execute(
             """
@@ -438,13 +421,12 @@ async def get_or_create_user_from_provider(
             SET last_used_at = NOW()
             WHERE provider_type = $1 AND provider_name = $2 AND provider_subject = $3
             """,
-            provider_type, provider_name, provider_subject
+            provider_type,
+            provider_name,
+            provider_subject,
         )
 
-        await conn.execute(
-            "UPDATE users SET last_login_at = NOW() WHERE id = $1",
-            auth_provider["user_id"]
-        )
+        await conn.execute("UPDATE users SET last_login_at = NOW() WHERE id = $1", auth_provider["user_id"])
 
         return User(**dict(user_row)), False
 
@@ -453,19 +435,15 @@ async def get_or_create_user_from_provider(
 
     if not is_first_user:
         registration_enabled = await conn.fetchval(
-            "SELECT value FROM app_settings WHERE key = $1",
-            "allow_user_registration"
+            "SELECT value FROM app_settings WHERE key = $1", "allow_user_registration"
         )
-        if registration_enabled == 'false':
+        if registration_enabled == "false":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User registration is currently disabled",
             )
 
-    existing_user = await conn.fetchrow(
-        "SELECT id FROM users WHERE username = $1",
-        username
-    )
+    existing_user = await conn.fetchrow("SELECT id FROM users WHERE username = $1", username)
 
     if existing_user:
         raise HTTPException(
@@ -511,17 +489,13 @@ async def get_or_create_user_from_provider(
 
 
 @router.post("/forward-auth", response_model=Token)
-async def forward_auth_login(
-    request: Request,
-    conn: asyncpg.Connection = Depends(get_db)
-):
+async def forward_auth_login(request: Request, conn: asyncpg.Connection = Depends(get_db)):
     """
     Handle forward authentication from Authelia/Authentik
     Auto-detects and logs in users based on headers
     """
     trusted_proxies_setting = await conn.fetchval(
-        "SELECT value FROM app_settings WHERE key = $1",
-        "forward_auth_trusted_proxies"
+        "SELECT value FROM app_settings WHERE key = $1", "forward_auth_trusted_proxies"
     )
 
     trusted_ranges = None
@@ -548,12 +522,8 @@ async def forward_auth_login(
         forward_auth_data.get("metadata"),
     )
 
-    access_token = create_access_token(
-        data={"sub": user.username, "user_id": user.id}
-    )
-    refresh_token = create_refresh_token(
-        data={"sub": user.username, "user_id": user.id}
-    )
+    access_token = create_access_token(data={"sub": user.username, "user_id": user.id})
+    refresh_token = create_refresh_token(data={"sub": user.username, "user_id": user.id})
 
     return Token(access_token=access_token, refresh_token=refresh_token)
 
@@ -580,12 +550,10 @@ async def list_oidc_providers(conn: asyncpg.Connection = Depends(get_db)):
     """
     List all enabled OIDC providers (public endpoint for login page)
     """
-    providers_data = await conn.fetch(
-        """
+    providers_data = await conn.fetch("""
         SELECT key, value FROM app_settings
         WHERE category = 'oidc_provider' AND key LIKE 'oidc_provider_%'
-        """
-    )
+        """)
 
     providers = []
     provider_ids = set()
@@ -599,21 +567,22 @@ async def list_oidc_providers(conn: asyncpg.Connection = Depends(get_db)):
     for provider_id in provider_ids:
         try:
             config_json = await conn.fetchval(
-                "SELECT value FROM app_settings WHERE key = $1",
-                f"oidc_provider_{provider_id}_config"
+                "SELECT value FROM app_settings WHERE key = $1", f"oidc_provider_{provider_id}_config"
             )
 
             if config_json:
                 config = json.loads(config_json)
                 if config.get("enabled", True):
-                    providers.append(OIDCProviderPublic(
-                        id=int(provider_id),
-                        name=config.get("name", f"Provider {provider_id}"),
-                        enabled=True,
-                        button_text=config.get("button_text"),
-                        button_icon=config.get("button_icon"),
-                    ))
-        except (json.JSONDecodeError, ValueError):
+                    providers.append(
+                        OIDCProviderPublic(
+                            id=int(provider_id),
+                            name=config.get("name", f"Provider {provider_id}"),
+                            enabled=True,
+                            button_text=config.get("button_text"),
+                            button_icon=config.get("button_icon"),
+                        )
+                    )
+        except json.JSONDecodeError, ValueError:
             continue
 
     return providers
@@ -628,12 +597,10 @@ async def create_oidc_provider(
     """
     Create a new OIDC provider (admin only)
     """
-    next_id = await conn.fetchval(
-        """
+    next_id = await conn.fetchval("""
         SELECT COALESCE(MAX(CAST(SUBSTRING(key FROM 'oidc_provider_([0-9]+)_config') AS INTEGER)), 0) + 1
         FROM app_settings WHERE key LIKE 'oidc_provider_%_config'
-        """
-    )
+        """)
 
     config_dict = config.dict()
     config_dict["id"] = next_id
@@ -718,8 +685,7 @@ async def oidc_authorize(
     Get OIDC authorization URL for provider
     """
     config_json = await conn.fetchval(
-        "SELECT value FROM app_settings WHERE key = $1",
-        f"oidc_provider_{provider_id}_config"
+        "SELECT value FROM app_settings WHERE key = $1", f"oidc_provider_{provider_id}_config"
     )
 
     if not config_json:
@@ -748,8 +714,8 @@ async def oidc_authorize(
 
     await conn.execute(
         """
-        INSERT INTO app_settings (key, value, value_type, category)
-        VALUES ($1, $2, 'string', 'oidc_state')
+        INSERT INTO app_settings (key, value, value_type, category, is_encrypted)
+        VALUES ($1, $2, 'string', 'oidc_state', FALSE)
         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
         """,
         f"oidc_state_{state}",
@@ -768,8 +734,7 @@ async def oidc_callback(
     Handle OIDC callback with authorization code
     """
     stored_provider_id = await conn.fetchval(
-        "SELECT value FROM app_settings WHERE key = $1",
-        f"oidc_state_{callback_data.state}"
+        "SELECT value FROM app_settings WHERE key = $1", f"oidc_state_{callback_data.state}"
     )
 
     if not stored_provider_id or int(stored_provider_id) != callback_data.provider_id:
@@ -778,14 +743,10 @@ async def oidc_callback(
             detail="Invalid state parameter",
         )
 
-    await conn.execute(
-        "DELETE FROM app_settings WHERE key = $1",
-        f"oidc_state_{callback_data.state}"
-    )
+    await conn.execute("DELETE FROM app_settings WHERE key = $1", f"oidc_state_{callback_data.state}")
 
     config_json = await conn.fetchval(
-        "SELECT value FROM app_settings WHERE key = $1",
-        f"oidc_provider_{callback_data.provider_id}_config"
+        "SELECT value FROM app_settings WHERE key = $1", f"oidc_provider_{callback_data.provider_id}_config"
     )
 
     if not config_json:
@@ -840,12 +801,8 @@ async def oidc_callback(
             claims,
         )
 
-        access_token = create_access_token(
-            data={"sub": user.username, "user_id": user.id}
-        )
-        refresh_token = create_refresh_token(
-            data={"sub": user.username, "user_id": user.id}
-        )
+        access_token = create_access_token(data={"sub": user.username, "user_id": user.id})
+        refresh_token = create_refresh_token(data={"sub": user.username, "user_id": user.id})
 
         return Token(access_token=access_token, refresh_token=refresh_token)
 
@@ -867,10 +824,7 @@ async def list_user_auth_providers(
     """
     List all auth providers linked to current user
     """
-    providers = await conn.fetch(
-        "SELECT * FROM user_auth_providers WHERE user_id = $1",
-        current_user.id
-    )
+    providers = await conn.fetch("SELECT * FROM user_auth_providers WHERE user_id = $1", current_user.id)
 
     return [UserAuthProvider(**dict(p)) for p in providers]
 

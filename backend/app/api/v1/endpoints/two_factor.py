@@ -245,8 +245,8 @@ async def start_webauthn_registration(
     challenge = options.challenge.hex()
     await conn.execute(
         """
-        INSERT INTO app_settings (key, value, value_type, category)
-        VALUES ($1, $2, 'string', 'webauthn_challenge')
+        INSERT INTO app_settings (key, value, value_type, category, is_encrypted)
+        VALUES ($1, $2, 'string', 'webauthn_challenge', FALSE)
         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
         """,
         f"webauthn_challenge_{current_user.id}",
