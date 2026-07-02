@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kinora_password}
       POSTGRES_DB: ${POSTGRES_DB:-kinora}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     # Expose PostgreSQL for local development migrations
     ports:
       - "5432:5432"

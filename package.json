@@ -10,7 +10,7 @@
 		"preinstall": "node scripts/check-docker.js",
 		"postinstall": "node scripts/setup-backend.js",
 		"dev": "npm run docker:dev && npm run db:migrate && npm run dev:all",
-		"db:migrate": "cd backend && alembic upgrade head",
+		"db:migrate": "cd backend && python -m alembic upgrade head",
 		"dev:all": "concurrently -n \"backend,celery-worker,celery-beat,frontend\" -c \"cyan,magenta,yellow,green\" \"npm run dev:backend\" \"npm run dev:celery-worker\" \"npm run dev:celery-beat\" \"npm run dev:frontend\"",
 		"dev:backend": "cd backend && python -m granian --interface asgi --host 0.0.0.0 --port 8000 --reload app.main:app",
 		"dev:celery-worker": "cd backend && python -m celery -A app.tasks.celery_app worker --loglevel=info --pool=solo",
