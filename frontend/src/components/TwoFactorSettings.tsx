@@ -126,6 +126,7 @@ export default function TwoFactorSettings() {
 			queryClient.invalidateQueries({ queryKey: ["2fa-status"] });
 			setShowDisableModal(false);
 			setDisableCode("");
+			setError(null);
 			setSuccess("TOTP disabled successfully!");
 			setTimeout(() => setSuccess(null), 3000);
 		},
@@ -265,8 +266,8 @@ export default function TwoFactorSettings() {
 
 	return (
 		<div className="space-y-6">
-			{/* Status Messages */}
-			{error && (
+			{/* Status Messages (hidden while the disable modal is open, which shows its own error) */}
+			{error && !showDisableModal && (
 				<div className="p-4 bg-destructive/10 border border-destructive/50 rounded-lg flex items-center gap-2">
 					<AlertCircle className="w-5 h-5 text-destructive" />
 					<p className="text-sm text-destructive">{error}</p>
@@ -311,7 +312,10 @@ export default function TwoFactorSettings() {
 						</div>
 
 						<button
-							onClick={() => setShowDisableModal(true)}
+							onClick={() => {
+								setError(null);
+								setShowDisableModal(true);
+							}}
 							className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition cursor-pointer"
 						>
 							Disable TOTP
@@ -541,6 +545,14 @@ export default function TwoFactorSettings() {
 							disable two-factor authentication.
 						</p>
 						<div className="space-y-4">
+							{error && (
+								<div className="p-3 bg-destructive/10 border border-destructive/50 rounded-lg flex items-center gap-2">
+									<AlertCircle className="w-5 h-5 text-destructive shrink-0" />
+									<p className="text-sm text-destructive">
+										{error}
+									</p>
+								</div>
+							)}
 							<div>
 								<label className="block text-sm font-medium mb-2">
 									TOTP Code or Backup Code
@@ -574,6 +586,7 @@ export default function TwoFactorSettings() {
 									onClick={() => {
 										setShowDisableModal(false);
 										setDisableCode("");
+										setError(null);
 									}}
 									className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 transition cursor-pointer"
 								>
