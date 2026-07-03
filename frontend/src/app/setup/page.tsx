@@ -1540,7 +1540,7 @@ export default function SetupPage() {
 								onClick={() => setShowBrowser(false)}
 								className="p-2 hover:bg-accent rounded-lg transition cursor-pointer"
 							>
-								✕
+								<X className="w-5 h-5" />
 							</button>
 						</div>
 

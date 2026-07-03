@@ -148,7 +148,6 @@ class OIDCProviderConfig(BaseModel):
     scopes: str = Field(default="openid profile")
     enabled: bool = Field(default=True)
     button_text: Optional[str] = Field(default=None)
-    button_icon: Optional[str] = Field(default=None)
 
 
 class OIDCProviderPublic(BaseModel):
@@ -158,7 +157,6 @@ class OIDCProviderPublic(BaseModel):
     name: str
     enabled: bool
     button_text: Optional[str] = None
-    button_icon: Optional[str] = None
 
 
 class OIDCAuthRequest(BaseModel):
@@ -184,6 +182,7 @@ class LinkAuthProviderRequest(BaseModel):
 
 
 # 2FA Schemas
+
 
 class TOTPSetupResponse(BaseModel):
     """Schema for TOTP setup response"""

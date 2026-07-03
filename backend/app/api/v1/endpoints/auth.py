@@ -579,7 +579,6 @@ async def list_oidc_providers(conn: asyncpg.Connection = Depends(get_db)):
                             name=config.get("name", f"Provider {provider_id}"),
                             enabled=True,
                             button_text=config.get("button_text"),
-                            button_icon=config.get("button_icon"),
                         )
                     )
         except json.JSONDecodeError, ValueError:

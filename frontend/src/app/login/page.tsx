@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LogIn, Loader2, Film } from "lucide-react";
+import { LogIn, Loader2, Film, Globe } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import HolographicGrid from "@/components/HolographicGrid";
@@ -13,7 +13,6 @@ interface OIDCProvider {
 	name: string;
 	enabled: boolean;
 	button_text?: string;
-	button_icon?: string;
 }
 
 export default function LoginPage() {
@@ -421,11 +420,7 @@ export default function LoginPage() {
 													"transition-all",
 												)}
 											>
-												{provider.button_icon && (
-													<span className="text-lg">
-														{provider.button_icon}
-													</span>
-												)}
+												<Globe className="w-5 h-5" />
 												{provider.button_text ||
 													`Sign in with ${provider.name}`}
 											</button>

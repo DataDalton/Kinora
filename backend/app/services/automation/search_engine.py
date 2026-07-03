@@ -64,10 +64,10 @@ class SearchEngine:
         """
         # Map indexer names to instances
         indexer_map = {
-            '1337x': leetx_indexer,
-            'YTS': yts_indexer,
-            'Nyaa': self.nyaa_indexer,
-            'Rutracker': None,  # Not implemented yet
+            "1337x": leetx_indexer,
+            "YTS": yts_indexer,
+            "Nyaa": self.nyaa_indexer,
+            "Rutracker": None,  # Not implemented yet
         }
 
         tasks = []
@@ -89,11 +89,7 @@ class SearchEngine:
             tasks.append(task)
 
         # Run with timeout, preserving partial results
-        done, pending = await asyncio.wait(
-            tasks,
-            timeout=timeout,
-            return_when=asyncio.ALL_COMPLETED
-        )
+        done, pending = await asyncio.wait(tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED)
 
         # Cancel pending tasks
         for task in pending:
@@ -246,7 +242,7 @@ class SearchEngine:
                                 continue
 
                             # Found acceptable release!
-                            print(f"\n✓ Selected: {best_release.title}")
+                            print(f"\n[OK] Selected: {best_release.title}")
                             print(f"  Resolution: {best_release.quality}")
                             print(f"  Source: {best_release.source}")
                             print(f"  Codec: {best_release.codec}")
@@ -256,7 +252,7 @@ class SearchEngine:
 
                             return best_release
 
-        print(f"\n✗ No acceptable release found")
+        print(f"\n[FAIL] No acceptable release found")
         return None
 
     async def search_and_select(
@@ -320,7 +316,7 @@ class SearchEngine:
                 paused=True,
             )
 
-            print(f"✓ Added to download client (pending validation): {torrent_hash}")
+            print(f"[OK] Added to download client (pending validation): {torrent_hash}")
 
             # Trigger validation immediately after adding
             validation_result = await validate_and_resume_torrent(
@@ -347,7 +343,7 @@ class SearchEngine:
         all_indexers = self.general_indexers + self.anime_indexers
 
         for indexer in all_indexers:
-            if hasattr(indexer, 'get_rss'):
+            if hasattr(indexer, "get_rss"):
                 task = indexer.get_rss()
                 tasks.append(task)
 
@@ -385,20 +381,20 @@ class SearchEngine:
         raw_data = release.raw_data
 
         # Get anime preferences from profile
-        anime_subtitle_pref = getattr(profile, 'anime_subtitle_preference', 'softsub')
-        anime_allow_hardsub = getattr(profile, 'anime_allow_hardsub', False)
-        anime_prefer_dual_audio = getattr(profile, 'anime_prefer_dual_audio', False)
-        anime_audio_lang = getattr(profile, 'anime_audio_language', 'ja')
-        anime_subtitle_lang = getattr(profile, 'anime_subtitle_language', 'en')
+        anime_subtitle_pref = getattr(profile, "anime_subtitle_preference", "softsub")
+        anime_allow_hardsub = getattr(profile, "anime_allow_hardsub", False)
+        anime_prefer_dual_audio = getattr(profile, "anime_prefer_dual_audio", False)
+        anime_audio_lang = getattr(profile, "anime_audio_language", "ja")
+        anime_subtitle_lang = getattr(profile, "anime_subtitle_language", "en")
 
-        subtitle_type = raw_data.get('subtitle_type')
-        audio_language = raw_data.get('audio_language')
-        subtitle_language = raw_data.get('subtitle_language')
+        subtitle_type = raw_data.get("subtitle_type")
+        audio_language = raw_data.get("audio_language")
+        subtitle_language = raw_data.get("subtitle_language")
 
         # Filter by audio language if detected
         if audio_language and audio_language != anime_audio_lang:
             # Allow dual audio if it contains preferred language
-            if not (subtitle_type == 'dual_audio' and anime_audio_lang in ['ja', 'en']):
+            if not (subtitle_type == "dual_audio" and anime_audio_lang in ["ja", "en"]):
                 return False
 
         # Filter by subtitle language if detected
@@ -406,18 +402,18 @@ class SearchEngine:
             return False
 
         # Filter by dual audio preference
-        if anime_prefer_dual_audio and subtitle_type != 'dual_audio':
+        if anime_prefer_dual_audio and subtitle_type != "dual_audio":
             return False
 
         # Filter by hardsub/softsub
-        if subtitle_type == 'hardsub' and not anime_allow_hardsub:
+        if subtitle_type == "hardsub" and not anime_allow_hardsub:
             return False
 
-        if anime_subtitle_pref == 'softsub' and subtitle_type == 'hardsub' and not anime_allow_hardsub:
+        if anime_subtitle_pref == "softsub" and subtitle_type == "hardsub" and not anime_allow_hardsub:
             return False
 
         # Block raw releases (no subtitles)
-        if subtitle_type == 'raw':
+        if subtitle_type == "raw":
             return False
 
         return True
@@ -439,23 +435,28 @@ class SearchEngine:
         Cascade: FLAC -> mp3_320 -> mp3_256 -> mp3_128 -> aac -> ogg
         """
         # Get preferred quality order from profile
-        quality_order = getattr(profile, 'music_preferred_quality', None) or [
-            'flac', 'mp3_320', 'mp3_256', 'mp3_128', 'aac', 'ogg'
+        quality_order = getattr(profile, "music_preferred_quality", None) or [
+            "flac",
+            "mp3_320",
+            "mp3_256",
+            "mp3_128",
+            "aac",
+            "ogg",
         ]
 
         # Get per-media-type indexers and timing
-        selected_indexers = profile.get_indexers_for_type('music')
+        selected_indexers = profile.get_indexers_for_type("music")
         search_timeout = profile.search_timeout
         max_results = profile.max_results
 
         # Map quality values to search terms
         format_search_terms = {
-            'flac': 'FLAC',
-            'mp3_320': 'MP3 320',
-            'mp3_256': 'MP3 256',
-            'mp3_128': 'MP3 128',
-            'aac': 'AAC',
-            'ogg': 'OGG',
+            "flac": "FLAC",
+            "mp3_320": "MP3 320",
+            "mp3_256": "MP3 256",
+            "mp3_128": "MP3 128",
+            "aac": "AAC",
+            "ogg": "OGG",
         }
 
         print(f"Music cascading search: {query}")
@@ -497,50 +498,46 @@ class SearchEngine:
                 continue
 
             # Select best release (most seeders for music)
-            best_release = self._select_best_music_release(
-                filtered_releases,
-                profile,
-                preferred_uploaders
-            )
+            best_release = self._select_best_music_release(filtered_releases, profile, preferred_uploaders)
 
             if best_release:
-                print(f"\n✓ Selected: {best_release.title}")
+                print(f"\n[OK] Selected: {best_release.title}")
                 print(f"  Format: {best_release.audio_format}")
                 print(f"  Bitrate: {best_release.audio_bitrate}")
                 print(f"  Lossless: {best_release.is_lossless}")
                 print(f"  Seeders: {best_release.seeders}")
                 return best_release
 
-        print(f"\n✗ No acceptable music release found")
+        print(f"\n[FAIL] No acceptable music release found")
         return None
 
     def _meets_music_requirements(self, release: TorrentRelease, profile: MediaProfile) -> bool:
         """
         Check if music release meets profile requirements
         """
-        preferred_quality = getattr(profile, 'music_preferred_quality', None) or []
+        preferred_quality = getattr(profile, "music_preferred_quality", None) or []
 
         if not preferred_quality:
             return True
 
         # Map release format to quality values
         format_to_quality = {
-            'FLAC': 'flac',
-            'MP3': 'mp3_320',  # Default MP3 to 320
-            'AAC': 'aac',
-            'OGG': 'ogg',
-            'ALAC': 'flac',  # Treat ALAC as equivalent to FLAC
-            'WAV': 'flac',   # Treat WAV as lossless
+            "FLAC": "flac",
+            "MP3": "mp3_320",  # Default MP3 to 320
+            "AAC": "aac",
+            "OGG": "ogg",
+            "ALAC": "flac",  # Treat ALAC as equivalent to FLAC
+            "WAV": "flac",  # Treat WAV as lossless
         }
 
         # Map bitrate to quality
         bitrate_to_quality = {
-            '320': 'mp3_320',
-            '256': 'mp3_256',
-            '192': 'mp3_192',
-            '128': 'mp3_128',
-            'V0': 'mp3_320',  # V0 is roughly equivalent to 320
-            'V2': 'mp3_256',
+            "320": "mp3_320",
+            "256": "mp3_256",
+            "192": "mp3_192",
+            "128": "mp3_128",
+            "V0": "mp3_320",  # V0 is roughly equivalent to 320
+            "V2": "mp3_256",
         }
 
         # Determine release quality
@@ -596,9 +593,7 @@ class SearchEngine:
         Search for music with cascading quality, select best, and download
         Returns torrent hash if successful
         """
-        best_release = await self.music_cascading_search(
-            query, profile, preferred_uploaders, blocked_uploaders
-        )
+        best_release = await self.music_cascading_search(query, profile, preferred_uploaders, blocked_uploaders)
 
         if not best_release:
             return None
@@ -625,7 +620,7 @@ class SearchEngine:
                 paused=True,
             )
 
-            print(f"✓ Added to download client (pending validation): {torrent_hash}")
+            print(f"[OK] Added to download client (pending validation): {torrent_hash}")
 
             # Trigger validation immediately after adding
             validation_result = await validate_and_resume_torrent(
