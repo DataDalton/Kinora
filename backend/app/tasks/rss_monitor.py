@@ -2,7 +2,7 @@ import time
 from datetime import datetime
 from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
-from app.services.automation.search_engine import search_engine
+from app.services.automation.search_engine import search_engine, _resolve_grab_folder
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.torrent_validator import validate_and_resume_torrent
@@ -38,38 +38,46 @@ async def async_monitor_rss_feeds():
         pool = await get_pool()
 
         async with pool.acquire() as conn:
-            # Get all monitored media with their profiles using JOIN
+            # Get all monitored media that have an assigned profile
             monitoredMoviesWithProfiles = await conn.fetch("""
-                SELECT m.*, mp.id as mp_id, mp.name as mp_name, mp.resolutions,
-                       mp.sources, mp.codecs, mp.uploaders, mp.min_seeds,
-                       mp.min_size, mp.max_size, mp.search_timeout, mp.max_results
+                SELECT m.*
                 FROM movies m
                 INNER JOIN media_profiles mp ON m.media_profile_id = mp.id
                 WHERE m.monitored = TRUE AND m.has_file = FALSE
                 """)
 
             monitoredShowsWithProfiles = await conn.fetch("""
-                SELECT s.*, mp.id as mp_id, mp.name as mp_name, mp.resolutions,
-                       mp.sources, mp.codecs, mp.uploaders, mp.min_seeds,
-                       mp.min_size, mp.max_size, mp.search_timeout, mp.max_results
+                SELECT s.*
                 FROM shows s
                 INNER JOIN media_profiles mp ON s.media_profile_id = mp.id
                 WHERE s.monitored = TRUE
                 """)
+
+            # Batch-load the referenced profiles once, then look them up per item.
+            profileIds = list(
+                {m["media_profile_id"] for m in monitoredMoviesWithProfiles}
+                | {s["media_profile_id"] for s in monitoredShowsWithProfiles}
+            )
+            profiles = {}
+            if profileIds:
+                profileRows = await conn.fetch("SELECT * FROM media_profiles WHERE id = ANY($1)", profileIds)
+                profiles = {r["id"]: MediaProfile.from_row(dict(r)) for r in profileRows}
 
             # Check each release against wanted media
             for release in releases:
                 # Try to match against movies
                 for movieRow in monitoredMoviesWithProfiles:
                     movieDict = dict(movieRow)
-                    if await check_and_grab_movie(conn, release, movieDict):
+                    profile = profiles.get(movieDict["media_profile_id"])
+                    if await check_and_grab_movie(conn, release, movieDict, profile):
                         grabbed_count += 1
                         break
 
                 # Try to match against shows
                 for showRow in monitoredShowsWithProfiles:
                     showDict = dict(showRow)
-                    if await check_and_grab_show(conn, release, showDict):
+                    profile = profiles.get(showDict["media_profile_id"])
+                    if await check_and_grab_show(conn, release, showDict, profile):
                         grabbed_count += 1
                         break
 
@@ -103,11 +111,14 @@ async def async_monitor_rss_feeds():
         )
 
 
-async def check_and_grab_movie(conn, release, movie):
+async def check_and_grab_movie(conn, release, movie, profile):
     """
     Check if release matches wanted movie and grab it.
-    Movie dict includes pre-joined profile fields (mp_id, mp_name, etc.)
+    profile is the resolved MediaProfile for the movie's media_profile_id.
     """
+    if not profile:
+        return False
+
     # Simple title matching (can be enhanced with fuzzy matching)
     releaseTitleLower = release.title.lower()
     movieTitleLower = movie["title"].lower()
@@ -120,26 +131,6 @@ async def check_and_grab_movie(conn, release, movie):
         year = movie["release_date"].year
         if str(year) not in release.title:
             return False
-
-    # Check for pre-joined profile data
-    if not movie.get("mp_id"):
-        return False
-
-    # Construct MediaProfile from pre-joined columns
-    profileData = {
-        "id": movie["mp_id"],
-        "name": movie["mp_name"],
-        "resolutions": movie["resolutions"],
-        "sources": movie["sources"],
-        "codecs": movie["codecs"],
-        "uploaders": movie["uploaders"],
-        "min_seeds": movie["min_seeds"],
-        "min_size": movie["min_size"],
-        "max_size": movie["max_size"],
-        "search_timeout": movie["search_timeout"],
-        "max_results": movie["max_results"],
-    }
-    profile = MediaProfile(**profileData)
 
     # Score the release with movie-specific settings
     score = media_profile_service.score_release(release, profile, media_type="movie")
@@ -154,30 +145,36 @@ async def check_and_grab_movie(conn, release, movie):
             if not client:
                 return False
 
+            # Resolve the paired root folder so the torrent lands in the hardlink folder and
+            # the organizer knows where to place it on completion.
+            folder = await _resolve_grab_folder(conn, "movie", movie["id"])
+            savePath = folder["download_path"] if folder else None
+            rootFolderId = folder["id"] if folder else None
+
             # Add torrent paused with validating tag for pre-download validation
             torrent_hash = await client.add_torrent(
                 torrent=release.magnet,
+                save_path=savePath,
                 category="movies",
                 tags=["kinora", "validating", f"movie-{movie['id']}"],
                 paused=True,
             )
 
-            # Trigger validation immediately after adding
-            await validate_and_resume_torrent(
-                torrent_hash=torrent_hash,
-                client=client,
-                profile=profile,
-                media_type="movie",
-            )
-
-            # Record in download history
+            # Record in download history before validation so the row exists for it.
             await conn.execute(
                 """
                 INSERT INTO download_history (
                     media_id, media_type, torrent_hash, torrent_title,
-                    indexer, quality, size, status, download_client
+                    indexer, quality, size, magnet_link, torrent_url, info_hash,
+                    status, root_folder_id, download_client
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                ON CONFLICT (torrent_hash) DO UPDATE SET
+                    magnet_link = COALESCE(EXCLUDED.magnet_link, download_history.magnet_link),
+                    torrent_url = COALESCE(EXCLUDED.torrent_url, download_history.torrent_url),
+                    info_hash = COALESCE(EXCLUDED.info_hash, download_history.info_hash),
+                    root_folder_id = COALESCE(EXCLUDED.root_folder_id, download_history.root_folder_id),
+                    updated_at = NOW()
                 """,
                 movie["id"],
                 "movie",
@@ -186,8 +183,20 @@ async def check_and_grab_movie(conn, release, movie):
                 release.indexer,
                 release.quality,
                 release.size,
+                release.magnet,
+                release.torrent_url,
+                release.info_hash or torrent_hash,
                 "downloading",
+                rootFolderId,
                 "qbittorrent",
+            )
+
+            # Trigger validation immediately after adding
+            await validate_and_resume_torrent(
+                torrent_hash=torrent_hash,
+                client=client,
+                profile=profile,
+                media_type="movie",
             )
 
             # Update movie status
@@ -203,12 +212,15 @@ async def check_and_grab_movie(conn, release, movie):
     return False
 
 
-async def check_and_grab_show(conn, release, show):
+async def check_and_grab_show(conn, release, show, profile):
     """
     Check if release matches wanted show episode and grab it.
-    Show dict includes pre-joined profile fields (mp_id, mp_name, etc.)
+    profile is the resolved MediaProfile for the show's media_profile_id.
     """
     import re
+
+    if not profile:
+        return False
 
     releaseTitleLower = release.title.lower()
     showTitleLower = show["title"].lower()
@@ -236,26 +248,6 @@ async def check_and_grab_show(conn, release, show):
     if not matchedSeason or not matchedEpisode:
         return False
 
-    # Check for pre-joined profile data
-    if not show.get("mp_id"):
-        return False
-
-    # Construct MediaProfile from pre-joined columns
-    profileData = {
-        "id": show["mp_id"],
-        "name": show["mp_name"],
-        "resolutions": show["resolutions"],
-        "sources": show["sources"],
-        "codecs": show["codecs"],
-        "uploaders": show["uploaders"],
-        "min_seeds": show["min_seeds"],
-        "min_size": show["min_size"],
-        "max_size": show["max_size"],
-        "search_timeout": show["search_timeout"],
-        "max_results": show["max_results"],
-    }
-    profile = MediaProfile(**profileData)
-
     # Score the release with show-specific settings
     score = media_profile_service.score_release(release, profile, media_type="show")
 
@@ -269,30 +261,35 @@ async def check_and_grab_show(conn, release, show):
             if not client:
                 return False
 
+            # Resolve the paired root folder (hardlink folder + organize target).
+            folder = await _resolve_grab_folder(conn, "show", show["id"])
+            savePath = folder["download_path"] if folder else None
+            rootFolderId = folder["id"] if folder else None
+
             # Add torrent paused with validating tag for pre-download validation
             torrentHash = await client.add_torrent(
                 torrent=release.magnet,
+                save_path=savePath,
                 category="tv",
                 tags=["kinora", "validating", f"show-{show['id']}", f"s{matchedSeason:02d}e{matchedEpisode:02d}"],
                 paused=True,
             )
 
-            # Trigger validation immediately after adding
-            await validate_and_resume_torrent(
-                torrent_hash=torrentHash,
-                client=client,
-                profile=profile,
-                media_type="show",
-            )
-
-            # Record in download history
+            # Record in download history before validation so the row exists for it.
             await conn.execute(
                 """
                 INSERT INTO download_history (
                     media_id, media_type, torrent_hash, torrent_title,
-                    indexer, quality, size, status, download_client
+                    indexer, quality, size, magnet_link, torrent_url, info_hash,
+                    status, root_folder_id, download_client
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                ON CONFLICT (torrent_hash) DO UPDATE SET
+                    magnet_link = COALESCE(EXCLUDED.magnet_link, download_history.magnet_link),
+                    torrent_url = COALESCE(EXCLUDED.torrent_url, download_history.torrent_url),
+                    info_hash = COALESCE(EXCLUDED.info_hash, download_history.info_hash),
+                    root_folder_id = COALESCE(EXCLUDED.root_folder_id, download_history.root_folder_id),
+                    updated_at = NOW()
                 """,
                 show["id"],
                 "show",
@@ -301,8 +298,20 @@ async def check_and_grab_show(conn, release, show):
                 release.indexer if hasattr(release, "indexer") else "unknown",
                 release.quality,
                 release.size,
+                release.magnet,
+                release.torrent_url,
+                release.info_hash or torrentHash,
                 "downloading",
+                rootFolderId,
                 "qbittorrent",
+            )
+
+            # Trigger validation immediately after adding
+            await validate_and_resume_torrent(
+                torrent_hash=torrentHash,
+                client=client,
+                profile=profile,
+                media_type="show",
             )
 
             # Update show status

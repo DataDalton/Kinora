@@ -46,6 +46,7 @@ class DownloadHistory(DownloadHistoryBase):
     id: int
     status: str
     progress: float
+    grab_mode: Optional[str] = None
     error_message: Optional[str] = None
     was_upgrade: bool
     started_at: datetime

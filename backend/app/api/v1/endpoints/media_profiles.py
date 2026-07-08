@@ -5,9 +5,11 @@ import asyncpg
 
 from app.db import get_db
 from app.api.v1.endpoints.auth import get_current_user
+from app.services import naming_tokens
 
 try:
     import iso639
+
     ISO639_AVAILABLE = True
 except ImportError:
     ISO639_AVAILABLE = False
@@ -23,6 +25,7 @@ def validate_language_code(code: str) -> bool:
     except iso639.LanguageNotFoundError:
         return False
 
+
 router = APIRouter()
 
 
@@ -35,6 +38,7 @@ class MediaProfileCreate(BaseModel):
     - Position in list: determines preference (index 0 = most preferred)
     - If value NOT in list: rejected
     """
+
     name: str
     # Per-media-type quality: Movies
     movie_resolutions: Optional[List[str]] = []
@@ -68,8 +72,6 @@ class MediaProfileCreate(BaseModel):
     languages: Optional[List[str]] = []
     subtitle_languages: Optional[List[str]] = []
     upgrade_allowed: Optional[bool] = True
-    upgradeuntil_quality: Optional[str] = None
-    indexers: Optional[List[str]] = []
     uploaders: Optional[List[str]] = []
     release_groups: Optional[List[str]] = []
     regex_filters: Optional[List[str]] = []
@@ -81,6 +83,8 @@ class MediaProfileCreate(BaseModel):
     search_timeout: Optional[int] = 30
     max_retries: Optional[int] = 3
     max_results: Optional[int] = 100
+    min_seeds: Optional[int] = 1
+    upgrade_replace_policy: Optional[str] = "keep_old"
     # Naming formats
     movie_naming_format: Optional[str] = None
     movie_folder_format: Optional[str] = None
@@ -115,14 +119,52 @@ class MediaProfileCreate(BaseModel):
     # Torrent validation settings
     validation_enabled: Optional[bool] = True
     validation_mode: Optional[str] = "allowlist"
-    forbidden_extensions: Optional[List[str]] = ['.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.scr', '.com', '.ps1', '.vbs', '.jar']
+    forbidden_extensions: Optional[List[str]] = [
+        ".exe",
+        ".bat",
+        ".cmd",
+        ".sh",
+        ".msi",
+        ".dll",
+        ".scr",
+        ".com",
+        ".ps1",
+        ".vbs",
+        ".jar",
+    ]
     validation_failure_action: Optional[str] = "pause_notify"
-    movie_allowed_extensions: Optional[List[str]] = ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']
-    show_allowed_extensions: Optional[List[str]] = ['.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.ts']
-    anime_allowed_extensions: Optional[List[str]] = ['.mkv', '.mp4', '.avi', '.m4v']
-    music_allowed_extensions: Optional[List[str]] = ['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma']
+    movie_allowed_extensions: Optional[List[str]] = [
+        ".mkv",
+        ".mp4",
+        ".avi",
+        ".m4v",
+        ".mov",
+        ".wmv",
+        ".flv",
+        ".webm",
+        ".ts",
+    ]
+    show_allowed_extensions: Optional[List[str]] = [
+        ".mkv",
+        ".mp4",
+        ".avi",
+        ".m4v",
+        ".mov",
+        ".wmv",
+        ".flv",
+        ".webm",
+        ".ts",
+    ]
+    anime_allowed_extensions: Optional[List[str]] = [".mkv", ".mp4", ".avi", ".m4v"]
+    music_allowed_extensions: Optional[List[str]] = [".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma"]
+    # Seeding overrides (None = inherit global download-client default)
+    seed_ratio_limit: Optional[float] = None
+    seed_time_limit: Optional[int] = None
+    inactive_seed_time_limit: Optional[int] = None
+    seed_then_cleanup: Optional[bool] = False
+    auto_recovery: Optional[bool] = None
 
-    @field_validator('languages', 'subtitle_languages')
+    @field_validator("languages", "subtitle_languages")
     @classmethod
     def validate_languages(cls, v):
         """Validate all language codes in languages list"""
@@ -132,7 +174,7 @@ class MediaProfileCreate(BaseModel):
                     raise ValueError(f"Invalid ISO 639-1 language code: {code}")
         return v
 
-    @field_validator('anime_audio_language', 'anime_subtitle_language')
+    @field_validator("anime_audio_language", "anime_subtitle_language")
     @classmethod
     def validate_anime_languages(cls, v):
         """Validate anime language codes"""
@@ -143,17 +185,8 @@ class MediaProfileCreate(BaseModel):
 
 class MediaProfileUpdate(BaseModel):
     """Update media profile (all fields optional for partial updates)"""
+
     name: Optional[str] = None
-    # Legacy global settings
-    min_size: Optional[int] = None
-    max_size: Optional[int] = None
-    resolutions: Optional[List[str]] = None
-    codecs: Optional[List[str]] = None
-    sources: Optional[List[str]] = None
-    audio_codecs: Optional[List[str]] = None
-    audio_channels: Optional[List[str]] = None
-    hdr_formats: Optional[List[str]] = None
-    editions: Optional[List[str]] = None
     # Per-media-type quality: Movies
     movie_resolutions: Optional[List[str]] = None
     movie_codecs: Optional[List[str]] = None
@@ -186,8 +219,6 @@ class MediaProfileUpdate(BaseModel):
     languages: Optional[List[str]] = None
     subtitle_languages: Optional[List[str]] = None
     upgrade_allowed: Optional[bool] = None
-    upgradeuntil_quality: Optional[str] = None
-    indexers: Optional[List[str]] = None
     uploaders: Optional[List[str]] = None
     release_groups: Optional[List[str]] = None
     regex_filters: Optional[List[str]] = None
@@ -199,6 +230,8 @@ class MediaProfileUpdate(BaseModel):
     search_timeout: Optional[int] = None
     max_retries: Optional[int] = None
     max_results: Optional[int] = None
+    min_seeds: Optional[int] = None
+    upgrade_replace_policy: Optional[str] = None
     # Naming formats
     movie_naming_format: Optional[str] = None
     movie_folder_format: Optional[str] = None
@@ -239,8 +272,14 @@ class MediaProfileUpdate(BaseModel):
     show_allowed_extensions: Optional[List[str]] = None
     anime_allowed_extensions: Optional[List[str]] = None
     music_allowed_extensions: Optional[List[str]] = None
+    # Seeding overrides (None = inherit global download-client default)
+    seed_ratio_limit: Optional[float] = None
+    seed_time_limit: Optional[int] = None
+    inactive_seed_time_limit: Optional[int] = None
+    seed_then_cleanup: Optional[bool] = None
+    auto_recovery: Optional[bool] = None
 
-    @field_validator('languages', 'subtitle_languages')
+    @field_validator("languages", "subtitle_languages")
     @classmethod
     def validate_languages(cls, v):
         """Validate all language codes in languages list"""
@@ -250,7 +289,7 @@ class MediaProfileUpdate(BaseModel):
                     raise ValueError(f"Invalid ISO 639-1 language code: {code}")
         return v
 
-    @field_validator('anime_audio_language', 'anime_subtitle_language')
+    @field_validator("anime_audio_language", "anime_subtitle_language")
     @classmethod
     def validate_anime_languages(cls, v):
         """Validate anime language codes"""
@@ -261,18 +300,9 @@ class MediaProfileUpdate(BaseModel):
 
 class MediaProfileResponse(BaseModel):
     """Media profile response"""
+
     id: int
     name: str
-    # Legacy global settings
-    min_size: Optional[int]
-    max_size: Optional[int]
-    resolutions: Optional[List[str]]
-    codecs: Optional[List[str]]
-    sources: Optional[List[str]]
-    audio_codecs: Optional[List[str]]
-    audio_channels: Optional[List[str]]
-    hdr_formats: Optional[List[str]]
-    editions: Optional[List[str]]
     # Per-media-type quality: Movies
     movie_resolutions: Optional[List[str]]
     movie_codecs: Optional[List[str]]
@@ -305,7 +335,6 @@ class MediaProfileResponse(BaseModel):
     languages: Optional[List[str]]
     subtitle_languages: Optional[List[str]]
     upgrade_allowed: bool
-    indexers: Optional[List[str]]
     uploaders: Optional[List[str]]
     release_groups: Optional[List[str]]
     regex_filters: Optional[List[str]]
@@ -317,6 +346,8 @@ class MediaProfileResponse(BaseModel):
     search_timeout: Optional[int]
     max_retries: Optional[int]
     max_results: Optional[int]
+    min_seeds: Optional[int]
+    upgrade_replace_policy: Optional[str]
     # Naming formats
     movie_naming_format: Optional[str]
     movie_folder_format: Optional[str]
@@ -357,11 +388,59 @@ class MediaProfileResponse(BaseModel):
     show_allowed_extensions: Optional[List[str]]
     anime_allowed_extensions: Optional[List[str]]
     music_allowed_extensions: Optional[List[str]]
+    # Seeding overrides
+    seed_ratio_limit: Optional[float] = None
+    seed_time_limit: Optional[int] = None
+    inactive_seed_time_limit: Optional[int] = None
+    seed_then_cleanup: Optional[bool] = None
+    auto_recovery: Optional[bool] = None
+
+
+class NamingPreviewRequest(BaseModel):
+    """Render a naming/folder format against a representative sample item."""
+
+    media_type: str
+    folder_format: Optional[str] = None
+    naming_format: Optional[str] = None
+    illegal_char_replacement: Optional[str] = "_"
+    colon_replacement: Optional[str] = " -"
+
+
+@router.post("/naming-preview")
+async def naming_preview(
+    request: NamingPreviewRequest,
+    current_user=Depends(get_current_user),
+):
+    """Return a rendered example folder/file name plus any unrecognized tokens."""
+    context = naming_tokens.sample_context(request.media_type)
+    extension = ".flac" if request.media_type == "music" else ".mkv"
+    illegal = request.illegal_char_replacement or "_"
+    colon = request.colon_replacement or " -"
+
+    folder = (
+        naming_tokens.render(request.folder_format, context, illegal_replacement=illegal, colon_replacement=colon)
+        if request.folder_format
+        else ""
+    )
+    filename = (
+        naming_tokens.render(
+            request.naming_format, context, illegal_replacement=illegal, colon_replacement=colon, extension=extension
+        )
+        if request.naming_format
+        else ""
+    )
+    unknown = sorted(
+        set(
+            naming_tokens.unknown_tokens(request.folder_format or "")
+            + naming_tokens.unknown_tokens(request.naming_format or "")
+        )
+    )
+    return {"folder": folder, "file": filename, "unknown_tokens": unknown}
 
 
 @router.get("/", response_model=List[MediaProfileResponse])
 async def get_all_media_profiles(
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -374,7 +453,7 @@ async def get_all_media_profiles(
 @router.get("/{profile_id}", response_model=MediaProfileResponse)
 async def get_media_profile(
     profile_id: int,
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -394,16 +473,13 @@ async def get_media_profile(
 @router.post("/", response_model=MediaProfileResponse, status_code=status.HTTP_201_CREATED)
 async def create_media_profile(
     profile: MediaProfileCreate,
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
     Create a new media profile
     """
-    existing = await conn.fetchrow(
-        "SELECT id FROM media_profiles WHERE name = $1",
-        profile.name
-    )
+    existing = await conn.fetchrow("SELECT id FROM media_profiles WHERE name = $1", profile.name)
 
     if existing:
         raise HTTPException(
@@ -411,124 +487,17 @@ async def create_media_profile(
             detail=f"Media profile with name '{profile.name}' already exists",
         )
 
+    # Build the INSERT from the model so column changes need no positional bookkeeping.
+    data = profile.model_dump()
+    columns = list(data.keys())
+    placeholders = ", ".join(f"${i}" for i in range(1, len(columns) + 1))
     row = await conn.fetchrow(
-        """
-        INSERT INTO media_profiles (
-            name,
-            movie_resolutions, movie_codecs, movie_sources, movie_audio_codecs,
-            movie_audio_channels, movie_hdr_formats, movie_editions,
-            movie_min_size, movie_max_size,
-            show_resolutions, show_codecs, show_sources, show_audio_codecs,
-            show_audio_channels, show_hdr_formats,
-            show_min_size, show_max_size,
-            anime_resolutions, anime_codecs, anime_sources, anime_audio_codecs,
-            anime_audio_channels, anime_hdr_formats,
-            anime_min_size, anime_max_size,
-            languages, subtitle_languages, upgrade_allowed,
-            indexers, uploaders, release_groups, regex_filters,
-            seeder_weight, size_weight, recency_weight, search_sort_preference,
-            season_pack_preference, search_timeout, max_retries, max_results,
-            movie_naming_format, movie_folder_format, show_naming_format, show_folder_format,
-            anime_naming_format, anime_folder_format,
-            anime_subtitle_preference, anime_allow_hardsub, anime_prefer_dual_audio,
-            anime_audio_language, anime_subtitle_language,
-            movie_indexers, show_indexers, anime_indexers, music_indexers,
-            music_artist_folder_format, music_album_folder_format,
-            music_track_naming_format, music_multi_disc_format,
-            music_preferred_quality, music_embed_lyrics, music_embed_artwork,
-            media_server, use_hardlinks,
-            illegal_char_replacement, colon_replacement,
-            validation_enabled, validation_mode, forbidden_extensions,
-            validation_failure_action, movie_allowed_extensions, show_allowed_extensions,
-            anime_allowed_extensions, music_allowed_extensions
-        )
-        VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-            $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-            $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-            $31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
-            $41, $42, $43, $44, $45, $46, $47, $48, $49, $50,
-            $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
-            $61, $62, $63, $64, $65, $66, $67, $68, $69, $70,
-            $71, $72, $73, $74, $75
-        )
+        f"""
+        INSERT INTO media_profiles ({", ".join(columns)})
+        VALUES ({placeholders})
         RETURNING *
         """,
-        profile.name,
-        profile.movie_resolutions,
-        profile.movie_codecs,
-        profile.movie_sources,
-        profile.movie_audio_codecs,
-        profile.movie_audio_channels,
-        profile.movie_hdr_formats,
-        profile.movie_editions,
-        profile.movie_min_size,
-        profile.movie_max_size,
-        profile.show_resolutions,
-        profile.show_codecs,
-        profile.show_sources,
-        profile.show_audio_codecs,
-        profile.show_audio_channels,
-        profile.show_hdr_formats,
-        profile.show_min_size,
-        profile.show_max_size,
-        profile.anime_resolutions,
-        profile.anime_codecs,
-        profile.anime_sources,
-        profile.anime_audio_codecs,
-        profile.anime_audio_channels,
-        profile.anime_hdr_formats,
-        profile.anime_min_size,
-        profile.anime_max_size,
-        profile.languages,
-        profile.subtitle_languages,
-        profile.upgrade_allowed,
-        profile.indexers,
-        profile.uploaders,
-        profile.release_groups,
-        profile.regex_filters,
-        profile.seeder_weight,
-        profile.size_weight,
-        profile.recency_weight,
-        profile.search_sort_preference,
-        profile.season_pack_preference,
-        profile.search_timeout,
-        profile.max_retries,
-        profile.max_results,
-        profile.movie_naming_format,
-        profile.movie_folder_format,
-        profile.show_naming_format,
-        profile.show_folder_format,
-        profile.anime_naming_format,
-        profile.anime_folder_format,
-        profile.anime_subtitle_preference,
-        profile.anime_allow_hardsub,
-        profile.anime_prefer_dual_audio,
-        profile.anime_audio_language,
-        profile.anime_subtitle_language,
-        profile.movie_indexers,
-        profile.show_indexers,
-        profile.anime_indexers,
-        profile.music_indexers,
-        profile.music_artist_folder_format,
-        profile.music_album_folder_format,
-        profile.music_track_naming_format,
-        profile.music_multi_disc_format,
-        profile.music_preferred_quality,
-        profile.music_embed_lyrics,
-        profile.music_embed_artwork,
-        profile.media_server,
-        profile.use_hardlinks,
-        profile.illegal_char_replacement,
-        profile.colon_replacement,
-        profile.validation_enabled,
-        profile.validation_mode,
-        profile.forbidden_extensions,
-        profile.validation_failure_action,
-        profile.movie_allowed_extensions,
-        profile.show_allowed_extensions,
-        profile.anime_allowed_extensions,
-        profile.music_allowed_extensions,
+        *[data[col] for col in columns],
     )
 
     return dict(row)
@@ -538,16 +507,13 @@ async def create_media_profile(
 async def update_media_profile(
     profile_id: int,
     profile: MediaProfileUpdate,
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
     Update media profile
     """
-    existing = await conn.fetchrow(
-        "SELECT * FROM media_profiles WHERE id = $1",
-        profile_id
-    )
+    existing = await conn.fetchrow("SELECT * FROM media_profiles WHERE id = $1", profile_id)
 
     if not existing:
         raise HTTPException(
@@ -559,8 +525,17 @@ async def update_media_profile(
     update_values = []
     param_count = 1
 
+    # Fields where an explicit null means "inherit the global default", so null must
+    # be persisted rather than skipped.
+    nullable_fields = {
+        "seed_ratio_limit",
+        "seed_time_limit",
+        "inactive_seed_time_limit",
+        "auto_recovery",
+    }
+
     for field, value in profile.model_dump(exclude_unset=True).items():
-        if value is not None:
+        if value is not None or field in nullable_fields:
             update_fields.append(f"{field} = ${param_count}")
             update_values.append(value)
             param_count += 1
@@ -585,7 +560,7 @@ async def update_media_profile(
 @router.delete("/{profile_id}")
 async def delete_media_profile(
     profile_id: int,
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -603,7 +578,7 @@ async def delete_media_profile(
             SELECT 1 FROM albums WHERE media_profile_id = $1
         ) AS combined
         """,
-        profile_id
+        profile_id,
     )
 
     if in_use > 0:
@@ -612,10 +587,7 @@ async def delete_media_profile(
             detail=f"Cannot delete media profile. It is being used by {in_use} media item(s)",
         )
 
-    result = await conn.execute(
-        "DELETE FROM media_profiles WHERE id = $1",
-        profile_id
-    )
+    result = await conn.execute("DELETE FROM media_profiles WHERE id = $1", profile_id)
 
     if result == "DELETE 0":
         raise HTTPException(

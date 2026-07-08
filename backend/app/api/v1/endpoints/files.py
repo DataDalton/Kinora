@@ -6,7 +6,14 @@ import os
 import shutil
 
 from app.db import get_db
-from app.schemas.files import MediaFiles, FileInfo, RenameFileRequest, ManualImportRequest, DeleteFilesRequest, FileOperationResult
+from app.schemas.files import (
+    MediaFiles,
+    FileInfo,
+    RenameFileRequest,
+    ManualImportRequest,
+    DeleteFilesRequest,
+    FileOperationResult,
+)
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
 
@@ -79,8 +86,16 @@ async def get_media_files(
     table_name = validate_media_type(media_type)
 
     title_column = "title" if media_type != "artist" else "name"
+    # root_folder is display-only; resolve its path from the item's root_folder_id
+    # (the root_folder_path column was replaced by root_folder_id).
     row = await conn.fetchrow(
-        f"SELECT id, {title_column} as title, file_path, root_folder_path FROM {table_name} WHERE id = $1",
+        f"""
+        SELECT m.id, m.{title_column} as title, m.file_path,
+               rf.root_path as root_folder_path
+        FROM {table_name} m
+        LEFT JOIN root_folders rf ON m.root_folder_id = rf.id
+        WHERE m.id = $1
+        """,
         media_id,
     )
 
@@ -106,6 +121,17 @@ async def get_media_files(
             files = scan_directory(file_path)
             total_size = sum(f.size for f in files if not f.is_directory)
 
+    # Latest completed grab mode for this item (drives the "Manual" badge).
+    grab_mode = await conn.fetchval(
+        """
+        SELECT grab_mode FROM download_history
+        WHERE media_type = $1 AND media_id = $2 AND status = 'completed'
+        ORDER BY completed_at DESC NULLS LAST LIMIT 1
+        """,
+        media_type,
+        media_id,
+    )
+
     return MediaFiles(
         media_type=media_type,
         media_id=media_id,
@@ -113,6 +139,7 @@ async def get_media_files(
         root_folder=root_folder,
         files=files,
         total_size=total_size,
+        grab_mode=grab_mode,
     )
 
 

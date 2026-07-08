@@ -29,8 +29,8 @@ class TorrentInfo:
     downloaded: int  # bytes
     uploaded: int  # bytes
     size: int  # bytes
-    seeders: int
-    leechers: int
+    seeders: int  # connected seeds
+    leechers: int  # connected peers
     ratio: float
     eta: Optional[int] = None  # seconds
     save_path: Optional[str] = None
@@ -38,6 +38,23 @@ class TorrentInfo:
     tags: Optional[List[str]] = None
     added_on: Optional[int] = None  # timestamp
     completion_on: Optional[int] = None  # timestamp
+    # Seeding / share-limit state
+    ratio_limit: float = -1.0  # -1 use global, -2 unlimited
+    seeding_time: int = 0  # seconds spent seeding
+    seeding_time_limit: int = -1  # minutes, -1 global, -2 unlimited
+    inactive_seeding_time_limit: int = -1  # minutes, -1 global, -2 unlimited
+    force_start: bool = False
+    super_seeding: bool = False
+    sequential_download: bool = False
+    # Swarm health
+    availability: float = 0.0  # distributed copies available
+    num_complete: int = 0  # seeds in the swarm
+    num_incomplete: int = 0  # leechers in the swarm
+    # Per-torrent speed limits (bytes/s, 0 = unlimited)
+    dl_limit: int = 0
+    up_limit: int = 0
+    last_activity: Optional[int] = None  # timestamp of last upload/download
+    tracker: Optional[str] = None  # currently working tracker URL
 
 
 class BaseDownloadClient(ABC):
@@ -111,4 +128,68 @@ class BaseDownloadClient(ABC):
     @abstractmethod
     async def get_torrent_files(self, hash: str) -> List[Dict[str, Any]]:
         """Get list of files in torrent"""
+        pass
+
+    @abstractmethod
+    async def set_share_limits(
+        self,
+        hash: str,
+        ratio_limit: float,
+        seeding_time_limit: int,
+        inactive_seeding_time_limit: int = -1,
+    ) -> bool:
+        """Set per-torrent ratio and seeding-time limits.
+
+        Sentinels: -1 = use global limit, -2 = no limit. Times are in minutes.
+        """
+        pass
+
+    @abstractmethod
+    async def recheck_torrent(self, hash: str) -> bool:
+        """Force a data recheck of the torrent"""
+        pass
+
+    @abstractmethod
+    async def reannounce_torrent(self, hash: str) -> bool:
+        """Force a reannounce to trackers"""
+        pass
+
+    @abstractmethod
+    async def set_force_start(self, hash: str, enabled: bool) -> bool:
+        """Enable or disable force-start (bypass queue limits)"""
+        pass
+
+    @abstractmethod
+    async def set_super_seeding(self, hash: str, enabled: bool) -> bool:
+        """Enable or disable super-seeding mode"""
+        pass
+
+    @abstractmethod
+    async def set_sequential_download(self, hash: str, enabled: bool) -> bool:
+        """Enable or disable sequential download"""
+        pass
+
+    @abstractmethod
+    async def set_queue_priority(self, hash: str, action: str) -> bool:
+        """Change queue priority. action: 'top' | 'bottom' | 'up' | 'down'."""
+        pass
+
+    @abstractmethod
+    async def set_torrent_speed_limits(self, hash: str, download_limit: int, upload_limit: int) -> bool:
+        """Set per-torrent download/upload speed limits in bytes/s (0 = unlimited)"""
+        pass
+
+    @abstractmethod
+    async def set_global_speed_limits(self, download_limit: int, upload_limit: int) -> bool:
+        """Set global download/upload speed limits in bytes/s (0 = unlimited)"""
+        pass
+
+    @abstractmethod
+    async def toggle_alternative_speed_limits(self) -> bool:
+        """Toggle the alternative (scheduled) speed-limit mode"""
+        pass
+
+    @abstractmethod
+    async def get_transfer_info(self) -> Dict[str, Any]:
+        """Get global transfer info (speeds, totals, alt-speed state)"""
         pass

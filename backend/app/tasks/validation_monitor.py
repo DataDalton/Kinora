@@ -16,7 +16,14 @@ from datetime import datetime
 from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
-from app.services.torrent_validator import torrent_validator, ValidationResult
+from app.services.torrent_validator import (
+    torrent_validator,
+    ValidationResult,
+    write_validation_state,
+    STEP_PASSED,
+    STEP_FAILED,
+    STEP_PENDING,
+)
 from app.core.cache import cacheSet
 
 
@@ -58,6 +65,7 @@ async def async_check_validating_torrents():
                 # Check if metadata is ready
                 if not torrent_validator.is_metadata_ready(torrent):
                     pending_count += 1
+                    await write_validation_state(torrent.hash, STEP_PENDING)
                     continue
 
                 # Get file list from torrent
@@ -65,6 +73,7 @@ async def async_check_validating_torrents():
 
                 if not files:
                     pending_count += 1
+                    await write_validation_state(torrent.hash, STEP_PENDING)
                     continue
 
                 # Determine media type from tags
@@ -74,23 +83,26 @@ async def async_check_validating_torrents():
                 profile = await _get_profile_for_torrent(conn, torrent, media_type)
 
                 # Check if validation is enabled
-                if profile and not profile.get('validation_enabled', True):
+                if profile and not profile.get("validation_enabled", True):
                     # Skip validation, just mark as validated and resume
                     await _mark_validated(client, torrent)
                     validated_count += 1
                     print(f"Validation skipped (disabled in profile): {torrent.name}")
+                    await write_validation_state(torrent.hash, STEP_PASSED)
                     continue
 
                 # Get extension settings from profile
                 allowed = None
                 forbidden = None
-                failure_action = 'pause_notify'
+                failure_action = "pause_notify"
+                validation_mode = "allowlist"
 
                 if profile:
                     # Get media-type specific allowed extensions
-                    allowed = profile.get(f'{media_type}_allowed_extensions') or profile.get('allowed_extensions')
-                    forbidden = profile.get('forbidden_extensions')
-                    failure_action = profile.get('validation_failure_action', 'pause_notify')
+                    allowed = profile.get(f"{media_type}_allowed_extensions")
+                    forbidden = profile.get("forbidden_extensions")
+                    failure_action = profile.get("validation_failure_action", "pause_notify")
+                    validation_mode = profile.get("validation_mode", "allowlist")
 
                 # Run validation
                 report = torrent_validator.validate_files(
@@ -98,6 +110,7 @@ async def async_check_validating_torrents():
                     media_type=media_type,
                     allowed_extensions=allowed,
                     forbidden_extensions=forbidden,
+                    mode=validation_mode,
                 )
 
                 if report.result == ValidationResult.PASSED:
@@ -113,15 +126,23 @@ async def async_check_validating_torrents():
                         SET status = 'downloading', updated_at = NOW()
                         WHERE torrent_hash = $1 AND status = 'downloading'
                         """,
-                        torrent.hash
+                        torrent.hash,
                     )
+                    await write_validation_state(torrent.hash, STEP_PASSED, report)
+                    try:
+                        from app.services.seeding import apply_seeding_limits
+                        from app.services.media_profile import MediaProfile
+
+                        mp = MediaProfile.from_row(profile) if profile else None
+                        await apply_seeding_limits(client, torrent.hash, mp)
+                    except Exception as e:
+                        print(f"Could not apply seeding limits: {e}")
                 else:
                     # Validation failed - execute failure action
-                    await _handle_validation_failure(
-                        client, conn, torrent, report, failure_action, media_type
-                    )
+                    await _handle_validation_failure(client, conn, torrent, report, failure_action, media_type)
                     failed_count += 1
                     print(f"Validation failed: {torrent.name} - {report.message}")
+                    await write_validation_state(torrent.hash, STEP_FAILED, report)
 
         return {
             "status": "success",
@@ -139,11 +160,15 @@ async def async_check_validating_torrents():
 
     finally:
         elapsedMs = int((time.time() - startTime) * 1000)
-        await cacheSet(f"task:last_run:{taskName}", {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "status": status,
-            "durationMs": elapsedMs,
-        }, expire=86400)
+        await cacheSet(
+            f"task:last_run:{taskName}",
+            {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "status": status,
+                "durationMs": elapsedMs,
+            },
+            expire=86400,
+        )
 
 
 async def _mark_validated(client, torrent):
@@ -174,7 +199,7 @@ async def _handle_validation_failure(client, conn, torrent, report, failure_acti
             WHERE torrent_hash = $2
             """,
             report.message,
-            torrent.hash
+            torrent.hash,
         )
 
         # Update media status back to wanted
@@ -200,7 +225,7 @@ async def _handle_validation_failure(client, conn, torrent, report, failure_acti
             WHERE torrent_hash = $2
             """,
             report.message,
-            torrent.hash
+            torrent.hash,
         )
 
         print(f"Torrent quarantined: {torrent.name}")
@@ -217,7 +242,7 @@ async def _handle_validation_failure(client, conn, torrent, report, failure_acti
             WHERE torrent_hash = $2
             """,
             report.message,
-            torrent.hash
+            torrent.hash,
         )
 
         print(f"Torrent paused due to validation failure: {torrent.name}")
@@ -234,7 +259,7 @@ async def _reset_media_status(conn, tags: list, media_type: str):
             try:
                 media_id = int(tag.split("-")[1])
                 break
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 continue
 
     if not media_id:
@@ -248,10 +273,7 @@ async def _reset_media_status(conn, tags: list, media_type: str):
     }.get(media_type)
 
     if table_name:
-        await conn.execute(
-            f"UPDATE {table_name} SET status = 'wanted', updated_at = NOW() WHERE id = $1",
-            media_id
-        )
+        await conn.execute(f"UPDATE {table_name} SET status = 'wanted', updated_at = NOW() WHERE id = $1", media_id)
 
 
 def _extract_media_type_from_tags(tags: list) -> str:
@@ -283,7 +305,7 @@ async def _get_profile_for_torrent(conn, torrent, media_type: str) -> dict:
             try:
                 media_id = int(tag.split("-")[1])
                 break
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 continue
 
     if not media_id:
@@ -297,17 +319,11 @@ async def _get_profile_for_torrent(conn, torrent, media_type: str) -> dict:
         "album": "albums",
     }.get(media_type, "movies")
 
-    media = await conn.fetchrow(
-        f"SELECT media_profile_id FROM {table_name} WHERE id = $1",
-        media_id
-    )
+    media = await conn.fetchrow(f"SELECT media_profile_id FROM {table_name} WHERE id = $1", media_id)
 
     if not media or not media.get("media_profile_id"):
         return None
 
-    profile = await conn.fetchrow(
-        "SELECT * FROM media_profiles WHERE id = $1",
-        media["media_profile_id"]
-    )
+    profile = await conn.fetchrow("SELECT * FROM media_profiles WHERE id = $1", media["media_profile_id"])
 
     return dict(profile) if profile else None

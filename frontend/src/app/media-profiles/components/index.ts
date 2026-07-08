@@ -1,28 +1,21 @@
 // Types
-export * from './types';
+export * from "./types";
 
 // Constants
-export * from './constants';
+export * from "./constants";
 
 // Shared components
-export * from './shared';
+export * from "./shared";
 
 // Navigation
-export { default as Navigation } from './Navigation';
-export type { NavigationProps } from './Navigation';
+export { default as Navigation } from "./Navigation";
+export type { NavigationProps } from "./Navigation";
 
 // Group components (new two-level navigation structure)
-export * from './groups';
+export * from "./groups";
 
-// Legacy components (kept for backward compatibility)
-// Profile section
-export * from './Profile';
-
-// Search sections
-export * from './Search';
-
-// Naming sections
-export * from './Naming';
+// Profile section (imported directly by ProfileGroup)
+export * from "./Profile";
 
 // Quality sections
-export * from './Quality';
+export * from "./Quality";

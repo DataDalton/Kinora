@@ -20,7 +20,6 @@ from app.services.download_clients.qbittorrent import QBittorrentClient
 from app.core.config import settings
 from app.services.folder_selector import folderSelector
 
-
 router = APIRouter()
 
 
@@ -44,6 +43,7 @@ def decrypt_value(encrypted_value: str) -> str:
 
 class SetupStatusResponse(BaseModel):
     """Response for setup status check"""
+
     is_setup_complete: bool
     has_download_client: bool
     has_tmdb_key: bool
@@ -53,6 +53,7 @@ class SetupStatusResponse(BaseModel):
 
 class QBittorrentSetupRequest(BaseModel):
     """Request to configure qBittorrent"""
+
     name: str = Field(..., description="Display name for this client")
     host: str = Field(..., description="IP or hostname")
     port: int = Field(..., ge=1, le=65535, description="Port number")
@@ -63,11 +64,13 @@ class QBittorrentSetupRequest(BaseModel):
 
 class TMDBSetupRequest(BaseModel):
     """Request to configure TMDB API key"""
+
     api_key: str = Field(..., min_length=32, description="TMDB API v3 key")
 
 
 class RootFolderSetupItem(BaseModel):
     """Single root folder configuration for setup"""
+
     name: str = Field(..., description="Display name for this folder")
     root_path: str = Field(..., description="Root folder path for organized media")
     download_path: Optional[str] = Field(None, description="Download folder path (auto-generated if not provided)")
@@ -75,6 +78,7 @@ class RootFolderSetupItem(BaseModel):
 
 class SelectionModeConfig(BaseModel):
     """Per-media-type selection mode configuration"""
+
     movies: str = Field(default="most_free_space", description="Selection mode for movies")
     shows: str = Field(default="most_free_space", description="Selection mode for TV shows")
     anime: str = Field(default="most_free_space", description="Selection mode for anime")
@@ -83,11 +87,14 @@ class SelectionModeConfig(BaseModel):
 
 class RootFoldersSetupRequest(BaseModel):
     """Request to configure root folders - supports multiple folders per media type"""
+
     movies: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for movies")
     shows: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for TV shows")
     anime: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for anime")
     music: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for music")
-    selection_modes: SelectionModeConfig = Field(default_factory=SelectionModeConfig, description="Selection mode per media type")
+    selection_modes: SelectionModeConfig = Field(
+        default_factory=SelectionModeConfig, description="Selection mode per media type"
+    )
 
 
 @router.get("/status", response_model=SetupStatusResponse)
@@ -99,23 +106,18 @@ async def get_setup_status(
     Check if setup is complete and what steps are remaining.
     """
     # Check for download client
-    has_download_client = await conn.fetchval(
-        "SELECT EXISTS(SELECT 1 FROM download_clients WHERE is_enabled = TRUE)"
-    )
+    has_download_client = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM download_clients WHERE is_enabled = TRUE)")
 
     # Check for TMDB key
-    tmdb_key_row = await conn.fetchrow(
-        "SELECT value FROM app_settings WHERE key = 'tmdb_api_key'"
-    )
-    has_tmdb_key = bool(tmdb_key_row and tmdb_key_row['value'])
+    tmdb_key_row = await conn.fetchrow("SELECT value FROM app_settings WHERE key = 'tmdb_api_key'")
+    has_tmdb_key = bool(tmdb_key_row and tmdb_key_row["value"])
 
     # Check for root folders - requires at least one active folder per media type
-    mediaTypes = ['movies', 'shows', 'anime', 'music']
+    mediaTypes = ["movies", "shows", "anime", "music"]
     hasAllFolders = True
     for mediaType in mediaTypes:
         folderCount = await conn.fetchval(
-            "SELECT COUNT(*) FROM root_folders WHERE media_type = $1 AND is_active = TRUE",
-            mediaType
+            "SELECT COUNT(*) FROM root_folders WHERE media_type = $1 AND is_active = TRUE", mediaType
         )
         if not folderCount or folderCount == 0:
             hasAllFolders = False
@@ -132,7 +134,7 @@ async def get_setup_status(
         has_download_client=has_download_client,
         has_tmdb_key=has_tmdb_key,
         has_root_folders=has_root_folders,
-        is_admin=is_admin
+        is_admin=is_admin,
     )
 
 
@@ -154,7 +156,7 @@ async def setup_qbittorrent(
             port=config.port,
             username=config.username,
             password=config.password,
-            use_ssl=config.use_ssl
+            use_ssl=config.use_ssl,
         )
 
         # Test connection
@@ -163,7 +165,7 @@ async def setup_qbittorrent(
         if not is_connected:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to connect to qBittorrent. Check host, port, and credentials."
+                detail="Failed to connect to qBittorrent. Check host, port, and credentials.",
             )
 
         # Add default categories for media types (ignore if they already exist)
@@ -188,17 +190,14 @@ async def setup_qbittorrent(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"qBittorrent connection test failed: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"qBittorrent connection test failed: {str(e)}"
         )
 
     # Encrypt password
     encrypted_password = encrypt_value(config.password)
 
     # Save to database (mark any existing default as non-default)
-    await conn.execute(
-        "UPDATE download_clients SET is_default = FALSE WHERE is_default = TRUE"
-    )
+    await conn.execute("UPDATE download_clients SET is_default = FALSE WHERE is_default = TRUE")
 
     await conn.execute(
         """
@@ -217,7 +216,7 @@ async def setup_qbittorrent(
         config.use_ssl,
         True,
         True,
-        "success"
+        "success",
     )
 
     return {"status": "success", "message": "qBittorrent configured successfully"}
@@ -236,21 +235,16 @@ async def setup_tmdb(
 
     # Test the API key
     from app.core.http_client import http_get
+
     try:
-        response = await http_get(
-            f"https://api.themoviedb.org/3/configuration?api_key={config.api_key}"
-        )
+        response = await http_get(f"https://api.themoviedb.org/3/configuration?api_key={config.api_key}")
         if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid TMDB API key"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TMDB API key")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to validate TMDB API key: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to validate TMDB API key: {str(e)}"
         )
 
     # Save encrypted API key
@@ -268,7 +262,7 @@ async def setup_tmdb(
         "string",
         True,
         "api_keys",
-        "TMDB API v3 Key for fetching movie and TV show metadata"
+        "TMDB API v3 Key for fetching movie and TV show metadata",
     )
 
     return {"status": "success", "message": "TMDB API key configured successfully"}
@@ -311,11 +305,7 @@ async def setup_root_folders(
                     fillThresholdPercent=None,
                     fillThresholdGb=None,
                 )
-                createdFolders.append({
-                    "mediaType": mediaType,
-                    "name": folderItem.name,
-                    "id": folder["id"]
-                })
+                createdFolders.append({"mediaType": mediaType, "name": folderItem.name, "id": folder["id"]})
             except ValueError as e:
                 errors.append(f"{mediaType}/{folderItem.name}: {str(e)}")
             except Exception as e:
@@ -330,7 +320,7 @@ async def setup_root_folders(
             ON CONFLICT (media_type) DO UPDATE SET selection_mode = $2, updated_at = NOW()
             """,
             mediaType,
-            selectionMode
+            selectionMode,
         )
 
     if errors:
@@ -340,18 +330,17 @@ async def setup_root_folders(
                 "status": "partial",
                 "message": f"Created {len(createdFolders)} folders with {len(errors)} errors",
                 "created": createdFolders,
-                "errors": errors
+                "errors": errors,
             }
         # If all folders failed, raise an error
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create root folders: {'; '.join(errors)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to create root folders: {'; '.join(errors)}"
         )
 
     return {
         "status": "success",
         "message": f"Root folders configured successfully ({len(createdFolders)} folders created)",
-        "created": createdFolders
+        "created": createdFolders,
     }
 
 
@@ -378,16 +367,37 @@ async def mark_setup_complete(
             missing.append("root folders")
 
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Setup incomplete. Missing: {', '.join(missing)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Setup incomplete. Missing: {', '.join(missing)}"
         )
 
     # Mark setup as complete and initialize system settings
     settings_to_create = [
-        ("setup_complete", "true", "boolean", False, "internal", "Indicates if initial setup wizard has been completed"),
+        (
+            "setup_complete",
+            "true",
+            "boolean",
+            False,
+            "internal",
+            "Indicates if initial setup wizard has been completed",
+        ),
         ("allow_user_registration", "true", "boolean", False, "system", "Allow new users to register accounts"),
         ("rss_sync_interval", "15", "integer", False, "system", "RSS feed sync interval in minutes"),
-        ("auto_search_interval", "60", "integer", False, "system", "Automatic search interval in minutes for monitored content"),
+        (
+            "auto_search_interval",
+            "60",
+            "integer",
+            False,
+            "system",
+            "Automatic search interval in minutes for monitored content",
+        ),
+        (
+            "upgrade_search_interval",
+            "360",
+            "integer",
+            False,
+            "system",
+            "Upgrade search interval in minutes for quality upgrades",
+        ),
     ]
 
     for key, value, value_type, is_encrypted, category, description in settings_to_create:
@@ -397,7 +407,12 @@ async def mark_setup_complete(
             VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
             """,
-            key, value, value_type, is_encrypted, category, description
+            key,
+            value,
+            value_type,
+            is_encrypted,
+            category,
+            description,
         )
 
     return {"status": "success", "message": "Setup completed successfully"}
@@ -405,6 +420,7 @@ async def mark_setup_complete(
 
 class DirectoryItem(BaseModel):
     """Response for directory browser item"""
+
     name: str
     path: str
     is_directory: bool
@@ -412,6 +428,7 @@ class DirectoryItem(BaseModel):
 
 class BrowseDirectoryResponse(BaseModel):
     """Response for directory browsing"""
+
     current_path: str
     parent_path: Optional[str]
     items: List[DirectoryItem]
@@ -430,44 +447,32 @@ async def browse_directory(
     try:
         # Handle Windows drive root listing
         import platform
-        if platform.system() == 'Windows' and (path == '/' or path == ''):
+
+        if platform.system() == "Windows" and (path == "/" or path == ""):
             # List available drives on Windows
             import string
             from pathlib import Path as PathLib
+
             drives = []
             for letter in string.ascii_uppercase:
                 drive_path = f"{letter}:\\"
                 if PathLib(drive_path).exists():
-                    drives.append(DirectoryItem(
-                        name=f"{letter}:",
-                        path=drive_path,
-                        is_directory=True
-                    ))
-            return BrowseDirectoryResponse(
-                current_path="Computer",
-                parent_path=None,
-                items=drives
-            )
+                    drives.append(DirectoryItem(name=f"{letter}:", path=drive_path, is_directory=True))
+            return BrowseDirectoryResponse(current_path="Computer", parent_path=None, items=drives)
 
         # Normalize and validate path
         target_path = Path(path).resolve()
 
         # Check if path exists and is a directory
         if not target_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Path does not exist: {path}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Path does not exist: {path}")
 
         if not target_path.is_dir():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Path is not a directory: {path}")
 
         # Get parent path
         # On Windows, if we're at drive root (e.g., C:\), go back to drive list
-        if platform.system() == 'Windows' and target_path.parent == target_path:
+        if platform.system() == "Windows" and target_path.parent == target_path:
             parent_path = "/"  # Signal to go back to drive listing
         else:
             parent_path = str(target_path.parent) if target_path.parent != target_path else None
@@ -477,36 +482,24 @@ async def browse_directory(
         try:
             for entry in sorted(target_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
                 # Skip hidden files/folders on Unix
-                if entry.name.startswith('.'):
+                if entry.name.startswith("."):
                     continue
 
                 try:
                     is_dir = entry.is_dir()
-                    items.append(DirectoryItem(
-                        name=entry.name,
-                        path=str(entry),
-                        is_directory=is_dir
-                    ))
-                except (PermissionError, OSError):
+                    items.append(DirectoryItem(name=entry.name, path=str(entry), is_directory=is_dir))
+                except PermissionError, OSError:
                     # Skip files/folders we can't access
                     continue
 
         except PermissionError:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied accessing: {path}"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission denied accessing: {path}")
 
-        return BrowseDirectoryResponse(
-            current_path=str(target_path),
-            parent_path=parent_path,
-            items=items
-        )
+        return BrowseDirectoryResponse(current_path=str(target_path), parent_path=parent_path, items=items)
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error browsing directory: {str(e)}"
         )

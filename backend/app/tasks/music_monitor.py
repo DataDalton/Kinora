@@ -55,7 +55,7 @@ async def async_search_wanted_music():
         async with pool.acquire() as conn:
             # Get all wanted albums (monitored but not downloaded)
             wanted_albums = await conn.fetch("""
-                SELECT a.*, ar.name as artist_name, ar.root_folder_path as artist_root_folder
+                SELECT a.*, ar.name as artist_name
                 FROM albums a
                 LEFT JOIN artists ar ON a.artist_id = ar.id
                 WHERE a.monitored = TRUE
@@ -73,14 +73,14 @@ async def async_search_wanted_music():
                 album_title = album["title"]
                 query = f"{artist_name} {album_title}"
 
-                # Get quality profile
+                # Get media profile
                 profile = None
                 if album["media_profile_id"]:
                     profile_row = await conn.fetchrow(
-                        "SELECT * FROM quality_profiles WHERE id = $1", album["media_profile_id"]
+                        "SELECT * FROM media_profiles WHERE id = $1", album["media_profile_id"]
                     )
                     if profile_row:
-                        profile = MediaProfile(**dict(profile_row))
+                        profile = MediaProfile.from_row(dict(profile_row))
 
                 if not profile:
                     # Use default music profile settings
@@ -90,37 +90,19 @@ async def async_search_wanted_music():
                         music_preferred_quality=["flac", "mp3_320", "mp3_256"],
                     )
 
-                # Determine save path
-                save_path = album.get("root_folder_path") or album.get("artist_root_folder")
-
-                # Search and download
+                # Search and download. The paired folder (hardlink target + organize path)
+                # is resolved from the album's assigned root folder inside the engine.
                 try:
                     torrent_hash = await search_engine.search_music_and_download(
                         query=query,
                         profile=profile,
-                        save_path=save_path,
                         tags=["kinora", "music", f"album-{album['id']}"],
+                        history_conn=conn,
+                        history_media_id=album["id"],
                     )
 
                     if torrent_hash:
-                        # Record download
-                        await conn.execute(
-                            """
-                            INSERT INTO download_history (
-                                media_id, media_type, torrent_hash, torrent_title,
-                                indexer, status, download_client
-                            )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7)
-                            """,
-                            album["id"],
-                            "album",
-                            torrent_hash,
-                            query,
-                            "1337x",
-                            "downloading",
-                            "qbittorrent",
-                        )
-
+                        # The engine records download_history (with re-addable source).
                         # Update album status
                         await conn.execute(
                             """
@@ -211,7 +193,7 @@ async def async_check_new_releases():
                             """
                             INSERT INTO albums (
                                 title, cover, cover_medium, cover_big, cover_xl, release_date,
-                                deezer_id, artist_id, monitored, root_folder_path,
+                                deezer_id, artist_id, monitored, root_folder_id,
                                 nb_tracks, record_type, artist_name, status
                             )
                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, $9, $10, $11, $12, 'wanted')
@@ -224,7 +206,7 @@ async def async_check_new_releases():
                             parse_release_date(album_info.get("release_date")),
                             album_info.get("id"),
                             artist["id"],
-                            artist["root_folder_path"],
+                            artist.get("root_folder_id"),
                             album_info.get("nb_tracks"),
                             album_info.get("record_type"),
                             artist["name"],
@@ -323,17 +305,18 @@ async def async_search_discography(artist_id: int):
 
                 if album["media_profile_id"]:
                     profile_row = await conn.fetchrow(
-                        "SELECT * FROM quality_profiles WHERE id = $1", album["media_profile_id"]
+                        "SELECT * FROM media_profiles WHERE id = $1", album["media_profile_id"]
                     )
                     if profile_row:
-                        profile = MediaProfile(**dict(profile_row))
+                        profile = MediaProfile.from_row(dict(profile_row))
 
                 try:
                     torrent_hash = await search_engine.search_music_and_download(
                         query=query,
                         profile=profile,
-                        save_path=album.get("root_folder_path") or artist.get("root_folder_path"),
                         tags=["kinora", "music", "discography", f"album-{album['id']}"],
+                        history_conn=conn,
+                        history_media_id=album["id"],
                     )
 
                     if torrent_hash:

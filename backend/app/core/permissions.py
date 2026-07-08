@@ -4,9 +4,9 @@ Permission system definitions and core functions.
 Provides permission definitions, hierarchy mappings, default groups,
 and database query functions for checking user permissions.
 """
+
 from typing import Dict, List, Set, Any
 import asyncpg
-
 
 # Permission definitions with display name and category
 # Format: 'permission.name': {'displayName': 'Display Name', 'category': 'category'}
@@ -35,6 +35,11 @@ PERMISSIONS: Dict[str, Dict[str, str]] = {
     "system.logs": {
         "displayName": "View Logs",
         "description": "View system logs and activity",
+        "category": "system",
+    },
+    "system.downloads": {
+        "displayName": "Manage Downloads",
+        "description": "Monitor and control the download client, seeding, and VPN",
         "category": "system",
     },
     # Movies permissions
@@ -174,6 +179,7 @@ PERMISSION_HIERARCHY: Dict[str, List[str]] = {
         "system.users",
         "system.groups",
         "system.logs",
+        "system.downloads",
         "movies.view",
         "movies.manage",
         "movies.request",
@@ -240,6 +246,7 @@ DEFAULT_GROUPS: List[Dict[str, Any]] = [
             "shows.approve",
             "anime.approve",
             "music.approve",
+            "system.downloads",
             "users.password.self",
         ],
     },
@@ -354,9 +361,7 @@ async def getUserPermissions(conn: asyncpg.Connection, userId: int) -> Set[str]:
     return expandPermissions(basePermissions)
 
 
-async def userHasPermission(
-    conn: asyncpg.Connection, userId: int, permission: str
-) -> bool:
+async def userHasPermission(conn: asyncpg.Connection, userId: int, permission: str) -> bool:
     """
     Check if a user has a specific permission.
 
@@ -372,9 +377,7 @@ async def userHasPermission(
     return permission in userPermissions
 
 
-async def userHasAnyPermission(
-    conn: asyncpg.Connection, userId: int, permissions: List[str]
-) -> bool:
+async def userHasAnyPermission(conn: asyncpg.Connection, userId: int, permissions: List[str]) -> bool:
     """
     Check if a user has any of the specified permissions.
 
@@ -393,9 +396,7 @@ async def userHasAnyPermission(
     return bool(userPermissions.intersection(permissions))
 
 
-async def userHasAllPermissions(
-    conn: asyncpg.Connection, userId: int, permissions: List[str]
-) -> bool:
+async def userHasAllPermissions(conn: asyncpg.Connection, userId: int, permissions: List[str]) -> bool:
     """
     Check if a user has all of the specified permissions.
 
@@ -447,9 +448,7 @@ async def getUserGroups(conn: asyncpg.Connection, userId: int) -> List[Dict[str,
     ]
 
 
-async def getGroupPermissions(
-    conn: asyncpg.Connection, groupId: int
-) -> List[str]:
+async def getGroupPermissions(conn: asyncpg.Connection, groupId: int) -> List[str]:
     """
     Get all permission names assigned to a group.
 
@@ -544,9 +543,7 @@ async def assignUserToGroup(
     )
 
 
-async def removeUserFromGroup(
-    conn: asyncpg.Connection, userId: int, groupId: int
-) -> None:
+async def removeUserFromGroup(conn: asyncpg.Connection, userId: int, groupId: int) -> None:
     """
     Remove a user from a permission group.
 
@@ -588,9 +585,7 @@ async def setUserGroups(
         )
 
 
-async def validateGroupIds(
-    conn: asyncpg.Connection, groupIds: List[int]
-) -> List[int]:
+async def validateGroupIds(conn: asyncpg.Connection, groupIds: List[int]) -> List[int]:
     """
     Validate that all group IDs exist and return the valid ones.
 
@@ -610,9 +605,7 @@ async def validateGroupIds(
     return [r["id"] for r in result]
 
 
-async def userInGroup(
-    conn: asyncpg.Connection, userId: int, groupName: str
-) -> bool:
+async def userInGroup(conn: asyncpg.Connection, userId: int, groupName: str) -> bool:
     """
     Check if a user belongs to a specific group by name.
 

@@ -1,4 +1,5 @@
 "use client";
+import NamingPreview from "../shared/NamingPreview";
 
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -505,14 +506,11 @@ export default function AnimeGroup({
 							}
 							className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 						/>
-						<div className="mt-2 p-2 bg-muted rounded border border-border">
-							<p className="text-xs font-semibold text-muted-foreground mb-1">
-								Example:
-							</p>
-							<p className="text-xs font-mono">
-								Anime Title (2024) [anilistid-98765]
-							</p>
-						</div>
+						<NamingPreview
+							mediaType="anime"
+							folderFormat={formData.anime_folder_format}
+							namingFormat={formData.anime_naming_format}
+						/>
 					</div>
 
 					{/* Anime File Naming Format */}
@@ -543,15 +541,11 @@ export default function AnimeGroup({
 							className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 							rows={2}
 						/>
-						<div className="mt-2 p-2 bg-muted rounded border border-border">
-							<p className="text-xs font-semibold text-muted-foreground mb-1">
-								Example:
-							</p>
-							<p className="text-xs font-mono">
-								Anime Title (2024) [tmdbid-54321] -
-								[Bluray-1080p][AAC 2.0][JA][10bit][x265]-GROUP
-							</p>
-						</div>
+						<NamingPreview
+							mediaType="anime"
+							folderFormat={formData.anime_folder_format}
+							namingFormat={formData.anime_naming_format}
+						/>
 					</div>
 
 					{/* Naming Builder Modal */}

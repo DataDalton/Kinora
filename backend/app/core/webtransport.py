@@ -1,4 +1,4 @@
-from typing import Dict, Set, Callable, Any
+from typing import Dict, Set, Callable, Any, Optional
 import asyncio
 import json
 from datetime import datetime
@@ -86,58 +86,126 @@ class WebTransportManager:
         """
         Send download progress update to user
         """
-        await self.send_to_user(user_id, {
-            "type": "download_progress",
-            "torrent_hash": torrent_hash,
-            "progress": progress,
-            "download_speed": speed,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "download_progress",
+                "torrent_hash": torrent_hash,
+                "progress": progress,
+                "download_speed": speed,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     async def send_media_added(self, user_id: int, media_type: str, media_id: int, title: str) -> None:
         """
         Notify user that media was added to library
         """
-        await self.send_to_user(user_id, {
-            "type": "media_added",
-            "media_type": media_type,
-            "media_id": media_id,
-            "title": title,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "media_added",
+                "media_type": media_type,
+                "media_id": media_id,
+                "title": title,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     async def send_search_complete(self, user_id: int, query: str, results_count: int) -> None:
         """
         Notify user that search is complete
         """
-        await self.send_to_user(user_id, {
-            "type": "search_complete",
-            "query": query,
-            "results_count": results_count,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "search_complete",
+                "query": query,
+                "results_count": results_count,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+    async def send_validation_update(
+        self,
+        user_id: int,
+        torrent_hash: str,
+        step: str,
+        report: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Send a torrent validation step update to user
+        """
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "validation_update",
+                "torrent_hash": torrent_hash,
+                "step": step,
+                "report": report,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+    async def send_vpn_alert(
+        self,
+        user_id: int,
+        severity: str,
+        message: str,
+    ) -> None:
+        """
+        Send a VPN connection-safety alert to user
+        """
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "vpn_alert",
+                "severity": severity,
+                "message": message,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+    async def send_notification(self, user_id: int, notification: Dict[str, Any]) -> None:
+        """
+        Push a persisted in-app notification to user
+        """
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "notification",
+                "notification": notification,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     async def send_download_complete(self, user_id: int, media_id: int, media_type: str, title: str) -> None:
         """
         Notify user that download completed
         """
-        await self.send_to_user(user_id, {
-            "type": "download_complete",
-            "media_id": media_id,
-            "media_type": media_type,
-            "title": title,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "download_complete",
+                "media_id": media_id,
+                "media_type": media_type,
+                "title": title,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     async def send_rss_update(self, user_id: int, new_releases_count: int) -> None:
         """
         Notify user of new RSS releases
         """
-        await self.send_to_user(user_id, {
-            "type": "rss_update",
-            "new_releases": new_releases_count,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "rss_update",
+                "new_releases": new_releases_count,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     async def send_transcoding_progress(
         self,
@@ -152,16 +220,19 @@ class WebTransportManager:
         """
         Send transcoding progress update to user
         """
-        await self.send_to_user(user_id, {
-            "type": "transcoding_progress",
-            "job_id": job_id,
-            "progress": progress,
-            "fps": fps,
-            "speed": speed,
-            "frame": frame,
-            "bitrate": bitrate,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "transcoding_progress",
+                "job_id": job_id,
+                "progress": progress,
+                "fps": fps,
+                "speed": speed,
+                "frame": frame,
+                "bitrate": bitrate,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     async def send_transcoding_complete(
         self,
@@ -174,14 +245,17 @@ class WebTransportManager:
         """
         Notify user that transcoding completed
         """
-        await self.send_to_user(user_id, {
-            "type": "transcoding_complete",
-            "job_id": job_id,
-            "media_title": media_title,
-            "success": success,
-            "error_message": error_message,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.send_to_user(
+            user_id,
+            {
+                "type": "transcoding_complete",
+                "job_id": job_id,
+                "media_title": media_title,
+                "success": success,
+                "error_message": error_message,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
 
     def get_active_users(self) -> Set[int]:
         """

@@ -17,6 +17,127 @@ from app.services.indexers.nyaa import NyaaIndexer
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.torrent_validator import validate_and_resume_torrent
+from app.services.folder_selector import folderSelector
+
+# Media type -> root_folders.media_type scope, and -> the item table that stores root_folder_id.
+_FOLDER_MEDIA_TYPE = {
+    "movie": "movies",
+    "show": "shows",
+    "anime": "anime",
+    "album": "music",
+    "music": "music",
+    "track": "music",
+}
+_ITEM_TABLE = {
+    "movie": "movies",
+    "show": "shows",
+    "anime": "anime",
+    "album": "albums",
+    "music": "albums",
+    "track": "albums",
+}
+
+
+async def _resolve_grab_folder(conn, media_type, media_id):
+    """
+    Pick the paired root folder for an automated grab: the item's assigned folder when it has
+    one, else the configured selection for its type. The folder's download_path is where the
+    torrent is added (same filesystem as root_path so the completed files hardlink into the
+    library), and its id is recorded so the organizer knows where to place the release.
+    Returns the folder dict, or None when no folder is configured.
+    """
+    if conn is None or not media_type:
+        return None
+    folder_media_type = _FOLDER_MEDIA_TYPE.get(media_type, media_type)
+    override = None
+    table = _ITEM_TABLE.get(media_type)
+    if media_id is not None and table:
+        try:
+            override = await conn.fetchval(f"SELECT root_folder_id FROM {table} WHERE id = $1", media_id)
+        except Exception:
+            override = None
+    try:
+        return await folderSelector.selectFolder(conn, mediaType=folder_media_type, overrideFolderId=override)
+    except Exception as e:
+        print(f"Could not resolve grab folder for {media_type} {media_id}: {e}")
+        return None
+
+
+async def _record_download_history(
+    conn,
+    torrent_hash,
+    release,
+    media_id,
+    media_type,
+    grab_mode="auto",
+    was_upgrade=False,
+    root_folder_id=None,
+) -> None:
+    """
+    Write a complete download_history row for an added release, including the magnet/
+    .torrent source and info hash so it can be re-added later from the archive, plus the
+    root_folder_id so the organizer can place the completed files. Keyed on torrent_hash and
+    idempotent. Best effort, never raises.
+    """
+    try:
+        await conn.execute(
+            """
+            INSERT INTO download_history (
+                media_id, media_type, torrent_hash, torrent_title, indexer,
+                quality, size, magnet_link, torrent_url, info_hash, status,
+                grab_mode, was_upgrade, root_folder_id, download_client, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'downloading', $11, $12, $13, 'qbittorrent', NOW())
+            ON CONFLICT (torrent_hash) DO UPDATE SET
+                media_id = EXCLUDED.media_id,
+                media_type = EXCLUDED.media_type,
+                torrent_title = EXCLUDED.torrent_title,
+                indexer = EXCLUDED.indexer,
+                magnet_link = COALESCE(EXCLUDED.magnet_link, download_history.magnet_link),
+                torrent_url = COALESCE(EXCLUDED.torrent_url, download_history.torrent_url),
+                info_hash = COALESCE(EXCLUDED.info_hash, download_history.info_hash),
+                grab_mode = EXCLUDED.grab_mode,
+                was_upgrade = EXCLUDED.was_upgrade,
+                root_folder_id = COALESCE(EXCLUDED.root_folder_id, download_history.root_folder_id),
+                updated_at = NOW()
+            """,
+            media_id,
+            media_type,
+            torrent_hash,
+            release.title or "Unknown",
+            release.indexer or "unknown",
+            release.quality,
+            release.size,
+            release.magnet,
+            release.torrent_url,
+            release.info_hash or torrent_hash,
+            grab_mode,
+            was_upgrade,
+            root_folder_id,
+        )
+    except Exception as e:
+        print(f"Failed to record download history for {torrent_hash}: {e}")
+
+
+async def _fetch_blocklisted_titles(conn, media_type, media_id) -> set:
+    """
+    Return the set of release titles blocklisted for a media item (lowercased for
+    case-insensitive matching). Music types map to the 'album' blocklist scope. Returns an
+    empty set when no connection/item is given or on error, so search never fails on this.
+    """
+    if conn is None or media_id is None or not media_type:
+        return set()
+    normalized = "album" if media_type in ("music", "track", "album") else media_type
+    try:
+        rows = await conn.fetch(
+            "SELECT release_title FROM blocklist WHERE media_type = $1 AND media_id = $2",
+            normalized,
+            media_id,
+        )
+        return {r["release_title"].strip().lower() for r in rows if r["release_title"]}
+    except Exception as e:
+        print(f"Could not load blocklist for {media_type} {media_id}: {e}")
+        return set()
 
 
 class SearchEngine:
@@ -47,6 +168,22 @@ class SearchEngine:
             leetx_indexer,
         ]
 
+    async def _search_indexer_with_retry(self, indexer, query, category, limit_per_indexer, max_retries):
+        """
+        Search a single indexer, retrying on transient errors up to max_retries times
+        with a short backoff. Returns an empty list when every attempt fails.
+        """
+        attempts = max(0, max_retries) + 1
+        for attempt in range(attempts):
+            try:
+                return await indexer.search(query, category, limit_per_indexer)
+            except Exception as e:
+                if attempt >= attempts - 1:
+                    print(f"Indexer {getattr(indexer, 'name', indexer)} failed after {attempt + 1} attempt(s): {e}")
+                    return []
+                await asyncio.sleep(min(2**attempt, 5))
+        return []
+
     async def search_all_indexers(
         self,
         query: str,
@@ -56,6 +193,7 @@ class SearchEngine:
         selected_indexers: Optional[List[str]] = None,
         timeout: int = 30,
         max_results: int = 100,
+        max_retries: int = 0,
     ) -> List[TorrentRelease]:
         """
         Search all enabled indexers in parallel.
@@ -67,7 +205,6 @@ class SearchEngine:
             "1337x": leetx_indexer,
             "YTS": yts_indexer,
             "Nyaa": self.nyaa_indexer,
-            "Rutracker": None,  # Not implemented yet
         }
 
         tasks = []
@@ -85,7 +222,9 @@ class SearchEngine:
             indexers = self.general_indexers
 
         for indexer in indexers:
-            task = asyncio.create_task(indexer.search(query, category, limit_per_indexer))
+            task = asyncio.create_task(
+                self._search_indexer_with_retry(indexer, query, category, limit_per_indexer, max_retries)
+            )
             tasks.append(task)
 
         # Run with timeout, preserving partial results
@@ -132,6 +271,7 @@ class SearchEngine:
         preferred_uploaders: Optional[List[str]] = None,
         blocked_uploaders: Optional[List[str]] = None,
         media_type: Optional[str] = None,
+        blocklisted_titles: Optional[set] = None,
     ) -> Optional[TorrentRelease]:
         """
         Multi-dimensional cascading search
@@ -206,6 +346,7 @@ class SearchEngine:
                                 selected_indexers=selected_indexers,
                                 timeout=search_timeout,
                                 max_results=max_results,
+                                max_retries=profile.max_retries,
                             )
 
                             if not releases:
@@ -214,6 +355,10 @@ class SearchEngine:
                             # Filter by profile requirements
                             filtered_releases = []
                             for release in releases:
+                                # Skip releases the user has blocklisted for this item.
+                                if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
+                                    continue
+
                                 if not media_profile_service._meets_minimum_requirements(release, profile, media_type):
                                     continue
 
@@ -281,17 +426,45 @@ class SearchEngine:
         preferred_uploaders: Optional[List[str]] = None,
         blocked_uploaders: Optional[List[str]] = None,
         media_type: Optional[str] = None,
+        history_conn=None,
+        history_media_id: Optional[int] = None,
+        current_quality: Optional[str] = None,
+        grab_mode: str = "auto",
+        upgrade_allowed: Optional[bool] = None,
     ) -> Optional[str]:
         """
-        Search with cascading quality, select best, and download
-        Returns torrent hash if successful
+        Search with cascading quality, select best, and download.
+        Returns torrent hash if successful. When history_conn and history_media_id
+        are provided, records a download_history row (with the re-addable source).
+        When current_quality is provided, only grabs a release that is an upgrade;
+        upgrade_allowed is the effective per-item decision (item override, else profile)
+        and lets a per-item override drive the upgrade regardless of the profile default.
         """
+        # Skip releases the user has blocklisted for this item (auto-search only).
+        blocklisted_titles = await _fetch_blocklisted_titles(history_conn, media_type, history_media_id)
         best_release = await self.cascading_search(
-            query, profile, category, preferred_uploaders, blocked_uploaders, media_type
+            query,
+            profile,
+            category,
+            preferred_uploaders,
+            blocked_uploaders,
+            media_type,
+            blocklisted_titles=blocklisted_titles,
         )
 
         if not best_release:
             return None
+
+        # Upgrade mode: only proceed when the found release beats the current quality.
+        if current_quality:
+            if not media_profile_service.needs_upgrade(
+                current_quality,
+                best_release.quality,
+                profile,
+                media_type,
+                upgrade_allowed=upgrade_allowed,
+            ):
+                return None
 
         # Prefer .torrent file if available, fallback to magnet
         torrent_source = best_release.torrent_url or best_release.magnet
@@ -306,6 +479,16 @@ class SearchEngine:
                 print("qBittorrent client not configured")
                 return None
 
+            # Resolve the paired root folder so the torrent downloads into the hardlink
+            # folder and the organizer knows where to place it. An explicit save_path (rare)
+            # takes precedence.
+            root_folder_id = None
+            if save_path is None:
+                folder = await _resolve_grab_folder(history_conn, media_type, history_media_id)
+                if folder:
+                    save_path = folder["download_path"]
+                    root_folder_id = folder["id"]
+
             # Add torrent paused with validating tag for pre-download validation
             validation_tags = (tags or []) + ["validating"]
             torrent_hash = await client.add_torrent(
@@ -317,6 +500,20 @@ class SearchEngine:
             )
 
             print(f"[OK] Added to download client (pending validation): {torrent_hash}")
+
+            # Record the full history row (with re-addable source) when the caller
+            # supplies a DB connection and media id.
+            if history_conn is not None and history_media_id is not None:
+                await _record_download_history(
+                    history_conn,
+                    torrent_hash,
+                    best_release,
+                    history_media_id,
+                    media_type or "movie",
+                    grab_mode=grab_mode,
+                    was_upgrade=(grab_mode == "upgrade"),
+                    root_folder_id=root_folder_id,
+                )
 
             # Trigger validation immediately after adding
             validation_result = await validate_and_resume_torrent(
@@ -424,6 +621,7 @@ class SearchEngine:
         profile: MediaProfile,
         preferred_uploaders: Optional[List[str]] = None,
         blocked_uploaders: Optional[List[str]] = None,
+        blocklisted_titles: Optional[set] = None,
     ) -> Optional[TorrentRelease]:
         """
         Music-specific cascading search
@@ -478,6 +676,7 @@ class SearchEngine:
                 selected_indexers=selected_indexers,
                 timeout=search_timeout,
                 max_results=max_results,
+                max_retries=profile.max_retries,
             )
 
             if not releases:
@@ -486,6 +685,9 @@ class SearchEngine:
             # Filter by quality and preferences
             filtered_releases = []
             for release in releases:
+                # Skip releases the user has blocklisted for this album.
+                if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
+                    continue
                 if not self._meets_music_requirements(release, profile):
                     continue
 
@@ -588,12 +790,18 @@ class SearchEngine:
         tags: Optional[List[str]] = None,
         preferred_uploaders: Optional[List[str]] = None,
         blocked_uploaders: Optional[List[str]] = None,
+        history_conn=None,
+        history_media_id: Optional[int] = None,
     ) -> Optional[str]:
         """
-        Search for music with cascading quality, select best, and download
-        Returns torrent hash if successful
+        Search for music with cascading quality, select best, and download.
+        Returns torrent hash if successful. When history_conn and history_media_id
+        are provided, records a download_history row (with the re-addable source).
         """
-        best_release = await self.music_cascading_search(query, profile, preferred_uploaders, blocked_uploaders)
+        blocklisted_titles = await _fetch_blocklisted_titles(history_conn, "album", history_media_id)
+        best_release = await self.music_cascading_search(
+            query, profile, preferred_uploaders, blocked_uploaders, blocklisted_titles=blocklisted_titles
+        )
 
         if not best_release:
             return None
@@ -610,6 +818,14 @@ class SearchEngine:
                 print("qBittorrent client not configured")
                 return None
 
+            # Resolve the paired music root folder (hardlink folder + organize target).
+            root_folder_id = None
+            if save_path is None:
+                folder = await _resolve_grab_folder(history_conn, "album", history_media_id)
+                if folder:
+                    save_path = folder["download_path"]
+                    root_folder_id = folder["id"]
+
             # Add torrent paused with validating tag for pre-download validation
             validation_tags = (tags or []) + ["validating"]
             torrent_hash = await client.add_torrent(
@@ -621,6 +837,18 @@ class SearchEngine:
             )
 
             print(f"[OK] Added to download client (pending validation): {torrent_hash}")
+
+            # Record the full history row (with re-addable source) when the caller
+            # supplies a DB connection and media id.
+            if history_conn is not None and history_media_id is not None:
+                await _record_download_history(
+                    history_conn,
+                    torrent_hash,
+                    best_release,
+                    history_media_id,
+                    "album",
+                    root_folder_id=root_folder_id,
+                )
 
             # Trigger validation immediately after adding
             validation_result = await validate_and_resume_torrent(

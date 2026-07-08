@@ -1,4 +1,5 @@
 "use client";
+import NamingPreview from "../shared/NamingPreview";
 
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -430,14 +431,11 @@ export default function TVShowsGroup({
 					}
 					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 				/>
-				<div className="mt-2 p-2 bg-muted rounded border border-border">
-					<p className="text-xs font-semibold text-muted-foreground mb-1">
-						Example:
-					</p>
-					<p className="text-xs font-mono">
-						Show Title (2024) [tvdbid-67890]
-					</p>
-				</div>
+				<NamingPreview
+					mediaType="show"
+					folderFormat={formData.show_folder_format}
+					namingFormat={formData.show_naming_format}
+				/>
 			</div>
 
 			<div>
@@ -467,14 +465,11 @@ export default function TVShowsGroup({
 					}
 					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 				/>
-				<div className="mt-2 p-2 bg-muted rounded border border-border">
-					<p className="text-xs font-semibold text-muted-foreground mb-1">
-						Example:
-					</p>
-					<p className="text-xs font-mono">
-						Show Title - S01E01 - Episode Title
-					</p>
-				</div>
+				<NamingPreview
+					mediaType="show"
+					folderFormat={formData.show_folder_format}
+					namingFormat={formData.show_naming_format}
+				/>
 			</div>
 
 			{showBuilder && (

@@ -1,13 +1,12 @@
 import asyncio
 import time
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import asyncpg
 
 from app.core.cache import cacheGet, cacheSet, getCacheClient
 from app.db import get_pool
 from app.core.config import settings
-
 
 HEALTH_CACHE_TTL = 30  # 30 seconds
 
@@ -182,24 +181,72 @@ class SystemHealthMonitor:
 
         for client in clients:
             if not client["is_enabled"]:
-                results.append({
-                    "id": client["id"],
-                    "name": client["name"],
-                    "clientType": client["client_type"],
-                    "status": "disabled",
-                    "message": "Client disabled",
-                })
+                results.append(
+                    {
+                        "id": client["id"],
+                        "name": client["name"],
+                        "clientType": client["client_type"],
+                        "status": "disabled",
+                        "message": "Client disabled",
+                    }
+                )
             else:
                 # Just report as configured - actual connectivity tested elsewhere
-                results.append({
-                    "id": client["id"],
-                    "name": client["name"],
-                    "clientType": client["client_type"],
-                    "status": "connected",
-                    "message": f"{client['host']}:{client['port']}",
-                })
+                results.append(
+                    {
+                        "id": client["id"],
+                        "name": client["name"],
+                        "clientType": client["client_type"],
+                        "status": "connected",
+                        "message": f"{client['host']}:{client['port']}",
+                    }
+                )
 
         return results
+
+    async def checkVpnHealth(self) -> Optional[Dict[str, Any]]:
+        """Check gluetun VPN tunnel health. Returns None when gluetun is not configured."""
+        try:
+            from app.services.gluetun import get_gluetun_client
+
+            gluetun = await get_gluetun_client()
+            if not gluetun:
+                return None
+
+            vpn_status = await gluetun.get_vpn_status()
+            pub = await gluetun.get_public_ip()
+            version = await gluetun.get_version()
+            up = vpn_status == "running"
+            ip = pub.get("public_ip") if pub else None
+            country = pub.get("country") if pub else None
+
+            if up and ip:
+                status = "connected"
+                message = ip + (f" ({country})" if country else "")
+            elif up:
+                status = "connected"
+                message = "Tunnel up"
+            else:
+                status = "error"
+                message = "Tunnel down"
+
+            return {
+                "id": -1,
+                "name": "VPN (gluetun)",
+                "clientType": "gluetun",
+                "status": status,
+                "version": version,
+                "message": message,
+            }
+        except Exception as e:
+            return {
+                "id": -1,
+                "name": "VPN (gluetun)",
+                "clientType": "gluetun",
+                "status": "error",
+                "version": None,
+                "message": str(e),
+            }
 
     async def checkExternalApis(self, conn: asyncpg.Connection) -> Dict[str, Dict[str, Any]]:
         """Check external API connectivity (lightweight checks only)."""
@@ -207,10 +254,7 @@ class SystemHealthMonitor:
 
         # Check TMDB - just verify API key is set, don't make network call
         try:
-            tmdbKey = await conn.fetchval(
-                "SELECT value FROM app_settings WHERE key = $1",
-                "tmdb_api_key"
-            )
+            tmdbKey = await conn.fetchval("SELECT value FROM app_settings WHERE key = $1", "tmdb_api_key")
             if tmdbKey or settings.TMDB_API_KEY:
                 results["tmdb"] = {
                     "name": "TMDB",
@@ -241,10 +285,7 @@ class SystemHealthMonitor:
 
         # Check FlareSolverr - just verify URL is set, don't make network call
         try:
-            flareSolverrUrl = await conn.fetchval(
-                "SELECT value FROM app_settings WHERE key = $1",
-                "flaresolverr_url"
-            )
+            flareSolverrUrl = await conn.fetchval("SELECT value FROM app_settings WHERE key = $1", "flaresolverr_url")
             if flareSolverrUrl or settings.FLARESOLVERR_URL:
                 results["flaresolverr"] = {
                     "name": "FlareSolverr",
@@ -298,6 +339,7 @@ class SystemHealthMonitor:
                     cached = await client.get(f"task:last_run:{task['taskName']}")
                     if cached:
                         import json
+
                         data = json.loads(cached)
                         taskStatus["lastRunTime"] = data.get("timestamp")
                         taskStatus["lastDurationMs"] = data.get("durationMs")
@@ -335,7 +377,12 @@ class SystemHealthMonitor:
             dbHealth = {"name": "PostgreSQL", "status": "unknown", "message": "Check timed out"}
             cacheHealth = {"name": "Dragonfly", "status": "unknown", "message": "Check timed out"}
             pgBouncerHealth = {"name": "PgBouncer", "status": "unknown", "message": "Check timed out"}
-            celeryHealth = {"name": "Celery", "status": "unknown", "message": "Check timed out", "details": {"workerCount": 0, "queueDepth": 0}}
+            celeryHealth = {
+                "name": "Celery",
+                "status": "unknown",
+                "message": "Check timed out",
+                "details": {"workerCount": 0, "queueDepth": 0},
+            }
             celeryTasks = []
 
         # Run DB-dependent checks sequentially (asyncpg connections aren't concurrent-safe)
@@ -343,6 +390,14 @@ class SystemHealthMonitor:
             downloadClients = await self.checkDownloadClients(conn)
         except Exception as e:
             downloadClients = []
+
+        # Append VPN (gluetun) tunnel health when configured.
+        try:
+            vpnHealth = await self.checkVpnHealth()
+            if vpnHealth:
+                downloadClients.append(vpnHealth)
+        except Exception:
+            pass
 
         try:
             externalApis = await self.checkExternalApis(conn)
@@ -357,18 +412,25 @@ class SystemHealthMonitor:
         if isinstance(pgBouncerHealth, Exception):
             pgBouncerHealth = {"name": "PgBouncer", "status": "error", "message": str(pgBouncerHealth)}
         if isinstance(celeryHealth, Exception):
-            celeryHealth = {"name": "Celery", "status": "error", "message": str(celeryHealth), "details": {"workerCount": 0, "queueDepth": 0}}
+            celeryHealth = {
+                "name": "Celery",
+                "status": "error",
+                "message": str(celeryHealth),
+                "details": {"workerCount": 0, "queueDepth": 0},
+            }
         if isinstance(celeryTasks, Exception):
             celeryTasks = []
 
         # Build queues from celery health
         queues = []
         if celeryHealth.get("details"):
-            queues.append({
-                "name": "celery",
-                "depth": celeryHealth["details"].get("queueDepth", 0),
-                "workerCount": celeryHealth["details"].get("workerCount", 0),
-            })
+            queues.append(
+                {
+                    "name": "celery",
+                    "depth": celeryHealth["details"].get("queueDepth", 0),
+                    "workerCount": celeryHealth["details"].get("workerCount", 0),
+                }
+            )
 
         result = {
             "timestamp": datetime.utcnow().isoformat() + "Z",

@@ -165,7 +165,7 @@ export default function AnimeDetailPage() {
     queryKey: ['files', 'anime', animeId],
     queryFn: async () => {
       const response = await api.get(`/files/anime/${animeId}`);
-      return response.data.files as FileInfo[];
+      return response.data as { files: FileInfo[]; grab_mode?: string };
     },
     enabled: !!anime?.has_file,
   });
@@ -720,7 +720,8 @@ export default function AnimeDetailPage() {
                 <FileQualityInfo
                   mediaType="anime"
                   mediaId={anime.id}
-                  files={files || []}
+                  files={files?.files || []}
+                  grabMode={files?.grab_mode}
                 />
               )}
 

@@ -128,6 +128,7 @@ class LeetxIndexer(BaseIndexer):
             return TorrentRelease(
                 title=title,
                 magnet=magnet,
+                detail_url=detail_url,
                 size=size_bytes,
                 size_string=size_str,
                 seeders=seeders,
@@ -152,6 +153,7 @@ class LeetxIndexer(BaseIndexer):
             return TorrentRelease(
                 title=title,
                 magnet=magnet,
+                detail_url=detail_url,
                 size=size_bytes,
                 size_string=size_str,
                 seeders=seeders,

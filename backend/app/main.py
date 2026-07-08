@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.db import init_pool, close_pool
@@ -29,7 +29,6 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    default_response_class=ORJSONResponse,
 )
 
 # GZip compression for responses over 1KB

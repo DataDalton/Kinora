@@ -11,6 +11,7 @@ from app.db.repositories import ShowRepository, SeasonRepository, EpisodeReposit
 from app.api.v1.endpoints.auth import get_current_user, require_permission
 from app.schemas.user import UserWithPermissions
 from app.services.metadata.tmdb import tmdb_service
+from app.services.folder_selector import resolve_media_folder
 from app.core.permissions import userHasPermission
 
 router = APIRouter()
@@ -189,11 +190,13 @@ async def add_show(
             parsedData.get("poster_path"),
             parsedData.get("year"),
             parsedData.get("overview"),
-            json.dumps({
-                "monitored": show_data.monitored,
-                "media_profile_id": show_data.media_profile_id,
-                "season_monitoring": show_data.season_monitoring,
-            }),
+            json.dumps(
+                {
+                    "monitored": show_data.monitored,
+                    "media_profile_id": show_data.media_profile_id,
+                    "season_monitoring": show_data.season_monitoring,
+                }
+            ),
         )
 
         return {
@@ -277,12 +280,10 @@ async def update_show_monitoring(
     # Cascade monitored status to all seasons and episodes
     if "monitored" in sentFields:
         await conn.execute(
-            "UPDATE seasons SET monitored = $2, updated_at = NOW() WHERE show_id = $1",
-            show_id, data.monitored
+            "UPDATE seasons SET monitored = $2, updated_at = NOW() WHERE show_id = $1", show_id, data.monitored
         )
         await conn.execute(
-            "UPDATE episodes SET monitored = $2, updated_at = NOW() WHERE show_id = $1",
-            show_id, data.monitored
+            "UPDATE episodes SET monitored = $2, updated_at = NOW() WHERE show_id = $1", show_id, data.monitored
         )
 
     return show
@@ -308,14 +309,14 @@ async def delete_show_with_files(
     filesDeleted = []
     errors = []
 
-    if delete_files and show.get("root_folder_path"):
-        folderPath = show["root_folder_path"]
-        try:
-            if os.path.isdir(folderPath):
+    if delete_files:
+        folderPath = await resolve_media_folder(conn, show.get("root_folder_id"), show.get("file_path"))
+        if folderPath and os.path.isdir(folderPath):
+            try:
                 shutil.rmtree(folderPath)
                 filesDeleted.append(folderPath)
-        except Exception as e:
-            errors.append(f"Failed to delete {folderPath}: {str(e)}")
+            except Exception as e:
+                errors.append(f"Failed to delete {folderPath}: {str(e)}")
 
     # Delete episodes and seasons first (cascading), then use repo for relations
     await conn.execute("DELETE FROM episodes WHERE show_id = $1", show_id)
@@ -379,11 +380,11 @@ async def rescan_show_files(
             detail="Show not found",
         )
 
-    folderPath = show.get("root_folder_path")
+    folderPath = await resolve_media_folder(conn, show.get("root_folder_id"), show.get("file_path"))
     fileCount = 0
 
     if folderPath and os.path.isdir(folderPath):
-        videoExtensions = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v')
+        videoExtensions = (".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v")
         for root, dirs, files in os.walk(folderPath):
             for f in files:
                 if f.lower().endswith(videoExtensions):
@@ -472,14 +473,18 @@ async def get_show_seasons(
 
             for s in tmdbSeasons:
                 if s.get("season_number", 0) > 0:
-                    await seasonRepo.upsert(show_id, s.get("season_number"), {
-                        "title": s.get("name"),
-                        "overview": s.get("overview"),
-                        "poster_path": s.get("poster_path"),
-                        "air_date": tmdb_service._parse_date(s.get("air_date")),
-                        "episode_count": s.get("episode_count"),
-                        "monitored": True,
-                    })
+                    await seasonRepo.upsert(
+                        show_id,
+                        s.get("season_number"),
+                        {
+                            "title": s.get("name"),
+                            "overview": s.get("overview"),
+                            "poster_path": s.get("poster_path"),
+                            "air_date": tmdb_service._parse_date(s.get("air_date")),
+                            "episode_count": s.get("episode_count"),
+                            "monitored": True,
+                        },
+                    )
 
             seasons = await seasonRepo.getByShowId(show_id)
         except Exception:
@@ -517,15 +522,20 @@ async def get_season_episodes(
             tmdbEpisodes = seasonData.get("episodes", [])
 
             for ep in tmdbEpisodes:
-                await episodeRepo.upsert(show_id, season_number, ep.get("episode_number"), {
-                    "title": ep.get("name"),
-                    "overview": ep.get("overview"),
-                    "still_path": ep.get("still_path"),
-                    "air_date": tmdb_service._parse_date(ep.get("air_date")),
-                    "runtime": ep.get("runtime"),
-                    "monitored": True,
-                    "has_file": False,
-                })
+                await episodeRepo.upsert(
+                    show_id,
+                    season_number,
+                    ep.get("episode_number"),
+                    {
+                        "title": ep.get("name"),
+                        "overview": ep.get("overview"),
+                        "still_path": ep.get("still_path"),
+                        "air_date": tmdb_service._parse_date(ep.get("air_date")),
+                        "runtime": ep.get("runtime"),
+                        "monitored": True,
+                        "has_file": False,
+                    },
+                )
 
             allEpisodes = await episodeRepo.getByShowId(show_id)
             episodes = [ep for ep in allEpisodes if ep.get("season_number") == season_number]
@@ -557,11 +567,15 @@ async def update_season_monitoring(
     # Update season and its episodes in bulk
     await conn.execute(
         "UPDATE seasons SET monitored = $1, updated_at = NOW() WHERE show_id = $2 AND season_number = $3",
-        data.monitored, show_id, season_number,
+        data.monitored,
+        show_id,
+        season_number,
     )
     await conn.execute(
         "UPDATE episodes SET monitored = $1, updated_at = NOW() WHERE show_id = $2 AND season_number = $3",
-        data.monitored, show_id, season_number,
+        data.monitored,
+        show_id,
+        season_number,
     )
 
     season = await seasonRepo.getByShowAndNumber(show_id, season_number)
@@ -588,7 +602,8 @@ async def update_episode_monitoring(
 
     await conn.execute(
         "UPDATE episodes SET monitored = $1, updated_at = NOW() WHERE id = $2",
-        data.monitored, episode_id,
+        data.monitored,
+        episode_id,
     )
 
     return await episodeRepo.getById(episode_id)

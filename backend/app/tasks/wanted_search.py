@@ -34,10 +34,7 @@ async def async_search_wanted_media():
         async with pool.acquire() as conn:
             # Get all wanted movies with their media profiles using JOIN
             wantedMoviesWithProfiles = await conn.fetch("""
-                SELECT m.id, m.title, m.release_date, m.media_profile_id,
-                       mp.id as mp_id, mp.name as mp_name, mp.resolutions,
-                       mp.sources, mp.codecs, mp.uploaders, mp.min_seeds,
-                       mp.min_size, mp.max_size, mp.search_timeout, mp.max_results
+                SELECT m.id, m.title, m.release_date, m.media_profile_id
                 FROM movies m
                 INNER JOIN media_profiles mp ON m.media_profile_id = mp.id
                 WHERE m.monitored = TRUE AND m.has_file = FALSE
@@ -45,6 +42,11 @@ async def async_search_wanted_media():
                 ORDER BY m.popularity DESC NULLS LAST
                 LIMIT 50
                 """)
+
+            # Batch-load the referenced profiles in one query, then look them up per movie.
+            profileIds = list({m["media_profile_id"] for m in wantedMoviesWithProfiles})
+            profileRows = await conn.fetch("SELECT * FROM media_profiles WHERE id = ANY($1)", profileIds)
+            profiles = {r["id"]: MediaProfile.from_row(dict(r)) for r in profileRows}
 
             for row in wantedMoviesWithProfiles:
                 movie = dict(row)
@@ -55,21 +57,9 @@ async def async_search_wanted_media():
                 if movie["release_date"]:
                     query += f" {movie['release_date'].year}"
 
-                # Construct MediaProfile from joined columns
-                profileData = {
-                    "id": movie["mp_id"],
-                    "name": movie["mp_name"],
-                    "resolutions": movie["resolutions"],
-                    "sources": movie["sources"],
-                    "codecs": movie["codecs"],
-                    "uploaders": movie["uploaders"],
-                    "min_seeds": movie["min_seeds"],
-                    "min_size": movie["min_size"],
-                    "max_size": movie["max_size"],
-                    "search_timeout": movie["search_timeout"],
-                    "max_results": movie["max_results"],
-                }
-                profile = MediaProfile(**profileData)
+                profile = profiles.get(movie["media_profile_id"])
+                if not profile:
+                    continue
 
                 # Search and download
                 try:
@@ -78,28 +68,14 @@ async def async_search_wanted_media():
                         profile=profile,
                         category="movies",
                         tags=["kinora", f"movie-{movie['id']}"],
+                        media_type="movie",
+                        history_conn=conn,
+                        history_media_id=movie["id"],
                     )
 
                     if torrent_hash:
-                        # Record download
-                        await conn.execute(
-                            """
-                            INSERT INTO download_history (
-                                media_id, media_type, torrent_hash, torrent_title,
-                                indexer, status, download_client
-                            )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7)
-                            """,
-                            movie["id"],
-                            "movie",
-                            torrent_hash,
-                            query,
-                            "multiple",
-                            "downloading",
-                            "qbittorrent",
-                        )
-
-                        # Update movie status
+                        # The engine records download_history (with re-addable source).
+                        # Update movie status here.
                         await conn.execute(
                             """
                             UPDATE movies

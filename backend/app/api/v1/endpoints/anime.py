@@ -11,6 +11,7 @@ from app.db.repositories import AnimeRepository, AnimeEpisodeRepository
 from app.api.v1.endpoints.auth import get_current_user, require_permission
 from app.schemas.user import UserWithPermissions
 from app.services.metadata.anilist import anilist_service
+from app.services.folder_selector import resolve_media_folder
 from app.core.permissions import userHasPermission
 
 router = APIRouter()
@@ -151,7 +152,7 @@ async def get_anime_seasons(
         WHERE series_id = $1 OR (id = $1 AND series_id IS NULL)
         ORDER BY season_order NULLS LAST, season_year NULLS LAST, title
         """,
-        seriesId
+        seriesId,
     )
 
     seasons = [dict(row) for row in rows]
@@ -159,7 +160,7 @@ async def get_anime_seasons(
     return {
         "seasons": seasons,
         "total_seasons": len(seasons),
-        "series_title": anime["title"].split(" Season")[0].split(" Part")[0].strip()  # Base title without "Season X"
+        "series_title": anime["title"].split(" Season")[0].split(" Part")[0].strip(),  # Base title without "Season X"
     }
 
 
@@ -213,8 +214,7 @@ async def add_anime(
                 if await repo.existsByAnilistId(related["anilist_id"]):
                     # Link existing anime to series if not already linked
                     existingAnime = await conn.fetchrow(
-                        "SELECT id, series_id FROM anime WHERE anilist_id = $1",
-                        related["anilist_id"]
+                        "SELECT id, series_id FROM anime WHERE anilist_id = $1", related["anilist_id"]
                     )
                     if existingAnime and not existingAnime["series_id"]:
                         addedAnime.append((dict(existingAnime), related.get("season_year") or 9999))
@@ -249,7 +249,9 @@ async def add_anime(
         for idx, (anime, _) in enumerate(addedAnime):
             await conn.execute(
                 "UPDATE anime SET series_id = $1, season_order = $2, updated_at = NOW() WHERE id = $3",
-                seriesParentId, idx + 1, anime["id"]
+                seriesParentId,
+                idx + 1,
+                anime["id"],
             )
 
         # Refresh the main anime to get updated fields
@@ -298,12 +300,14 @@ async def add_anime(
             parsedData.get("poster_path"),
             parsedData.get("season_year"),
             parsedData.get("overview"),
-            json.dumps({
-                "monitored": anime_data.monitored,
-                "media_profile_id": anime_data.media_profile_id,
-                "episode_monitoring": anime_data.episode_monitoring,
-                "add_sequels": anime_data.add_sequels,
-            }),
+            json.dumps(
+                {
+                    "monitored": anime_data.monitored,
+                    "media_profile_id": anime_data.media_profile_id,
+                    "episode_monitoring": anime_data.episode_monitoring,
+                    "add_sequels": anime_data.add_sequels,
+                }
+            ),
         )
 
         return {
@@ -388,7 +392,8 @@ async def update_anime_monitoring(
     if "monitored" in sentFields:
         await conn.execute(
             "UPDATE anime_episodes SET monitored = $2, updated_at = NOW() WHERE anime_id = $1",
-            anime_id, data.monitored
+            anime_id,
+            data.monitored,
         )
 
     return anime
@@ -414,14 +419,14 @@ async def delete_anime_with_files(
     filesDeleted = []
     errors = []
 
-    if delete_files and anime.get("root_folder_path"):
-        folderPath = anime["root_folder_path"]
-        try:
-            if os.path.isdir(folderPath):
+    if delete_files:
+        folderPath = await resolve_media_folder(conn, anime.get("root_folder_id"), anime.get("file_path"))
+        if folderPath and os.path.isdir(folderPath):
+            try:
                 shutil.rmtree(folderPath)
                 filesDeleted.append(folderPath)
-        except Exception as e:
-            errors.append(f"Failed to delete {folderPath}: {str(e)}")
+            except Exception as e:
+                errors.append(f"Failed to delete {folderPath}: {str(e)}")
 
     # Delete episodes first, then use repo for relations
     await conn.execute("DELETE FROM anime_episodes WHERE anime_id = $1", anime_id)
@@ -472,7 +477,7 @@ async def refresh_anime_metadata(
 async def rescan_anime_files(
     anime_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """Rescan anime files on disk and update database."""
     repo = AnimeRepository(conn)
@@ -484,12 +489,12 @@ async def rescan_anime_files(
             detail="Anime not found",
         )
 
-    folderPath = anime.get("root_folder_path")
+    folderPath = await resolve_media_folder(conn, anime.get("root_folder_id"), anime.get("file_path"))
     hasFile = False
     fileCount = 0
 
     if folderPath and os.path.isdir(folderPath):
-        videoExtensions = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v')
+        videoExtensions = (".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v")
         for root, dirs, files in os.walk(folderPath):
             for f in files:
                 if f.lower().endswith(videoExtensions):
@@ -504,7 +509,7 @@ async def rescan_anime_files(
 async def get_anime_credits(
     anime_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """Get anime characters and staff from AniList."""
     repo = AnimeRepository(conn)
@@ -535,15 +540,14 @@ async def get_anime_credits(
             {
                 "id": person.get("id"),
                 "name": person.get("name", {}).get("full"),
-                "role": ", ".join(person.get("primaryOccupations", [])) if person.get("primaryOccupations") else "Staff",
+                "role": (
+                    ", ".join(person.get("primaryOccupations", [])) if person.get("primaryOccupations") else "Staff"
+                ),
             }
             for person in anilistData.get("staff", {}).get("nodes", [])
         ]
 
-        studios = [
-            studio.get("name")
-            for studio in anilistData.get("studios", {}).get("nodes", [])
-        ]
+        studios = [studio.get("name") for studio in anilistData.get("studios", {}).get("nodes", [])]
 
         return {"characters": characters, "staff": staff, "studios": studios}
 
@@ -555,7 +559,7 @@ async def get_anime_credits(
 async def get_anime_episodes(
     anime_id: int,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """Get episodes for an anime."""
     animeRepo = AnimeRepository(conn)
@@ -583,7 +587,7 @@ async def update_anime_episode(
     episode_number: int,
     monitored: Optional[bool] = None,
     conn: asyncpg.Connection = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """Update a specific episode's monitoring status."""
     animeRepo = AnimeRepository(conn)
@@ -600,13 +604,11 @@ async def update_anime_episode(
 
     if not episode:
         # Create new episode entry
-        return await episodeRepo.upsert(anime_id, episode_number, {
-            "monitored": monitored if monitored is not None else True
-        })
+        return await episodeRepo.upsert(
+            anime_id, episode_number, {"monitored": monitored if monitored is not None else True}
+        )
     elif monitored is not None:
         # Update existing episode
-        return await episodeRepo.upsert(anime_id, episode_number, {
-            "monitored": monitored
-        })
+        return await episodeRepo.upsert(anime_id, episode_number, {"monitored": monitored})
 
     return episode

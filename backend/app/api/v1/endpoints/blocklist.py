@@ -1,13 +1,35 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
+from pydantic import BaseModel
 import asyncpg
 
 from app.db import get_db
-from app.schemas.blocklist import BlocklistEntry, BlocklistCreate, BulkBlocklistCreate, BlocklistCheck, BlocklistCheckResult
+from app.schemas.blocklist import (
+    BlocklistEntry,
+    BlocklistCreate,
+    BulkBlocklistCreate,
+    BlocklistCheck,
+    BlocklistCheckResult,
+)
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
 
 router = APIRouter()
+
+
+class BlocklistReleaseRequest(BaseModel):
+    """Blocklist a specific release for an item, optionally re-searching for a replacement."""
+
+    media_type: str
+    media_id: int
+    release_title: str
+    reason: Optional[str] = None
+    search_again: bool = False
+
+
+def _normalize_blocklist_type(media_type: str) -> str:
+    """Music sub-types share the album blocklist scope."""
+    return "album" if media_type in ("music", "track", "album") else media_type
 
 
 @router.get("/", response_model=List[BlocklistEntry])
@@ -163,6 +185,55 @@ async def add_to_blocklist(
     )
 
     return BlocklistEntry(**dict(row))
+
+
+@router.post("/release", response_model=dict)
+async def blocklist_release(
+    body: BlocklistReleaseRequest,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Blocklist a specific release for a media item so automated search skips it. Idempotent.
+    When search_again is set, dispatches a per-item search for a replacement (which now
+    excludes the blocklisted release). Used by the Blocklist / Blocklist & search actions on
+    failed downloads.
+    """
+    media_type = _normalize_blocklist_type(body.media_type)
+    if media_type not in ["movie", "show", "anime", "album"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot blocklist media type: {body.media_type}",
+        )
+    if not body.release_title:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="release_title is required",
+        )
+
+    existing = await conn.fetchrow(
+        "SELECT id FROM blocklist WHERE media_type = $1 AND media_id = $2 AND release_title = $3",
+        media_type,
+        body.media_id,
+        body.release_title,
+    )
+    if not existing:
+        await conn.execute(
+            "INSERT INTO blocklist (media_type, media_id, release_title, reason) VALUES ($1, $2, $3, $4)",
+            media_type,
+            body.media_id,
+            body.release_title,
+            body.reason or "Blocklisted from failed download",
+        )
+
+    search_dispatched = False
+    if body.search_again:
+        from app.tasks.manual_search import search_media_item
+
+        search_media_item.delay(media_type, body.media_id)
+        search_dispatched = True
+
+    return {"blocklisted": True, "search_dispatched": search_dispatched}
 
 
 @router.post("/bulk", response_model=dict)

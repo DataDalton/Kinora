@@ -27,6 +27,10 @@
 	--color-red-500: #ef4444;
 }
 
+html {
+	color-scheme: dark;
+}
+
 body {
 	background-color: var(--color-background);
 	color: var(--color-foreground);

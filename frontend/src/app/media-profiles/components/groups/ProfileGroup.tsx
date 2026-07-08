@@ -5,6 +5,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { MediaProfileFormData } from "../types";
 import Validation from "../Profile/Validation";
+import Seeding from "../Profile/Seeding";
 
 const LANGUAGES = ISO6391.getAllCodes().map((code) => ({
 	code,
@@ -15,7 +16,7 @@ const LANGUAGES = ISO6391.getAllCodes().map((code) => ({
 interface ProfileGroupProps {
 	formData: MediaProfileFormData;
 	setFormData: (data: MediaProfileFormData) => void;
-	activeTab: "general" | "languages" | "validation";
+	activeTab: "general" | "languages" | "validation" | "seeding";
 	hasAttemptedSubmit?: boolean;
 }
 
@@ -103,6 +104,45 @@ export default function ProfileGroup({
 							: "Grab highest quality once and stop"}
 					</p>
 				</div>
+
+				{formData.upgrade_allowed && (
+					<div className="p-4 rounded-lg border-2 border-transparent">
+						<label className="block text-sm font-semibold mb-2">
+							When Upgrading
+						</label>
+						<div className="flex gap-2">
+							{(
+								[
+									["keep_old", "Keep Old"],
+									["delete_old", "Delete Old"],
+									["keep_versions", "Keep Versions"],
+								] as const
+							).map(([value, label]) => (
+								<button
+									key={value}
+									type="button"
+									onClick={() =>
+										setFormData({
+											...formData,
+											upgrade_replace_policy: value,
+										})
+									}
+									className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${formData.upgrade_replace_policy === value ? "bg-primary text-primary-foreground shadow-md" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
+								>
+									{label}
+								</button>
+							))}
+						</div>
+						<p className="text-xs text-muted-foreground mt-1">
+							{formData.upgrade_replace_policy === "delete_old"
+								? "Delete the previous file after importing the upgrade"
+								: formData.upgrade_replace_policy ===
+									  "keep_versions"
+									? "Keep every quality version in the media folder (Jellyfin-style)"
+									: "Keep the old file in place (no automatic deletion)"}
+						</p>
+					</div>
+				)}
 			</div>
 		);
 	}
@@ -393,6 +433,10 @@ export default function ProfileGroup({
 				hasAttemptedSubmit={hasAttemptedSubmit}
 			/>
 		);
+	}
+
+	if (activeTab === "seeding") {
+		return <Seeding formData={formData} setFormData={setFormData} />;
 	}
 
 	return null;

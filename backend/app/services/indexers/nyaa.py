@@ -188,6 +188,7 @@ class NyaaIndexer(BaseIndexer):
                 title=title,
                 magnet=magnet,
                 torrent_url=torrent_url,
+                detail_url=detail_url,
                 info_hash=info_hash,
                 size=size,
                 size_string=size_string,
@@ -249,6 +250,7 @@ class NyaaIndexer(BaseIndexer):
                 title=title,
                 magnet=None,  # RSS doesn't include magnet, need to fetch detail page
                 torrent_url=link,
+                detail_url=link,
                 info_hash=None,
                 size=size,
                 size_string=size_string,
@@ -369,7 +371,7 @@ class NyaaIndexer(BaseIndexer):
         """
         try:
             from email.utils import parsedate_to_datetime
+
             return parsedate_to_datetime(date_str)
         except Exception:
             return None
-

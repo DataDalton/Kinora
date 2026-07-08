@@ -1,0 +1,26 @@
+# Gluetun control server authentication for Kinora.
+#
+# The control server (port 8000) is only reachable on the internal kinora-network
+# and is not published to the host, so these routes use no authentication. Kinora
+# reads the VPN public IP, forwarded port, and tunnel status, and can stop/start
+# the tunnel and switch servers.
+#
+# If you publish port 8000 to the host, change auth to "apikey" and set an "apikey"
+# value here, then store the same key in Kinora's download-client settings.
+
+[[roles]]
+name = "kinora"
+routes = [
+  "GET /v1/publicip/ip",
+  "GET /v1/vpn/status",
+  "PUT /v1/vpn/status",
+  "GET /v1/vpn/settings",
+  "PUT /v1/vpn/settings",
+  "GET /v1/openvpn/status",
+  "PUT /v1/openvpn/status",
+  "GET /v1/openvpn/portforwarded",
+  "GET /v1/portforwarded",
+  "GET /v1/dns/status",
+  "GET /v1/version",
+]
+auth = "none"

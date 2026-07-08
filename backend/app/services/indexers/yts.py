@@ -106,6 +106,7 @@ class YTSIndexer(BaseIndexer):
             release = TorrentRelease(
                 title=full_title,
                 magnet=magnet,
+                detail_url=movie.get("url"),
                 info_hash=hash_value,
                 size=size_bytes,
                 size_string=size_string,

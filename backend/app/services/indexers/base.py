@@ -13,6 +13,7 @@ class TorrentRelease:
     title: str
     magnet: Optional[str] = None
     torrent_url: Optional[str] = None
+    detail_url: Optional[str] = None  # indexer detail/page URL for the release
     info_hash: Optional[str] = None
     size: Optional[int] = None  # Size in bytes
     size_string: Optional[str] = None
@@ -166,7 +167,13 @@ class BaseIndexer(ABC):
             audio = "TrueHD"
         elif "ATMOS" in title_upper or "DOLBY ATMOS" in title_upper:
             audio = "Dolby Atmos"
-        elif "DTS-HD.MA" in title_upper or "DTS.HD.MA" in title_upper or "DTSHD.MA" in title_upper or "DTS-HD MA" in title_upper or "DTSHDMA" in title_upper:
+        elif (
+            "DTS-HD.MA" in title_upper
+            or "DTS.HD.MA" in title_upper
+            or "DTSHD.MA" in title_upper
+            or "DTS-HD MA" in title_upper
+            or "DTSHDMA" in title_upper
+        ):
             audio = "DTS-HD MA"
         elif "DTS" in title_upper:
             audio = "DTS"
@@ -190,7 +197,12 @@ class BaseIndexer(ABC):
 
         # HDR Format (Dolby Vision, HDR10+, HDR10, SDR)
         hdr = None
-        if "DOLBY VISION" in title_upper or "DOLBYVISION" in title_upper or "DV" in title_upper or "DOVI" in title_upper:
+        if (
+            "DOLBY VISION" in title_upper
+            or "DOLBYVISION" in title_upper
+            or "DV" in title_upper
+            or "DOVI" in title_upper
+        ):
             hdr = "Dolby Vision"
         elif "HDR10+" in title_upper or "HDR10PLUS" in title_upper:
             hdr = "HDR10+"
@@ -217,22 +229,22 @@ class BaseIndexer(ABC):
         # Language (default to English if not specified)
         language = None
         language_patterns = {
-            'MULTI': 'multi',
-            'ENGLISH': 'en',
-            'SPANISH': 'es',
-            'FRENCH': 'fr',
-            'GERMAN': 'de',
-            'ITALIAN': 'it',
-            'JAPANESE': 'ja',
-            'KOREAN': 'ko',
-            'CHINESE': 'zh',
-            'PORTUGUESE': 'pt',
-            'RUSSIAN': 'ru',
-            'HINDI': 'hi',
-            'ARABIC': 'ar',
-            'DUTCH': 'nl',
-            'POLISH': 'pl',
-            'TURKISH': 'tr',
+            "MULTI": "multi",
+            "ENGLISH": "en",
+            "SPANISH": "es",
+            "FRENCH": "fr",
+            "GERMAN": "de",
+            "ITALIAN": "it",
+            "JAPANESE": "ja",
+            "KOREAN": "ko",
+            "CHINESE": "zh",
+            "PORTUGUESE": "pt",
+            "RUSSIAN": "ru",
+            "HINDI": "hi",
+            "ARABIC": "ar",
+            "DUTCH": "nl",
+            "POLISH": "pl",
+            "TURKISH": "tr",
         }
         for key, code in language_patterns.items():
             if key in title_upper:
@@ -241,13 +253,13 @@ class BaseIndexer(ABC):
 
         # Check for language codes in brackets
         if not language:
-            lang_match = re.search(r'\[([A-Z]{2})\]', title_upper)
+            lang_match = re.search(r"\[([A-Z]{2})\]", title_upper)
             if lang_match:
                 language = lang_match.group(1).lower()
 
         # Default to English
         if not language:
-            language = 'en'
+            language = "en"
 
         # Release group (usually at the end in brackets or after dash)
         release_group = None
@@ -286,9 +298,9 @@ class BaseIndexer(ABC):
 
         multipliers = {
             "K": 1024,
-            "M": 1024 ** 2,
-            "G": 1024 ** 3,
-            "T": 1024 ** 4,
+            "M": 1024**2,
+            "G": 1024**3,
+            "T": 1024**4,
         }
 
         return int(value * multipliers.get(unit, 1))
@@ -355,11 +367,19 @@ class BaseIndexer(ABC):
             is_lossless = True
 
         # Discography detection
-        is_discography = any(x in title_upper for x in [
-            "DISCOGRAPHY", "DISCOGRAFIA", "COMPLETE DISCOGRAPHY",
-            "FULL DISCOGRAPHY", "COLLECTION", "COMPLETE COLLECTION",
-            "ANTHOLOGY", "COMPLETE WORKS"
-        ])
+        is_discography = any(
+            x in title_upper
+            for x in [
+                "DISCOGRAPHY",
+                "DISCOGRAFIA",
+                "COMPLETE DISCOGRAPHY",
+                "FULL DISCOGRAPHY",
+                "COLLECTION",
+                "COMPLETE COLLECTION",
+                "ANTHOLOGY",
+                "COMPLETE WORKS",
+            ]
+        )
 
         # Year detection
         year = None

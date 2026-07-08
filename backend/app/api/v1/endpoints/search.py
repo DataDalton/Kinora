@@ -30,7 +30,9 @@ router = APIRouter()
 class InteractiveSearchRequest(BaseModel):
     query: str
     media_type: str
-    media_id: int
+    # Not used by the search itself (results are query-based); optional so a search can
+    # run before the item exists in the library.
+    media_id: Optional[int] = None
     episode_id: Optional[int] = None
     indexers: Optional[List[str]] = None  # Which indexers to search (None = all available)
     quality: Optional[str] = None  # Quality to append to search query (e.g., "1080p")
@@ -44,10 +46,55 @@ class DownloadReleaseRequest(BaseModel):
     episode_id: Optional[int] = None
     indexer: Optional[str] = None
     indexer_page_url: Optional[str] = None
+    title: Optional[str] = None
     quality: Optional[str] = None
     size: Optional[int] = None
     seeders: Optional[int] = None
     root_folder_id: Optional[int] = None  # Override folder selection
+    keep_monitoring: Optional[bool] = None  # explicit satisfied/monitoring override
+
+
+_MANUAL_GRAB_TABLE = {"movie": "movies", "show": "shows", "anime": "anime", "album": "albums", "music": "albums"}
+
+
+async def _apply_manual_grab_state(conn, data, profile):
+    """
+    After a manual grab: mark the item downloading (prevents the background searcher from
+    double-grabbing) and set the satisfied/keep-monitoring default from whether the release
+    meets the profile. Returns (meets_profile, monitoring_mode).
+    """
+    table = _MANUAL_GRAB_TABLE.get(data.media_type)
+    if not table:
+        return None, None
+
+    await conn.execute(
+        f"UPDATE {table} SET status = 'downloading', updated_at = NOW() WHERE id = $1",
+        data.media_id,
+    )
+
+    meets = None
+    monitoring = data.keep_monitoring
+    if profile is not None and data.media_type in ("movie", "show", "anime"):
+        from app.services.indexers.base import TorrentRelease
+        from app.services.media_profile import media_profile_service
+
+        release = TorrentRelease(
+            title=data.title or "",
+            quality=data.quality,
+            size=data.size,
+            seeders=data.seeders or 0,
+        )
+        meets = media_profile_service.score_release(release, profile, media_type=data.media_type) >= 0
+        if monitoring is None:
+            monitoring = not meets
+
+    if monitoring is not None:
+        await conn.execute(
+            f"UPDATE {table} SET upgrade_allowed = $1 WHERE id = $2",
+            monitoring,
+            data.media_id,
+        )
+    return meets, monitoring
 
 
 @router.get("/")
@@ -65,36 +112,40 @@ async def search_media(
         if media_type in ["all", "movie"]:
             movie_results = await tmdb_service.search_movie(query)
             for movie in movie_results:
-                results.append({
-                    "id": movie.get("id"),
-                    "title": movie.get("title"),
-                    "name": movie.get("title"),
-                    "original_title": movie.get("original_title"),
-                    "overview": movie.get("overview"),
-                    "poster_path": movie.get("poster_path"),
-                    "backdrop_path": movie.get("backdrop_path"),
-                    "release_date": movie.get("release_date"),
-                    "vote_average": movie.get("vote_average", 0),
-                    "popularity": movie.get("popularity"),
-                    "media_type": "movie"
-                })
+                results.append(
+                    {
+                        "id": movie.get("id"),
+                        "title": movie.get("title"),
+                        "name": movie.get("title"),
+                        "original_title": movie.get("original_title"),
+                        "overview": movie.get("overview"),
+                        "poster_path": movie.get("poster_path"),
+                        "backdrop_path": movie.get("backdrop_path"),
+                        "release_date": movie.get("release_date"),
+                        "vote_average": movie.get("vote_average", 0),
+                        "popularity": movie.get("popularity"),
+                        "media_type": "movie",
+                    }
+                )
 
         if media_type in ["all", "show"]:
             show_results = await tmdb_service.search_tv(query)
             for show in show_results:
-                results.append({
-                    "id": show.get("id"),
-                    "title": show.get("name"),
-                    "name": show.get("name"),
-                    "original_title": show.get("original_name"),
-                    "overview": show.get("overview"),
-                    "poster_path": show.get("poster_path"),
-                    "backdrop_path": show.get("backdrop_path"),
-                    "first_air_date": show.get("first_air_date"),
-                    "vote_average": show.get("vote_average", 0),
-                    "popularity": show.get("popularity"),
-                    "media_type": "show"
-                })
+                results.append(
+                    {
+                        "id": show.get("id"),
+                        "title": show.get("name"),
+                        "name": show.get("name"),
+                        "original_title": show.get("original_name"),
+                        "overview": show.get("overview"),
+                        "poster_path": show.get("poster_path"),
+                        "backdrop_path": show.get("backdrop_path"),
+                        "first_air_date": show.get("first_air_date"),
+                        "vote_average": show.get("vote_average", 0),
+                        "popularity": show.get("popularity"),
+                        "media_type": "show",
+                    }
+                )
 
         if media_type in ["all", "anime"]:
             anime_results = await anilist_service.search_anime(query)
@@ -105,80 +156,90 @@ async def search_media(
                 start_date = anilist_service._parse_anilist_date(anime.get("startDate"))
                 release_date_str = start_date.strftime("%Y-%m-%d") if start_date else None
 
-                results.append({
-                    "id": anime.get("id"),
-                    "title": anime_title,
-                    "name": anime_title,
-                    "original_title": title.get("native"),
-                    "overview": anime.get("description"),
-                    "poster_path": anime.get("coverImage", {}).get("large"),
-                    "backdrop_path": anime.get("bannerImage"),
-                    "release_date": release_date_str,
-                    "vote_average": anime.get("averageScore") / 10 if anime.get("averageScore") else 0,
-                    "popularity": anime.get("popularity"),
-                    "media_type": "anime",
-                    "anilist_id": anime.get("id"),
-                    "mal_id": anime.get("idMal")
-                })
+                results.append(
+                    {
+                        "id": anime.get("id"),
+                        "title": anime_title,
+                        "name": anime_title,
+                        "original_title": title.get("native"),
+                        "overview": anime.get("description"),
+                        "poster_path": anime.get("coverImage", {}).get("large"),
+                        "backdrop_path": anime.get("bannerImage"),
+                        "release_date": release_date_str,
+                        "vote_average": anime.get("averageScore") / 10 if anime.get("averageScore") else 0,
+                        "popularity": anime.get("popularity"),
+                        "media_type": "anime",
+                        "anilist_id": anime.get("id"),
+                        "mal_id": anime.get("idMal"),
+                    }
+                )
 
         if media_type in ["all", "music"]:
             album_results = await deezer_service.search_album(query, limit=10)
             for album in album_results:
                 artist = album.get("artist", {})
-                results.append({
-                    "id": album.get("id"),
-                    "title": album.get("title"),
-                    "name": album.get("title"),
-                    "overview": f"by {artist.get('name', 'Unknown Artist')}",
-                    "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
-                    "backdrop_path": album.get("cover_xl"),
-                    "release_date": album.get("release_date"),
-                    "vote_average": 0,
-                    "popularity": 0,
-                    "media_type": "album",
-                    "deezer_id": album.get("id"),
-                    "artist_name": artist.get("name"),
-                    "artist_id": artist.get("id"),
-                    "nb_tracks": album.get("nb_tracks")
-                })
+                results.append(
+                    {
+                        "id": album.get("id"),
+                        "title": album.get("title"),
+                        "name": album.get("title"),
+                        "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                        "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
+                        "backdrop_path": album.get("cover_xl"),
+                        "release_date": album.get("release_date"),
+                        "vote_average": 0,
+                        "popularity": 0,
+                        "media_type": "album",
+                        "deezer_id": album.get("id"),
+                        "artist_name": artist.get("name"),
+                        "artist_id": artist.get("id"),
+                        "nb_tracks": album.get("nb_tracks"),
+                    }
+                )
 
             track_results = await deezer_service.search_track(query, limit=10)
             for track in track_results:
                 artist = track.get("artist", {})
                 album = track.get("album", {})
-                results.append({
-                    "id": track.get("id"),
-                    "title": track.get("title"),
-                    "name": track.get("title"),
-                    "overview": f"by {artist.get('name', 'Unknown Artist')}",
-                    "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
-                    "backdrop_path": album.get("cover_xl"),
-                    "vote_average": 0,
-                    "popularity": 0,
-                    "media_type": "track",
-                    "deezer_id": track.get("id"),
-                    "artist_name": artist.get("name"),
-                    "artist_id": artist.get("id"),
-                    "album_name": album.get("title"),
-                    "album_id": album.get("id"),
-                    "duration": track.get("duration")
-                })
+                results.append(
+                    {
+                        "id": track.get("id"),
+                        "title": track.get("title"),
+                        "name": track.get("title"),
+                        "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                        "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
+                        "backdrop_path": album.get("cover_xl"),
+                        "vote_average": 0,
+                        "popularity": 0,
+                        "media_type": "track",
+                        "deezer_id": track.get("id"),
+                        "artist_name": artist.get("name"),
+                        "artist_id": artist.get("id"),
+                        "album_name": album.get("title"),
+                        "album_id": album.get("id"),
+                        "duration": track.get("duration"),
+                    }
+                )
 
             artist_results = await deezer_service.search_artist(query, limit=5)
             for artist in artist_results:
-                results.append({
-                    "id": artist.get("id"),
-                    "title": artist.get("name"),
-                    "name": artist.get("name"),
-                    "overview": f"{artist.get('nb_album', 0)} albums",
-                    "poster_path": artist.get("picture_xl") or artist.get("picture_big") or artist.get("picture_medium"),
-                    "backdrop_path": artist.get("picture_xl"),
-                    "vote_average": 0,
-                    "popularity": 0,
-                    "media_type": "artist",
-                    "deezer_id": artist.get("id"),
-                    "nb_album": artist.get("nb_album")
-                })
+                results.append(
+                    {
+                        "id": artist.get("id"),
+                        "title": artist.get("name"),
+                        "name": artist.get("name"),
+                        "overview": f"{artist.get('nb_album', 0)} albums",
+                        "poster_path": artist.get("picture_xl")
+                        or artist.get("picture_big")
+                        or artist.get("picture_medium"),
+                        "backdrop_path": artist.get("picture_xl"),
+                        "vote_average": 0,
+                        "popularity": 0,
+                        "media_type": "artist",
+                        "deezer_id": artist.get("id"),
+                        "nb_album": artist.get("nb_album"),
+                    }
+                )
 
         results.sort(key=lambda x: x.get("popularity", 0), reverse=True)
 
@@ -216,7 +277,7 @@ async def get_media_details(
                 "cast": details.get("credits", {}).get("cast", [])[:10],
                 "crew": details.get("credits", {}).get("crew", [])[:5],
                 "recommendations": details.get("recommendations", {}).get("results", [])[:6],
-                "media_type": "movie"
+                "media_type": "movie",
             }
 
         elif media_type == "show":
@@ -235,7 +296,7 @@ async def get_media_details(
                 "crew": details.get("credits", {}).get("crew", [])[:5],
                 "recommendations": details.get("recommendations", {}).get("results", [])[:6],
                 "created_by": details.get("created_by", []),
-                "media_type": "show"
+                "media_type": "show",
             }
 
         elif media_type == "anime":
@@ -251,13 +312,15 @@ async def get_media_details(
                 media_rec = rec_node.get("mediaRecommendation")
                 if media_rec:
                     rec_title = media_rec.get("title", {})
-                    recommendations.append({
-                        "id": media_rec.get("id"),
-                        "title": rec_title.get("english") or rec_title.get("romaji"),
-                        "name": rec_title.get("english") or rec_title.get("romaji"),
-                        "poster_path": media_rec.get("coverImage", {}).get("large"),
-                        "backdrop_path": media_rec.get("bannerImage"),
-                    })
+                    recommendations.append(
+                        {
+                            "id": media_rec.get("id"),
+                            "title": rec_title.get("english") or rec_title.get("romaji"),
+                            "name": rec_title.get("english") or rec_title.get("romaji"),
+                            "poster_path": media_rec.get("coverImage", {}).get("large"),
+                            "backdrop_path": media_rec.get("bannerImage"),
+                        }
+                    )
 
             return {
                 **parsed,
@@ -270,7 +333,7 @@ async def get_media_details(
                 "staff": details.get("staff", {}).get("nodes", [])[:5],
                 "relations": details.get("relations", {}).get("nodes", [])[:6],
                 "recommendations": recommendations,
-                "media_type": "anime"
+                "media_type": "anime",
             }
 
         elif media_type == "artist":
@@ -309,7 +372,7 @@ async def get_media_details(
                     }
                     for album in albums
                 ],
-                "media_type": "artist"
+                "media_type": "artist",
             }
 
         elif media_type == "album":
@@ -352,7 +415,7 @@ async def get_media_details(
                     for track in tracks
                 ],
                 "deezer_link": details.get("link"),
-                "media_type": "album"
+                "media_type": "album",
             }
 
         elif media_type == "track":
@@ -397,20 +460,19 @@ async def get_media_details(
                     "release_date": album_release_date,
                 },
                 "deezer_id": media_id,
-                "media_type": "track"
+                "media_type": "track",
             }
 
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid media type. Must be 'movie', 'show', 'anime', 'artist', 'album', or 'track'"
+                detail="Invalid media type. Must be 'movie', 'show', 'anime', 'artist', 'album', or 'track'",
             )
 
     except Exception as e:
         print(f"Error fetching media details: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch details: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch details: {str(e)}"
         )
 
 
@@ -437,16 +499,15 @@ async def get_collection_details(
                     "title": movie.get("title"),
                     "release_date": movie.get("release_date"),
                     "poster_path": movie.get("poster_path"),
-                    "overview": movie.get("overview")
+                    "overview": movie.get("overview"),
                 }
                 for movie in collection_data.get("parts", [])
-            ]
+            ],
         }
     except Exception as e:
         print(f"Error fetching collection: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch collection: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch collection: {str(e)}"
         )
 
 
@@ -465,12 +526,15 @@ async def search_torrents(
 async def get_search_options(
     media_type: str,
     media_id: int,
+    profile_id: Optional[int] = Query(None),
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
-    Get available search filter options and media's current profile settings.
-    Returns all quality definitions and indexers from the search engine.
+    Get available search filter options and the relevant profile settings.
+    Returns all quality definitions and indexers from the search engine. When profile_id
+    is given, that profile is used directly (media_id may be 0), which lets a search that
+    is not yet tied to a library item still honor a chosen profile's indexers/resolutions.
     """
     # All available quality options from definitions
     all_resolutions = [r.value for r in Resolution]
@@ -494,41 +558,34 @@ async def get_search_options(
     profile_indexers = []
 
     try:
-        if media_type == "movie":
-            media = await conn.fetchrow(
-                "SELECT media_profile_id FROM movies WHERE id = $1", media_id
-            )
-        elif media_type == "show":
-            media = await conn.fetchrow(
-                "SELECT media_profile_id FROM shows WHERE id = $1", media_id
-            )
-        elif media_type == "anime":
-            media = await conn.fetchrow(
-                "SELECT media_profile_id FROM anime WHERE id = $1", media_id
-            )
-        elif media_type == "album":
-            media = await conn.fetchrow(
-                "SELECT media_profile_id FROM albums WHERE id = $1", media_id
-            )
-        else:
-            media = None
+        # A caller-supplied profile_id wins (used before an item exists). Otherwise the
+        # profile comes from the media item's assignment.
+        resolved_profile_id = profile_id
+        if resolved_profile_id is None:
+            if media_type == "movie":
+                media = await conn.fetchrow("SELECT media_profile_id FROM movies WHERE id = $1", media_id)
+            elif media_type == "show":
+                media = await conn.fetchrow("SELECT media_profile_id FROM shows WHERE id = $1", media_id)
+            elif media_type == "anime":
+                media = await conn.fetchrow("SELECT media_profile_id FROM anime WHERE id = $1", media_id)
+            elif media_type == "album":
+                media = await conn.fetchrow("SELECT media_profile_id FROM albums WHERE id = $1", media_id)
+            else:
+                media = None
+            if media and media.get("media_profile_id"):
+                resolved_profile_id = media["media_profile_id"]
 
-        if media and media.get("media_profile_id"):
-            profile = await conn.fetchrow(
-                "SELECT * FROM media_profiles WHERE id = $1",
-                media["media_profile_id"]
-            )
+        if resolved_profile_id:
+            profile = await conn.fetchrow("SELECT * FROM media_profiles WHERE id = $1", resolved_profile_id)
             if profile:
                 media_profile = dict(profile)
-                # Get media-type-specific resolutions or fall back to global
+                # Get media-type-specific resolutions
                 res_field = f"{media_type}_resolutions"
-                if media_type == "show":
-                    res_field = "show_resolutions"
-                profile_resolutions = profile.get(res_field) or profile.get("resolutions") or []
+                profile_resolutions = profile.get(res_field) or []
 
-                # Get media-type-specific indexers or fall back to global
+                # Get media-type-specific indexers
                 idx_field = f"{media_type}_indexers"
-                profile_indexers = profile.get(idx_field) or profile.get("indexers") or []
+                profile_indexers = profile.get(idx_field) or []
 
     except Exception as e:
         print(f"Error fetching media profile: {e}")
@@ -543,12 +600,16 @@ async def get_search_options(
             "hdr": all_hdr,
         },
         "available_indexers": available_indexers,
-        "profile": {
-            "id": media_profile.get("id") if media_profile else None,
-            "name": media_profile.get("name") if media_profile else None,
-            "resolutions": profile_resolutions,
-            "indexers": profile_indexers,
-        } if media_profile else None,
+        "profile": (
+            {
+                "id": media_profile.get("id") if media_profile else None,
+                "name": media_profile.get("name") if media_profile else None,
+                "resolutions": profile_resolutions,
+                "indexers": profile_indexers,
+            }
+            if media_profile
+            else None
+        ),
     }
 
 
@@ -605,11 +666,13 @@ async def interactive_search(
         try:
             releases = await indexer.search(search_query, category, limit=50)
             all_releases.extend(releases)
-            indexer_status.append({
-                "name": indexer_name,
-                "status": "success",
-                "count": len(releases),
-            })
+            indexer_status.append(
+                {
+                    "name": indexer_name,
+                    "status": "success",
+                    "count": len(releases),
+                }
+            )
         except Exception as e:
             error_msg = str(e)
             # Provide user-friendly error messages
@@ -620,12 +683,14 @@ async def interactive_search(
             elif "connection" in error_msg.lower():
                 error_msg = "Connection failed"
 
-            indexer_status.append({
-                "name": indexer_name,
-                "status": "error",
-                "error": error_msg,
-                "count": 0,
-            })
+            indexer_status.append(
+                {
+                    "name": indexer_name,
+                    "status": "error",
+                    "error": error_msg,
+                    "count": 0,
+                }
+            )
             print(f"Indexer {indexer_name} error: {e}")
 
     # Deduplicate by info_hash
@@ -645,21 +710,23 @@ async def interactive_search(
         if release.upload_date:
             upload_date_str = release.upload_date.isoformat()
 
-        results.append({
-            "title": release.title,
-            "size": release.size or 0,
-            "seeders": release.seeders,
-            "leechers": release.leechers,
-            "quality": release.quality or "Unknown",
-            "source": release.source or "",
-            "indexer": release.indexer,
-            "indexer_page_url": "",
-            "torrent_url": release.torrent_url or "",
-            "magnet_link": release.magnet or "",
-            "info_hash": release.info_hash or "",
-            "upload_date": upload_date_str,
-            "uploader": release.uploader or "",
-        })
+        results.append(
+            {
+                "title": release.title,
+                "size": release.size or 0,
+                "seeders": release.seeders,
+                "leechers": release.leechers,
+                "quality": release.quality or "Unknown",
+                "source": release.source or "",
+                "indexer": release.indexer,
+                "indexer_page_url": release.detail_url or "",
+                "torrent_url": release.torrent_url or "",
+                "magnet_link": release.magnet or "",
+                "info_hash": release.info_hash or "",
+                "upload_date": upload_date_str,
+                "uploader": release.uploader or "",
+            }
+        )
 
     # Sort by seeders descending
     results.sort(key=lambda x: x["seeders"], reverse=True)
@@ -685,16 +752,14 @@ async def download_release(
 
         if not torrent_source:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No torrent URL or magnet link provided"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No torrent URL or magnet link provided"
             )
 
         # Get qBittorrent client
         client = await get_qbittorrent_client()
         if not client:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Download client not configured or unavailable"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Download client not configured or unavailable"
             )
 
         pool = await get_pool()
@@ -715,18 +780,16 @@ async def download_release(
 
             if tableName and data.media_id:
                 mediaRow = await conn.fetchrow(
-                    f"SELECT root_folder_id, media_profile_id FROM {tableName} WHERE id = $1",
-                    data.media_id
+                    f"SELECT root_folder_id, media_profile_id FROM {tableName} WHERE id = $1", data.media_id
                 )
                 if mediaRow:
                     mediaRootFolderId = mediaRow.get("root_folder_id")
                     if mediaRow.get("media_profile_id"):
                         profileRow = await conn.fetchrow(
-                            "SELECT * FROM media_profiles WHERE id = $1",
-                            mediaRow["media_profile_id"]
+                            "SELECT * FROM media_profiles WHERE id = $1", mediaRow["media_profile_id"]
                         )
                         if profileRow:
-                            profile = MediaProfile(**dict(profileRow))
+                            profile = MediaProfile.from_row(dict(profileRow))
 
             # Determine which folder to use:
             # 1. User override from request
@@ -736,23 +799,45 @@ async def download_release(
 
             # Select folder using folder selector service
             folder = await folderSelector.selectFolder(
-                conn,
-                mediaType=folderMediaType or data.media_type,
-                overrideFolderId=overrideFolderId
+                conn, mediaType=folderMediaType or data.media_type, overrideFolderId=overrideFolderId
             )
 
             if not folder:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No active root folder configured for {data.media_type}"
+                    detail=f"No active root folder configured for {data.media_type}",
                 )
 
             # Check folder health before using
             if folder.get("health_status") == "error":
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=f"Root folder '{folder['name']}' is unhealthy: {folder.get('health_message', 'Unknown error')}"
+                    detail=f"Root folder '{folder['name']}' is unhealthy: {folder.get('health_message', 'Unknown error')}",
                 )
+
+            # Free-space preflight: refuse the grab if the release would push the
+            # download folder below the configured minimum free space.
+            try:
+                import shutil as _shutil
+                from app.services.seeding import get_global_seed_defaults
+
+                seedDefaults = await get_global_seed_defaults()
+                automation = seedDefaults.get("automation", {})
+                if automation.get("disk_pause_enabled") and data.size:
+                    usage = _shutil.disk_usage(folder["download_path"])
+                    minFree = automation.get("disk_min_free_gb", 10) * (1024**3)
+                    if usage.free < data.size + minFree:
+                        raise HTTPException(
+                            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+                            detail=(
+                                f"Not enough free space in '{folder['name']}' for this release "
+                                f"(needs {data.size // (1024**3)} GB, keeping {automation.get('disk_min_free_gb', 10)} GB free)"
+                            ),
+                        )
+            except HTTPException:
+                raise
+            except Exception as preflightError:
+                print(f"Free-space preflight skipped: {preflightError}")
 
             # Add torrent paused with validating tag
             baseTags = ["kinora", "validating"]
@@ -770,16 +855,33 @@ async def download_release(
                 paused=True,
             )
 
-            # Record in download_history with folder assignment
+            # torrent_title and indexer are NOT NULL, so resolve a name from the client
+            # and fall back for a request that omits the indexer.
+            torrentInfo = await client.get_torrent(torrentHash)
+            torrentTitle = (
+                data.title
+                or (torrentInfo.name if torrentInfo and torrentInfo.name else None)
+                or f"{data.media_type} #{data.media_id}"
+            )
+
+            # Record in download_history with folder assignment and manual grab mode. The
+            # magnet/.torrent source and info hash are stored so it can be re-added later.
             await conn.execute(
                 """
                 INSERT INTO download_history (
                     torrent_hash, media_type, media_id, episode_id, root_folder_id,
-                    indexer, quality, size_bytes, status, created_at
+                    torrent_title, indexer, quality, size, magnet_link, torrent_url,
+                    info_hash, indexer_page_url, grab_mode, status, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'downloading', NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'manual', 'downloading', NOW())
                 ON CONFLICT (torrent_hash) DO UPDATE SET
                     root_folder_id = $5,
+                    torrent_title = EXCLUDED.torrent_title,
+                    magnet_link = COALESCE(EXCLUDED.magnet_link, download_history.magnet_link),
+                    torrent_url = COALESCE(EXCLUDED.torrent_url, download_history.torrent_url),
+                    info_hash = COALESCE(EXCLUDED.info_hash, download_history.info_hash),
+                    indexer_page_url = COALESCE(EXCLUDED.indexer_page_url, download_history.indexer_page_url),
+                    grab_mode = 'manual',
                     updated_at = NOW()
                 """,
                 torrentHash,
@@ -787,10 +889,20 @@ async def download_release(
                 data.media_id,
                 data.episode_id,
                 folder["id"],
-                data.indexer,
+                torrentTitle,
+                data.indexer or "unknown",
                 data.quality,
                 data.size,
+                data.magnet_link,
+                data.torrent_url,
+                torrentHash,
+                data.indexer_page_url,
             )
+
+            # Fix double-grab: mark the item as downloading so the background searcher
+            # does not grab it again. Also set the satisfied/keep-monitoring default from
+            # whether the grabbed release meets the profile.
+            meetsProfile, monitoringMode = await _apply_manual_grab_state(conn, data, profile)
 
         # Trigger validation immediately after adding
         if profile:
@@ -806,7 +918,11 @@ async def download_release(
                 "root_folder_id": folder["id"],
                 "root_folder_name": folder["name"],
                 "download_path": folder["download_path"],
-                "message": f"Download queued to '{folder['name']}': {validationResult.message}"
+                "meets_profile": meetsProfile,
+                "monitoring_mode": (
+                    "satisfied" if monitoringMode is False else ("monitoring" if monitoringMode else None)
+                ),
+                "message": f"Download queued to '{folder['name']}': {validationResult.message}",
             }
         else:
             # No profile found, resume without validation
@@ -819,7 +935,11 @@ async def download_release(
                 "root_folder_id": folder["id"],
                 "root_folder_name": folder["name"],
                 "download_path": folder["download_path"],
-                "message": f"Download started to '{folder['name']}' (no profile for validation)"
+                "meets_profile": meetsProfile,
+                "monitoring_mode": (
+                    "satisfied" if monitoringMode is False else ("monitoring" if monitoringMode else None)
+                ),
+                "message": f"Download started to '{folder['name']}' (no profile for validation)",
             }
 
     except HTTPException:
@@ -827,6 +947,5 @@ async def download_release(
     except Exception as e:
         print(f"Download release error: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start download: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to start download: {str(e)}"
         )

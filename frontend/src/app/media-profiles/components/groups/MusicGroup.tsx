@@ -1,4 +1,5 @@
 "use client";
+import NamingPreview from "../shared/NamingPreview";
 
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -385,12 +386,11 @@ export default function MusicGroup({
 					}
 					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 				/>
-				<div className="mt-2 p-2 bg-muted rounded border border-border">
-					<p className="text-xs font-semibold text-muted-foreground mb-1">
-						Example:
-					</p>
-					<p className="text-xs font-mono">Artist Name</p>
-				</div>
+				<NamingPreview
+					mediaType="music"
+					folderFormat={formData.music_album_folder_format}
+					namingFormat={formData.music_track_naming_format}
+				/>
 			</div>
 
 			<div>
@@ -420,12 +420,11 @@ export default function MusicGroup({
 					}
 					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 				/>
-				<div className="mt-2 p-2 bg-muted rounded border border-border">
-					<p className="text-xs font-semibold text-muted-foreground mb-1">
-						Example:
-					</p>
-					<p className="text-xs font-mono">Album Name (2023)</p>
-				</div>
+				<NamingPreview
+					mediaType="music"
+					folderFormat={formData.music_album_folder_format}
+					namingFormat={formData.music_track_naming_format}
+				/>
 			</div>
 
 			<div>
@@ -455,12 +454,11 @@ export default function MusicGroup({
 					}
 					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 				/>
-				<div className="mt-2 p-2 bg-muted rounded border border-border">
-					<p className="text-xs font-semibold text-muted-foreground mb-1">
-						Example:
-					</p>
-					<p className="text-xs font-mono">01 - Track Title.flac</p>
-				</div>
+				<NamingPreview
+					mediaType="music"
+					folderFormat={formData.music_album_folder_format}
+					namingFormat={formData.music_track_naming_format}
+				/>
 			</div>
 
 			<div>
@@ -490,14 +488,11 @@ export default function MusicGroup({
 					}
 					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 				/>
-				<div className="mt-2 p-2 bg-muted rounded border border-border">
-					<p className="text-xs font-semibold text-muted-foreground mb-1">
-						Example:
-					</p>
-					<p className="text-xs font-mono">
-						01-05 - Track Title.flac
-					</p>
-				</div>
+				<NamingPreview
+					mediaType="music"
+					folderFormat={formData.music_album_folder_format}
+					namingFormat={formData.music_track_naming_format}
+				/>
 			</div>
 
 			{showBuilder && (

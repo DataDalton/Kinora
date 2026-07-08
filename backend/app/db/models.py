@@ -405,16 +405,6 @@ mediaProfiles = Table(
     metadata,
     Column("id", Integer, primary_key=True),
     Column("name", String(100), unique=True, nullable=False),
-    Column("min_size", Integer),
-    Column("max_size", Integer),
-    # Legacy global quality fields
-    Column("resolutions", ARRAY(Text), server_default="{}"),
-    Column("codecs", ARRAY(Text), server_default="{}"),
-    Column("sources", ARRAY(Text), server_default="{}"),
-    Column("audio_codecs", ARRAY(Text), server_default="{}"),
-    Column("audio_channels", ARRAY(Text), server_default="{}"),
-    Column("hdr_formats", ARRAY(Text), server_default="{}"),
-    Column("editions", ARRAY(Text), server_default="{}"),
     # Movie quality
     Column("movie_resolutions", ARRAY(Text), server_default="{}"),
     Column("movie_codecs", ARRAY(Text), server_default="{}"),
@@ -447,7 +437,6 @@ mediaProfiles = Table(
     Column("languages", ARRAY(Text), server_default="{}"),
     Column("subtitle_languages", ARRAY(Text), server_default="{}"),
     Column("upgrade_allowed", Boolean, default=True),
-    Column("indexers", ARRAY(Text), server_default="{}"),
     Column("uploaders", ARRAY(Text), server_default="{}"),
     Column("release_groups", ARRAY(Text), server_default="{}"),
     Column("regex_filters", ARRAY(Text), server_default="{}"),
@@ -459,6 +448,10 @@ mediaProfiles = Table(
     Column("search_timeout", Integer, default=30),
     Column("max_retries", Integer, default=3),
     Column("max_results", Integer, default=100),
+    # Minimum seeders required to accept a release
+    Column("min_seeds", Integer, server_default="1", nullable=False),
+    # Upgrade replace policy: keep_old | delete_old | keep_versions
+    Column("upgrade_replace_policy", String(20), server_default="keep_old", nullable=False),
     # Naming formats
     Column("movie_naming_format", Text),
     Column("movie_folder_format", Text),
@@ -492,13 +485,19 @@ mediaProfiles = Table(
     Column("colon_replacement", String(5), default=" -"),
     # Torrent validation settings
     Column("validation_enabled", Boolean, default=True),
-    Column("allowed_extensions", ARRAY(Text)),
+    Column("validation_mode", String(20), server_default="allowlist"),
     Column("forbidden_extensions", ARRAY(Text), server_default="'{.exe,.bat,.cmd,.sh,.msi,.dll,.scr,.com,.ps1,.vbs,.jar}'"),
     Column("validation_failure_action", String(20), default="pause_notify"),
     Column("movie_allowed_extensions", ARRAY(Text), server_default="'{.mkv,.mp4,.avi,.m4v,.mov,.wmv,.flv,.webm,.ts}'"),
     Column("show_allowed_extensions", ARRAY(Text), server_default="'{.mkv,.mp4,.avi,.m4v,.mov,.wmv,.flv,.webm,.ts}'"),
     Column("anime_allowed_extensions", ARRAY(Text), server_default="'{.mkv,.mp4,.avi,.m4v}'"),
     Column("music_allowed_extensions", ARRAY(Text), server_default="'{.flac,.mp3,.m4a,.aac,.ogg,.opus,.wav,.wma}'"),
+    # Seeding cascade overrides (NULL = inherit global download-client default)
+    Column("seed_ratio_limit", Float),
+    Column("seed_time_limit", Integer),
+    Column("inactive_seed_time_limit", Integer),
+    Column("seed_then_cleanup", Boolean, server_default="false", nullable=False),
+    Column("auto_recovery", Boolean),
     Column("created_at", DateTime, server_default=func.now(), nullable=False),
     Column("updated_at", DateTime, server_default=func.now(), nullable=False),
     Index("idx_media_profiles_name", "name"),
@@ -594,6 +593,7 @@ downloadHistory = Table(
     Column("size", BigInteger),
     Column("status", String(50), default="pending"),
     Column("progress", Float, default=0.0),
+    Column("grab_mode", String(20), server_default="auto", nullable=False),
     Column("download_client", String(50)),
     Column("save_path", Text),
     Column("error_message", Text),
@@ -611,7 +611,7 @@ downloadHistory = Table(
     Column("created_at", DateTime, server_default=func.now(), nullable=False),
     Column("updated_at", DateTime, server_default=func.now(), nullable=False),
     Index("idx_download_history_media", "media_id", "media_type"),
-    Index("idx_download_history_hash", "torrent_hash"),
+    Index("idx_download_history_hash", "torrent_hash", unique=True),
     Index("idx_download_history_status", "status"),
 )
 

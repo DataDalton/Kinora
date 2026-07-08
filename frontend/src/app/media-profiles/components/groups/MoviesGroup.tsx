@@ -1,4 +1,5 @@
 "use client";
+import NamingPreview from "../shared/NamingPreview";
 
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -481,14 +482,11 @@ export default function MoviesGroup({
 							}
 							className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 						/>
-						<div className="mt-2 p-2 bg-muted rounded border border-border">
-							<p className="text-xs font-semibold text-muted-foreground mb-1">
-								Example:
-							</p>
-							<p className="text-xs font-mono">
-								Movie Title (2024) [tmdbid-12345]
-							</p>
-						</div>
+						<NamingPreview
+							mediaType="movie"
+							folderFormat={formData.movie_folder_format}
+							namingFormat={formData.movie_naming_format}
+						/>
 					</div>
 
 					{/* Movie File Naming Format */}
@@ -519,15 +517,11 @@ export default function MoviesGroup({
 							className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-xs"
 							rows={2}
 						/>
-						<div className="mt-2 p-2 bg-muted rounded border border-border">
-							<p className="text-xs font-semibold text-muted-foreground mb-1">
-								Example:
-							</p>
-							<p className="text-xs font-mono">
-								Movie Title (2024) [tmdbid-12345] -
-								[Bluray-1080p][DTS 5.1][x265]-GROUP
-							</p>
-						</div>
+						<NamingPreview
+							mediaType="movie"
+							folderFormat={formData.movie_folder_format}
+							namingFormat={formData.movie_naming_format}
+						/>
 					</div>
 
 					{/* Naming Builder Modal */}

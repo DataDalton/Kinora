@@ -26,6 +26,7 @@ class MediaFiles(BaseModel):
     root_folder: Optional[str] = None
     files: List[FileInfo] = Field(default_factory=list)
     total_size: int = 0
+    grab_mode: Optional[str] = None
 
 
 class RenameFileRequest(BaseModel):

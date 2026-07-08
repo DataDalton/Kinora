@@ -2,6 +2,7 @@
 Folder selection service for choosing the appropriate root folder based on configured rules.
 Handles disk space caching and filesystem validation for hardlink support.
 """
+
 import os
 import platform
 import shutil
@@ -10,7 +11,6 @@ from datetime import datetime
 import asyncpg
 
 from app.core.cache import cacheGet, cacheSet, cacheDelete
-
 
 DISK_SPACE_CACHE_TTL = 60  # 1 minute cache for disk space
 
@@ -22,10 +22,7 @@ class FolderSelector:
     """
 
     async def getFoldersForMediaType(
-        self,
-        conn: asyncpg.Connection,
-        mediaType: str,
-        activeOnly: bool = True
+        self, conn: asyncpg.Connection, mediaType: str, activeOnly: bool = True
     ) -> List[Dict[str, Any]]:
         """Get all root folders for a media type, ordered by priority."""
         query = """
@@ -43,11 +40,7 @@ class FolderSelector:
         rows = await conn.fetch(query, mediaType)
         return [dict(row) for row in rows]
 
-    async def getFolder(
-        self,
-        conn: asyncpg.Connection,
-        folderId: int
-    ) -> Optional[Dict[str, Any]]:
+    async def getFolder(self, conn: asyncpg.Connection, folderId: int) -> Optional[Dict[str, Any]]:
         """Get a single root folder by ID."""
         row = await conn.fetchrow(
             """
@@ -58,15 +51,11 @@ class FolderSelector:
             FROM root_folders
             WHERE id = $1
             """,
-            folderId
+            folderId,
         )
         return dict(row) if row else None
 
-    async def getDefaultFolder(
-        self,
-        conn: asyncpg.Connection,
-        mediaType: str
-    ) -> Optional[Dict[str, Any]]:
+    async def getDefaultFolder(self, conn: asyncpg.Connection, mediaType: str) -> Optional[Dict[str, Any]]:
         """Get the default folder for a media type."""
         row = await conn.fetchrow(
             """
@@ -77,15 +66,12 @@ class FolderSelector:
             FROM root_folders
             WHERE media_type = $1 AND is_default = true AND is_active = true
             """,
-            mediaType
+            mediaType,
         )
         return dict(row) if row else None
 
     async def selectFolder(
-        self,
-        conn: asyncpg.Connection,
-        mediaType: str,
-        overrideFolderId: Optional[int] = None
+        self, conn: asyncpg.Connection, mediaType: str, overrideFolderId: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Select the best folder for a media type based on configured selection mode.
@@ -120,24 +106,14 @@ class FolderSelector:
             # Default to most free space
             return await self._selectMostFreeSpace(folders)
 
-    async def getSelectionMode(
-        self,
-        conn: asyncpg.Connection,
-        mediaType: str
-    ) -> str:
+    async def getSelectionMode(self, conn: asyncpg.Connection, mediaType: str) -> str:
         """Get the selection mode for a media type."""
         row = await conn.fetchrow(
-            "SELECT selection_mode FROM folder_selection_settings WHERE media_type = $1",
-            mediaType
+            "SELECT selection_mode FROM folder_selection_settings WHERE media_type = $1", mediaType
         )
         return row["selection_mode"] if row else "most_free_space"
 
-    async def setSelectionMode(
-        self,
-        conn: asyncpg.Connection,
-        mediaType: str,
-        selectionMode: str
-    ) -> None:
+    async def setSelectionMode(self, conn: asyncpg.Connection, mediaType: str, selectionMode: str) -> None:
         """Set the selection mode for a media type."""
         await conn.execute(
             """
@@ -146,13 +122,11 @@ class FolderSelector:
             ON CONFLICT (media_type)
             DO UPDATE SET selection_mode = $2, updated_at = now()
             """,
-            mediaType, selectionMode
+            mediaType,
+            selectionMode,
         )
 
-    async def _selectMostFreeSpace(
-        self,
-        folders: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+    async def _selectMostFreeSpace(self, folders: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Select the folder with the most free space."""
         if not folders:
             return None
@@ -163,17 +137,10 @@ class FolderSelector:
             healthyFolders = folders  # Fallback to all if none healthy
 
         # Sort by free space descending
-        sortedFolders = sorted(
-            healthyFolders,
-            key=lambda f: f.get("free_space_bytes") or 0,
-            reverse=True
-        )
+        sortedFolders = sorted(healthyFolders, key=lambda f: f.get("free_space_bytes") or 0, reverse=True)
         return sortedFolders[0] if sortedFolders else None
 
-    async def _selectByPriority(
-        self,
-        folders: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+    async def _selectByPriority(self, folders: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
         Select folders in priority order.
         Move to next priority when current folder exceeds threshold.
@@ -197,10 +164,7 @@ class FolderSelector:
 
         return folders[0] if folders else None
 
-    async def _selectByFillThreshold(
-        self,
-        folders: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+    async def _selectByFillThreshold(self, folders: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
         Fill each folder until threshold, then move to next.
         Similar to priority but strictly follows threshold rules.
@@ -225,7 +189,7 @@ class FolderSelector:
 
         # Check GB threshold
         if thresholdGb is not None:
-            freeGb = freeBytes / (1024 ** 3)
+            freeGb = freeBytes / (1024**3)
             if freeGb < thresholdGb:
                 return False
 
@@ -259,7 +223,7 @@ class FolderSelector:
 
             usage = shutil.disk_usage(path)
             return usage.total, usage.free
-        except (OSError, PermissionError):
+        except OSError, PermissionError:
             return None, None
 
     def validateSameFilesystem(self, rootPath: str, downloadPath: str) -> bool:
@@ -283,7 +247,7 @@ class FolderSelector:
                 rootStat = os.stat(rootPath)
                 downloadStat = os.stat(downloadPath)
                 return rootStat.st_dev == downloadStat.st_dev
-            except (OSError, PermissionError):
+            except OSError, PermissionError:
                 return False
 
     def generateDownloadPath(self, rootPath: str, mediaType: str) -> str:
@@ -346,19 +310,20 @@ class FolderSelector:
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'unknown')
             RETURNING *
             """,
-            mediaType, name, rootPath, downloadPath, priority,
-            fillThresholdPercent, fillThresholdGb,
-            totalBytes, freeBytes
+            mediaType,
+            name,
+            rootPath,
+            downloadPath,
+            priority,
+            fillThresholdPercent,
+            fillThresholdGb,
+            totalBytes,
+            freeBytes,
         )
 
         return dict(row)
 
-    async def updateFolder(
-        self,
-        conn: asyncpg.Connection,
-        folderId: int,
-        **kwargs
-    ) -> Optional[Dict[str, Any]]:
+    async def updateFolder(self, conn: asyncpg.Connection, folderId: int, **kwargs) -> Optional[Dict[str, Any]]:
         """Update an existing root folder."""
         folder = await self.getFolder(conn, folderId)
         if not folder:
@@ -391,13 +356,13 @@ class FolderSelector:
         # Validate filesystem if paths changed
         # Use existing folder paths if new paths are None or not provided
         newRootPath = kwargs.get("rootPath") if kwargs.get("rootPath") is not None else folder["root_path"]
-        newDownloadPath = kwargs.get("downloadPath") if kwargs.get("downloadPath") is not None else folder["download_path"]
+        newDownloadPath = (
+            kwargs.get("downloadPath") if kwargs.get("downloadPath") is not None else folder["download_path"]
+        )
 
         if newRootPath != folder["root_path"] or newDownloadPath != folder["download_path"]:
             if not self.validateSameFilesystem(newRootPath, newDownloadPath):
-                raise ValueError(
-                    "Download path must be on the same filesystem as root path for hardlinks to work."
-                )
+                raise ValueError("Download path must be on the same filesystem as root path for hardlinks to work.")
 
         updates.append(f"updated_at = ${paramIdx}")
         values.append(datetime.utcnow())
@@ -409,11 +374,7 @@ class FolderSelector:
         row = await conn.fetchrow(query, *values)
         return dict(row) if row else None
 
-    async def deleteFolder(
-        self,
-        conn: asyncpg.Connection,
-        folderId: int
-    ) -> bool:
+    async def deleteFolder(self, conn: asyncpg.Connection, folderId: int) -> bool:
         """Delete a root folder. Fails if media items are assigned to it."""
         # Check if any media items are using this folder
         mediaTypes = [
@@ -425,27 +386,17 @@ class FolderSelector:
         ]
 
         for table, column in mediaTypes:
-            count = await conn.fetchval(
-                f"SELECT COUNT(*) FROM {table} WHERE {column} = $1",
-                folderId
-            )
+            count = await conn.fetchval(f"SELECT COUNT(*) FROM {table} WHERE {column} = $1", folderId)
             if count > 0:
                 raise ValueError(
                     f"Cannot delete folder: {count} items in {table} are assigned to it. "
                     "Reassign or delete them first."
                 )
 
-        result = await conn.execute(
-            "DELETE FROM root_folders WHERE id = $1",
-            folderId
-        )
+        result = await conn.execute("DELETE FROM root_folders WHERE id = $1", folderId)
         return result == "DELETE 1"
 
-    async def updateDiskSpaceCache(
-        self,
-        conn: asyncpg.Connection,
-        folderId: int
-    ) -> None:
+    async def updateDiskSpaceCache(self, conn: asyncpg.Connection, folderId: int) -> None:
         """Update the cached disk space values in the database."""
         folder = await self.getFolder(conn, folderId)
         if not folder:
@@ -460,13 +411,49 @@ class FolderSelector:
             SET total_space_bytes = $1, free_space_bytes = $2, updated_at = now()
             WHERE id = $3
             """,
-            totalBytes, freeBytes, folderId
+            totalBytes,
+            freeBytes,
+            folderId,
         )
 
         # Also update Redis cache
         cacheKey = f"disk_space:{rootPath}"
         if totalBytes is not None:
             await cacheSet(cacheKey, {"total": totalBytes, "free": freeBytes}, DISK_SPACE_CACHE_TTL)
+
+
+async def resolve_media_folder(
+    conn: asyncpg.Connection,
+    root_folder_id: Optional[int],
+    file_path: Optional[str],
+) -> Optional[str]:
+    """
+    Resolve the top-level media folder for an item from its assigned root folder and its
+    file path. Shows/anime store file_path as an episode file, so the item's folder is the
+    first path segment under the root_folder's root_path. Falls back to the file's own
+    directory when the root cannot be resolved. Returns None when it cannot be determined.
+    """
+    if not file_path:
+        return None
+    root_path = None
+    if root_folder_id:
+        row = await conn.fetchrow("SELECT root_path FROM root_folders WHERE id = $1", root_folder_id)
+        if row:
+            root_path = row["root_path"]
+    if root_path:
+        try:
+            rel = os.path.relpath(file_path, root_path)
+        except ValueError:
+            rel = None
+        if rel and not rel.startswith(".."):
+            top = rel.split(os.sep)[0]
+            candidate = os.path.join(root_path, top)
+            if os.path.isdir(candidate):
+                return candidate
+    if os.path.isdir(file_path):
+        return file_path
+    parent = os.path.dirname(file_path)
+    return parent if parent and os.path.isdir(parent) else None
 
 
 # Singleton instance

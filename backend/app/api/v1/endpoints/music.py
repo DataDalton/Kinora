@@ -116,7 +116,7 @@ async def add_artist(
         "picture_xl": artist_data.picture_xl,
         "deezer_id": artist_data.deezer_id,
         "monitored": artist_data.monitored,
-        "root_folder_path": artist_data.root_folder_path,
+        "root_folder_id": artist_data.root_folder_id,
         "nb_album": artist_data.nb_album,
         "nb_fan": artist_data.nb_fan,
     }
@@ -307,7 +307,7 @@ async def add_album(
         "monitored": album_data.monitored,
         "has_file": False,
         "media_profile_id": album_data.media_profile_id,
-        "root_folder_path": album_data.root_folder_path,
+        "root_folder_id": album_data.root_folder_id,
         "artist_name": artistName,
         "status": "wanted",
         "explicit_lyrics": album_data.explicit_lyrics,
@@ -681,7 +681,7 @@ async def add_artist_discography(
             "artist_id": artist_id,
             "monitored": monitored,
             "media_profile_id": media_profile_id,
-            "root_folder_path": artist["root_folder_path"],
+            "root_folder_id": artist.get("root_folder_id"),
             "nb_tracks": albumInfo.get("nb_tracks"),
             "record_type": albumInfo.get("record_type"),
             "explicit_lyrics": albumInfo.get("explicit_lyrics", False),
@@ -829,7 +829,6 @@ async def search_and_download_album(
     torrentHash = await search_engine.search_music_and_download(
         query=searchQuery,
         profile=profile,
-        save_path=album.get("root_folder_path"),
         tags=["music", artistName],
     )
 
@@ -896,7 +895,6 @@ async def search_and_download_track(
     torrentHash = await search_engine.search_music_and_download(
         query=searchQuery,
         profile=profile,
-        save_path=album.get("root_folder_path") if album else None,
         tags=["music", artistName],
     )
 
@@ -970,7 +968,6 @@ async def search_and_download_discography(
         torrentHash = await search_engine.search_music_and_download(
             query=searchQuery,
             profile=profile,
-            save_path=album.get("root_folder_path") or artist.get("root_folder_path"),
             tags=["music", artist["name"]],
         )
 
@@ -1147,11 +1144,14 @@ async def delete_artist_with_files(
                 except Exception as e:
                     errors.append(f"Failed to delete {album['file_path']}: {str(e)}")
 
-        if artist["root_folder_path"] and os.path.exists(artist["root_folder_path"]):
+        # Remove now-empty artist folders (the parent of each deleted album folder).
+        artistFolders = {
+            os.path.dirname(a["file_path"]) for a in albums if a["file_path"]
+        }
+        for folder in artistFolders:
             try:
-                if os.path.isdir(artist["root_folder_path"]):
-                    if not os.listdir(artist["root_folder_path"]):
-                        os.rmdir(artist["root_folder_path"])
+                if os.path.isdir(folder) and not os.listdir(folder):
+                    os.rmdir(folder)
             except Exception as e:
                 errors.append(f"Failed to remove artist folder: {str(e)}")
 

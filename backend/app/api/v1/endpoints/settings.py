@@ -113,10 +113,7 @@ async def get_all_settings(
             settings_by_category[category] = []
         settings_by_category[category].append(setting)
 
-    return [
-        SettingsGroupResponse(category=cat, settings=settings)
-        for cat, settings in settings_by_category.items()
-    ]
+    return [SettingsGroupResponse(category=cat, settings=settings) for cat, settings in settings_by_category.items()]
 
 
 @router.get("/download-clients", response_model=List[DownloadClientResponse])
@@ -164,15 +161,11 @@ async def update_download_client(
     """
 
     # Check if client exists
-    existing = await conn.fetchrow(
-        "SELECT * FROM download_clients WHERE id = $1",
-        client_id
-    )
+    existing = await conn.fetchrow("SELECT * FROM download_clients WHERE id = $1", client_id)
 
     if not existing:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Download client with id {client_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Download client with id {client_id} not found"
         )
 
     # Build update query dynamically based on provided fields
@@ -220,18 +213,14 @@ async def update_download_client(
         if update_data.is_default:
             # Unset default for all other clients of same type
             await conn.execute(
-                "UPDATE download_clients SET is_default = FALSE WHERE client_type = $1",
-                existing['client_type']
+                "UPDATE download_clients SET is_default = FALSE WHERE client_type = $1", existing["client_type"]
             )
         update_fields.append(f"is_default = ${param_count}")
         update_values.append(update_data.is_default)
         param_count += 1
 
     if not update_fields:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No fields to update"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
 
     # Add updated_at
     update_fields.append(f"updated_at = NOW()")
@@ -248,9 +237,10 @@ async def update_download_client(
     updated = await conn.fetchrow(update_query, *update_values)
 
     # Clear cached qBittorrent client instance so it reloads with new config
-    if existing['client_type'] == 'qbittorrent':
+    if existing["client_type"] == "qbittorrent":
         from app.services.download_clients.qbittorrent import qbittorrent_client
         import app.services.download_clients.qbittorrent as qb_module
+
         qb_module.qbittorrent_client = None
 
     return DownloadClientResponse(
@@ -277,11 +267,14 @@ async def get_setting(
     Only administrators can access settings
     """
 
-    row = await conn.fetchrow("""
+    row = await conn.fetchrow(
+        """
         SELECT key, value, category, description, is_encrypted, value_type
         FROM app_settings
         WHERE key = $1
-    """, key)
+    """,
+        key,
+    )
 
     if not row:
         raise HTTPException(
@@ -315,11 +308,14 @@ async def update_setting(
     """
 
     # Check if setting exists
-    existing = await conn.fetchrow("""
+    existing = await conn.fetchrow(
+        """
         SELECT key, is_encrypted, category
         FROM app_settings
         WHERE key = $1
-    """, key)
+    """,
+        key,
+    )
 
     if not existing:
         raise HTTPException(
@@ -329,15 +325,19 @@ async def update_setting(
 
     # Encrypt value if setting requires encryption
     value_to_store = setting_update.value
-    if existing['is_encrypted']:
+    if existing["is_encrypted"]:
         value_to_store = encrypt_value(setting_update.value)
 
     # Update the setting
-    await conn.execute("""
+    await conn.execute(
+        """
         UPDATE app_settings
         SET value = $1, updated_at = NOW()
         WHERE key = $2
-    """, value_to_store, key)
+    """,
+        value_to_store,
+        key,
+    )
 
     return {"message": f"Setting '{key}' updated successfully"}
 
@@ -354,11 +354,14 @@ async def delete_setting(
     """
 
     # Reset value to empty string instead of deleting the row
-    result = await conn.execute("""
+    result = await conn.execute(
+        """
         UPDATE app_settings
         SET value = '', updated_at = NOW()
         WHERE key = $1
-    """, key)
+    """,
+        key,
+    )
 
     if result == "UPDATE 0":
         raise HTTPException(
@@ -398,14 +401,29 @@ async def initialize_default_settings(
             "category": "api_keys",
             "description": "TMDB API v3 Key for movie/show metadata",
         },
+        {
+            "key": "opensubtitles_api_key",
+            "value": "",
+            "value_type": "string",
+            "is_encrypted": True,
+            "category": "api_keys",
+            "description": "OpenSubtitles API key for subtitle downloads",
+        },
     ]
 
     for setting in default_settings:
-        await conn.execute("""
+        await conn.execute(
+            """
             INSERT INTO app_settings (key, value, value_type, is_encrypted, category, description)
             VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (key) DO NOTHING
-        """, setting["key"], setting["value"], setting["value_type"],
-            setting["is_encrypted"], setting["category"], setting["description"])
+        """,
+            setting["key"],
+            setting["value"],
+            setting["value_type"],
+            setting["is_encrypted"],
+            setting["category"],
+            setting["description"],
+        )
 
     return {"message": "Default settings initialized"}

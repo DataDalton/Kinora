@@ -51,6 +51,9 @@ dependencies = [
     "subliminal>=2.6.0",
     "babelfish>=0.6.1",
 
+    # Audio tagging (embed artwork/lyrics into music files)
+    "mutagen>=1.47.0",
+
     # Language Codes
     "python-iso639>=2026.4.20",
 

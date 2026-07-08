@@ -56,7 +56,7 @@ interface MediaProfile {
 	languages?: string[];
 	subtitle_languages?: string[];
 	upgrade_allowed: boolean;
-	indexers?: string[];
+	upgrade_replace_policy?: string;
 	uploaders?: string[];
 	release_groups?: string[];
 	regex_filters?: string[];
@@ -68,6 +68,7 @@ interface MediaProfile {
 	search_timeout?: number;
 	max_retries?: number;
 	max_results?: number;
+	min_seeds?: number;
 	// Naming formats
 	movie_naming_format?: string;
 	movie_folder_format?: string;
@@ -95,6 +96,7 @@ interface MediaProfile {
 	music_embed_lyrics?: boolean;
 	music_embed_artwork?: boolean;
 	// File output settings
+	media_server?: string;
 	use_hardlinks?: boolean;
 	illegal_char_replacement?: string;
 	colon_replacement?: string;
@@ -107,6 +109,11 @@ interface MediaProfile {
 	show_allowed_extensions?: string[];
 	anime_allowed_extensions?: string[];
 	music_allowed_extensions?: string[];
+	seed_ratio_limit?: number | null;
+	seed_time_limit?: number | null;
+	inactive_seed_time_limit?: number | null;
+	seed_then_cleanup?: boolean;
+	auto_recovery?: boolean | null;
 }
 
 const LANGUAGES = ISO6391.getAllCodes().map((code) => ({
@@ -189,6 +196,7 @@ export default function MediaProfilesPage() {
 				languages: data.languages,
 				subtitle_languages: data.subtitle_languages,
 				upgrade_allowed: data.upgrade_allowed,
+				upgrade_replace_policy: data.upgrade_replace_policy,
 				uploaders: data.uploader_filter
 					? data.uploader_filter
 							.split(",")
@@ -210,6 +218,7 @@ export default function MediaProfilesPage() {
 				search_timeout: data.search_timeout,
 				max_retries: data.max_retries,
 				max_results: data.max_results,
+				min_seeds: data.min_seeds,
 				// Naming formats
 				movie_naming_format: data.movie_naming_format,
 				movie_folder_format: data.movie_folder_format,
@@ -237,6 +246,7 @@ export default function MediaProfilesPage() {
 				music_embed_lyrics: data.music_embed_lyrics,
 				music_embed_artwork: data.music_embed_artwork,
 				// File output settings
+				media_server: data.media_server,
 				use_hardlinks: data.use_hardlinks,
 				illegal_char_replacement: data.illegal_char_replacement,
 				colon_replacement: data.colon_replacement,
@@ -249,6 +259,12 @@ export default function MediaProfilesPage() {
 				show_allowed_extensions: data.show_allowed_extensions,
 				anime_allowed_extensions: data.anime_allowed_extensions,
 				music_allowed_extensions: data.music_allowed_extensions,
+				// Seeding overrides
+				seed_ratio_limit: data.seed_ratio_limit,
+				seed_time_limit: data.seed_time_limit,
+				inactive_seed_time_limit: data.inactive_seed_time_limit,
+				seed_then_cleanup: data.seed_then_cleanup,
+				auto_recovery: data.auto_recovery,
 			});
 			return response.data;
 		},
@@ -300,6 +316,7 @@ export default function MediaProfilesPage() {
 				languages: data.languages,
 				subtitle_languages: data.subtitle_languages,
 				upgrade_allowed: data.upgrade_allowed,
+				upgrade_replace_policy: data.upgrade_replace_policy,
 				uploaders: data.uploader_filter
 					? data.uploader_filter
 							.split(",")
@@ -321,6 +338,7 @@ export default function MediaProfilesPage() {
 				search_timeout: data.search_timeout,
 				max_retries: data.max_retries,
 				max_results: data.max_results,
+				min_seeds: data.min_seeds,
 				// Naming formats
 				movie_naming_format: data.movie_naming_format,
 				movie_folder_format: data.movie_folder_format,
@@ -348,6 +366,7 @@ export default function MediaProfilesPage() {
 				music_embed_lyrics: data.music_embed_lyrics,
 				music_embed_artwork: data.music_embed_artwork,
 				// File output settings
+				media_server: data.media_server,
 				use_hardlinks: data.use_hardlinks,
 				illegal_char_replacement: data.illegal_char_replacement,
 				colon_replacement: data.colon_replacement,
@@ -360,6 +379,12 @@ export default function MediaProfilesPage() {
 				show_allowed_extensions: data.show_allowed_extensions,
 				anime_allowed_extensions: data.anime_allowed_extensions,
 				music_allowed_extensions: data.music_allowed_extensions,
+				// Seeding overrides
+				seed_ratio_limit: data.seed_ratio_limit,
+				seed_time_limit: data.seed_time_limit,
+				inactive_seed_time_limit: data.inactive_seed_time_limit,
+				seed_then_cleanup: data.seed_then_cleanup,
+				auto_recovery: data.auto_recovery,
 			});
 			return response.data;
 		},
@@ -430,6 +455,11 @@ export default function MediaProfilesPage() {
 			languages: profile.languages || ["en"],
 			subtitle_languages: profile.subtitle_languages || [],
 			upgrade_allowed: profile.upgrade_allowed,
+			upgrade_replace_policy:
+				(profile.upgrade_replace_policy as
+					| "keep_old"
+					| "delete_old"
+					| "keep_versions") || defaults.upgrade_replace_policy,
 			uploader_filter: profile.uploaders?.join(", ") || "",
 			release_group_filter: profile.release_groups?.join(", ") || "",
 			custom_regex: profile.regex_filters?.[0] || "",
@@ -450,6 +480,7 @@ export default function MediaProfilesPage() {
 			search_timeout: profile.search_timeout ?? 30,
 			max_retries: profile.max_retries ?? 3,
 			max_results: profile.max_results ?? 100,
+			min_seeds: profile.min_seeds ?? 1,
 			// Naming formats
 			movie_naming_format:
 				profile.movie_naming_format || defaults.movie_naming_format,
@@ -497,6 +528,9 @@ export default function MediaProfilesPage() {
 			music_embed_lyrics: profile.music_embed_lyrics ?? true,
 			music_embed_artwork: profile.music_embed_artwork ?? true,
 			// File output settings
+			media_server:
+				(profile.media_server as "jellyfin" | "custom") ||
+				defaults.media_server,
 			use_hardlinks: profile.use_hardlinks ?? true,
 			illegal_char_replacement: profile.illegal_char_replacement || "_",
 			colon_replacement: profile.colon_replacement || " -",
@@ -524,6 +558,12 @@ export default function MediaProfilesPage() {
 			music_allowed_extensions:
 				profile.music_allowed_extensions ||
 				defaults.music_allowed_extensions,
+			// Seeding overrides (null = inherit)
+			seed_ratio_limit: profile.seed_ratio_limit ?? null,
+			seed_time_limit: profile.seed_time_limit ?? null,
+			inactive_seed_time_limit: profile.inactive_seed_time_limit ?? null,
+			seed_then_cleanup: profile.seed_then_cleanup ?? false,
+			auto_recovery: profile.auto_recovery ?? null,
 		});
 		setEditingProfile(profile);
 		setShowForm(true);

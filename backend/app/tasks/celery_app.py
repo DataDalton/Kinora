@@ -26,6 +26,8 @@ celery_app = Celery(
     include=[
         "app.tasks.rss_monitor",
         "app.tasks.wanted_search",
+        "app.tasks.upgrade_search",
+        "app.tasks.manual_search",
         "app.tasks.download_monitor",
         "app.tasks.subtitle_search",
         "app.tasks.metadata_refresh",
@@ -33,6 +35,7 @@ celery_app = Celery(
         "app.tasks.music_monitor",
         "app.tasks.validation_monitor",
         "app.tasks.folder_health",
+        "app.tasks.seeding_monitor",
     ],
 )
 
@@ -71,23 +74,28 @@ def get_schedule_intervals():
                 auto_search_interval = await conn.fetchval(
                     "SELECT value FROM app_settings WHERE key = 'auto_search_interval'"
                 )
+                upgrade_search_interval = await conn.fetchval(
+                    "SELECT value FROM app_settings WHERE key = 'upgrade_search_interval'"
+                )
                 return (
                     int(rss_interval) if rss_interval else 15,
                     int(auto_search_interval) if auto_search_interval else 60,
+                    int(upgrade_search_interval) if upgrade_search_interval else 360,
                 )
             finally:
                 await conn.close()
 
-        rss_interval, auto_search_interval = asyncio.run(fetch_settings())
+        rss_interval, auto_search_interval, upgrade_search_interval = asyncio.run(fetch_settings())
     except Exception:
         rss_interval = 15
         auto_search_interval = 60
+        upgrade_search_interval = 360
 
-    return rss_interval, auto_search_interval
+    return rss_interval, auto_search_interval, upgrade_search_interval
 
 
 # Get intervals from database
-rss_interval, auto_search_interval = get_schedule_intervals()
+rss_interval, auto_search_interval, upgrade_search_interval = get_schedule_intervals()
 
 # Celery Beat schedule
 celery_app.conf.beat_schedule = {
@@ -98,6 +106,10 @@ celery_app.conf.beat_schedule = {
     "wanted-search": {
         "task": "app.tasks.wanted_search.search_wanted_media",
         "schedule": crontab(minute=f"*/{auto_search_interval}"),
+    },
+    "upgrade-search": {
+        "task": "app.tasks.upgrade_search.search_upgrades",
+        "schedule": float(upgrade_search_interval * 60),  # minutes -> seconds
     },
     "download-monitor-every-minute": {
         "task": "app.tasks.download_monitor.check_downloads",
@@ -126,6 +138,10 @@ celery_app.conf.beat_schedule = {
     "folder-disk-space-update": {
         "task": "app.tasks.folder_health.update_disk_space",
         "schedule": 60.0,  # Every 60 seconds - update cached disk space
+    },
+    "seeding-rules-monitor": {
+        "task": "app.tasks.seeding_monitor.evaluate_seeding_rules",
+        "schedule": 60.0,  # Every 60 seconds - smart seeding and reliability rules
     },
 }
 

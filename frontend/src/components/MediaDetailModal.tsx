@@ -2,7 +2,8 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import InteractiveSearchModal from "./InteractiveSearchModal";
 import Image from "next/image";
 import Toast from "./Toast";
 import { Folder, HardDrive, User, ArrowLeft, X } from "lucide-react";
@@ -67,6 +68,16 @@ export default function MediaDetailModal({
 	);
 	const [autoSearch, setAutoSearch] = useState(true);
 	const [addCollection, setAddCollection] = useState(false);
+	// Add & Search: open the interactive search WITHOUT adding yet. The library item is
+	// created only when the user actually downloads a release (deferred add), so cancelling
+	// the search leaves nothing behind.
+	const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
+	const [interactiveSearchMediaId, setInteractiveSearchMediaId] = useState<
+		number | null
+	>(null);
+	// Set while an add is being performed as part of a deferred grab, so the add's onSuccess
+	// does not navigate away or close the search.
+	const deferredAddRef = useRef(false);
 	const [navigationStack, setNavigationStack] = useState<Media[]>([]);
 	const [currentMedia, setCurrentMedia] = useState<Media | null>(null);
 	const [toast, setToast] = useState<{
@@ -253,7 +264,9 @@ export default function MediaDetailModal({
 			tmdb_id?: number;
 			deezer_id?: number;
 			monitored: boolean;
-			media_profile_id?: number;
+			media_profile_id?: number | null;
+			root_folder_id?: number | null;
+			add_sequels?: boolean;
 		}) => {
 			let endpoint: string;
 			if (mediaType === "movie") endpoint = "/movies";
@@ -293,6 +306,13 @@ export default function MediaDetailModal({
 									: "anime";
 			queryClient.invalidateQueries({ queryKey: [queryKey] });
 
+			// Deferred add (created as part of an Add & Search grab): keep the interactive
+			// search open and do not navigate away. ensureMediaId records the new id.
+			if (deferredAddRef.current) {
+				deferredAddRef.current = false;
+				return;
+			}
+
 			// Show count of related seasons added for anime
 			if (mediaType === "anime" && data.total_added > 1) {
 				showToast(
@@ -306,6 +326,60 @@ export default function MediaDetailModal({
 			setShowAddModal(false);
 		},
 	});
+
+	// Build the add payload from the current selections. Used both by the plain add and by
+	// the deferred add that runs on the first download from Add & Search.
+	const buildAddPayload = () => {
+		if (!mediaDetails?.id) return null;
+		const base = {
+			monitored: autoSearch,
+			media_profile_id: selectedProfileId,
+			root_folder_id: selectedFolderId,
+		};
+		if (mediaType === "anime")
+			return { ...base, anilist_id: mediaDetails.id } as any;
+		if (mediaType === "album")
+			return { ...base, deezer_id: mediaDetails.id } as any;
+		return { ...base, tmdb_id: mediaDetails.id } as any;
+	};
+
+	// Create the library item on demand (first download from Add & Search) and return its
+	// id. Repeated grabs reuse the already-created item. Throws a clear message when the
+	// item cannot be added so the search modal can surface it (permission denied, the add
+	// was routed to an approval request, or required details are missing).
+	const ensureMediaId = async (): Promise<number> => {
+		if (interactiveSearchMediaId) return interactiveSearchMediaId;
+		// Explicit access guard: only direct-add users create the item from here.
+		if (!canDirectAdd) {
+			throw new Error(
+				canRequestAdd
+					? "You can only request this title. Use Request on the detail page instead of Add & Search."
+					: "You do not have permission to add this title to the library.",
+			);
+		}
+		const payload = buildAddPayload();
+		if (!payload) {
+			throw new Error("Missing the details needed to add this title.");
+		}
+		deferredAddRef.current = true;
+		let data: any;
+		try {
+			data = await addMediaMutation.mutateAsync(payload);
+		} finally {
+			deferredAddRef.current = false;
+		}
+		if (data?.id) {
+			setInteractiveSearchMediaId(data.id);
+			return data.id;
+		}
+		// The server routed this to an approval request instead of a direct add.
+		if (data?.request_id || data?.status === "pending") {
+			throw new Error(
+				"This title needs approval before it can be downloaded.",
+			);
+		}
+		throw new Error("Could not add this title to your library.");
+	};
 
 	const getPosterUrl = (path: string | null) => {
 		if (!path) {
@@ -1416,7 +1490,9 @@ export default function MediaDetailModal({
 									)}
 								</select>
 								<p className="text-xs text-muted-foreground mt-1">
-									Quality profile for downloads
+									Quality profile for downloads. Required only
+									when automatic search is on. Leave unset to
+									add now and search interactively later.
 								</p>
 							</div>
 
@@ -1633,9 +1709,9 @@ export default function MediaDetailModal({
 							<div className="flex gap-3 pt-4">
 								<button
 									onClick={() => {
-										if (!selectedProfileId) {
+										if (autoSearch && !selectedProfileId) {
 											showToast(
-												"Please select a media profile",
+												"Select a media profile to search automatically, or turn off automatic search to add without one",
 												"info",
 											);
 											return;
@@ -1787,7 +1863,7 @@ export default function MediaDetailModal({
 									}}
 									disabled={
 										addMediaMutation.isPending ||
-										!selectedProfileId
+										(autoSearch && !selectedProfileId)
 									}
 									className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 cursor-pointer transition-all hover:scale-105"
 								>
@@ -1795,6 +1871,22 @@ export default function MediaDetailModal({
 										? "Adding..."
 										: "Add to Library"}
 								</button>
+								{/* Add & Search opens the interactive search without adding yet; the item is
+						    created on the first download (deferred add), so cancelling adds nothing. An
+						    artist is not a single searchable release, so it is excluded. */}
+								{mediaType !== "artist" && (
+									<button
+										onClick={() => {
+											setInteractiveSearchMediaId(null);
+											setShowAddModal(false);
+											setShowInteractiveSearch(true);
+										}}
+										disabled={addMediaMutation.isPending}
+										className="flex-1 px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 disabled:opacity-50 cursor-pointer transition-all"
+									>
+										Add & Search
+									</button>
+								)}
 								<button
 									onClick={() => {
 										setShowAddModal(false);
@@ -1926,6 +2018,43 @@ export default function MediaDetailModal({
 						onClose={() => setToast(null)}
 					/>
 				</div>
+			)}
+
+			{/* Add & Search: interactive search. The item is not in the library yet; it is
+			    created via ensureMediaId on the first download (deferred add). */}
+			{showInteractiveSearch && (
+				<InteractiveSearchModal
+					isOpen={showInteractiveSearch}
+					onClose={() => {
+						setShowInteractiveSearch(false);
+						onClose();
+					}}
+					mediaType={
+						(mediaType === "artist" ? "album" : mediaType) as
+							| "movie"
+							| "show"
+							| "anime"
+							| "album"
+							| "track"
+					}
+					mediaId={interactiveSearchMediaId}
+					ensureMediaId={ensureMediaId}
+					profileId={selectedProfileId}
+					onProfileChange={setSelectedProfileId}
+					mediaTitle={
+						mediaDetails?.title ||
+						mediaDetails?.name ||
+						displayMedia?.title ||
+						displayMedia?.name ||
+						""
+					}
+					searchQuery={
+						(mediaDetails?.title || mediaDetails?.name || "") +
+						(mediaType === "movie" && mediaDetails?.release_date
+							? ` ${String(mediaDetails.release_date).slice(0, 4)}`
+							: "")
+					}
+				/>
 			)}
 		</>
 	);

@@ -1,4 +1,5 @@
 from typing import List, Optional
+import os
 import secrets
 from pathlib import Path
 from pydantic import field_validator, model_validator
@@ -132,15 +133,33 @@ class Settings(BaseSettings):
 
     def _get_or_create_secret_key(self, key_name: str) -> str:
         """
-        Get or create a persistent secret key stored in a file
+        Get or create a persistent secret key stored in a file.
+
+        Uses KINORA_SECRETS_DIR when set (a mounted volume in Docker) so keys
+        survive container recreation. Generate-if-absent, never overwritten.
         """
-        key_file = Path(f".{key_name}")
+        secrets_dir = os.getenv("KINORA_SECRETS_DIR", ".")
+        key_file = Path(secrets_dir) / f".{key_name}"
+
+        # Migrate a legacy key from the working directory if present.
+        legacy = Path(f".{key_name}")
+        if not key_file.exists() and legacy.exists():
+            try:
+                key_file.parent.mkdir(parents=True, exist_ok=True)
+                key_file.write_text(legacy.read_text().strip())
+            except OSError:
+                return legacy.read_text().strip()
+
         if key_file.exists():
             return key_file.read_text().strip()
-        else:
-            new_key = secrets.token_urlsafe(32)
+
+        new_key = secrets.token_urlsafe(32)
+        try:
+            key_file.parent.mkdir(parents=True, exist_ok=True)
             key_file.write_text(new_key)
-            return new_key
+        except OSError:
+            pass
+        return new_key
 
     # External APIs
     # TMDB API v3 Key (injected during Docker build from GitHub Secrets)

@@ -16,16 +16,18 @@ from app.schemas.user import User
 from app.services.library_scanner import LibraryScanner
 from app.services.media_matcher import MediaMatcher
 from app.services.file_manager import FileManager
+from app.services import naming_tokens
+from pathlib import Path
 from app.schemas.movie import Movie
 from app.schemas.show import Show
 from app.schemas.anime import Anime
-
 
 router = APIRouter()
 
 
 class ScanRequest(BaseModel):
     """Request to scan a directory for media files."""
+
     directory_path: str = Field(..., description="Path to directory to scan")
     media_type: str = Field(..., description="Media type: movie, show, or anime")
     recursive: bool = Field(True, description="Scan subdirectories recursively")
@@ -34,6 +36,7 @@ class ScanRequest(BaseModel):
 
 class ImportRequest(BaseModel):
     """Request to import scanned files into library."""
+
     scanned_files: List[dict] = Field(..., description="List of scanned file metadata")
     media_type: str = Field(..., description="Media type: movie, show, or anime")
     root_folder_path: str = Field(..., description="Destination root folder for organized files")
@@ -44,6 +47,7 @@ class ImportRequest(BaseModel):
 
 class ScanResponse(BaseModel):
     """Response from directory scan."""
+
     scanned_count: int
     matched_count: int
     unmatched_count: int
@@ -53,6 +57,7 @@ class ScanResponse(BaseModel):
 
 class ImportResponse(BaseModel):
     """Response from import operation."""
+
     success_count: int
     failed_count: int
     imported_items: List[dict]
@@ -68,17 +73,15 @@ async def scan_directory(
     Scan a directory for media files and match them to metadata.
     """
     # Validate media type
-    if scan_request.media_type not in ['movie', 'show', 'anime']:
+    if scan_request.media_type not in ["movie", "show", "anime"]:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid media_type. Must be 'movie', 'show', or 'anime'"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid media_type. Must be 'movie', 'show', or 'anime'"
         )
 
     # Validate directory exists
     if not os.path.exists(scan_request.directory_path):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Directory not found: {scan_request.directory_path}"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Directory not found: {scan_request.directory_path}"
         )
 
     try:
@@ -91,27 +94,23 @@ async def scan_directory(
             directory_path=scan_request.directory_path,
             media_type=scan_request.media_type,
             recursive=scan_request.recursive,
-            skip_samples=scan_request.skip_samples
+            skip_samples=scan_request.skip_samples,
         )
 
         # Match files to metadata
-        match_results = matcher.batch_match_files(
-            scanned_files=scanned_files,
-            similarity_threshold=0.7
-        )
+        match_results = matcher.batch_match_files(scanned_files=scanned_files, similarity_threshold=0.7)
 
         return ScanResponse(
             scanned_count=len(scanned_files),
-            matched_count=len(match_results['matched']),
-            unmatched_count=len(match_results['unmatched']),
-            matched_files=match_results['matched'],
-            unmatched_files=match_results['unmatched']
+            matched_count=len(match_results["matched"]),
+            unmatched_count=len(match_results["unmatched"]),
+            matched_files=match_results["matched"],
+            unmatched_files=match_results["unmatched"],
         )
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error scanning directory: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error scanning directory: {str(e)}"
         )
 
 
@@ -127,24 +126,19 @@ async def import_files(
     Adds to database and organizes files according to naming conventions.
     """
     # Validate media type
-    if import_request.media_type not in ['movie', 'show', 'anime']:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid media_type"
-        )
+    if import_request.media_type not in ["movie", "show", "anime"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid media_type")
 
     # Validate copy mode
-    if import_request.copy_mode not in ['move', 'copy']:
+    if import_request.copy_mode not in ["move", "copy"]:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid copy_mode. Must be 'move' or 'copy'"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid copy_mode. Must be 'move' or 'copy'"
         )
 
     # Validate root folder
     if not os.path.exists(import_request.root_folder_path):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Root folder not found: {import_request.root_folder_path}"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Root folder not found: {import_request.root_folder_path}"
         )
 
     imported_items = []
@@ -156,7 +150,7 @@ async def import_files(
         for matched_file in import_request.scanned_files:
             try:
                 # Import based on media type
-                if import_request.media_type == 'movie':
+                if import_request.media_type == "movie":
                     result = await _import_movie(
                         conn=conn,
                         matched_file=matched_file,
@@ -164,9 +158,9 @@ async def import_files(
                         copy_mode=import_request.copy_mode,
                         monitored=import_request.monitored,
                         media_profile_id=import_request.media_profile_id,
-                        file_manager=file_manager
+                        file_manager=file_manager,
                     )
-                elif import_request.media_type == 'show':
+                elif import_request.media_type == "show":
                     result = await _import_show(
                         conn=conn,
                         matched_file=matched_file,
@@ -174,9 +168,9 @@ async def import_files(
                         copy_mode=import_request.copy_mode,
                         monitored=import_request.monitored,
                         media_profile_id=import_request.media_profile_id,
-                        file_manager=file_manager
+                        file_manager=file_manager,
                     )
-                elif import_request.media_type == 'anime':
+                elif import_request.media_type == "anime":
                     result = await _import_anime(
                         conn=conn,
                         matched_file=matched_file,
@@ -184,29 +178,56 @@ async def import_files(
                         copy_mode=import_request.copy_mode,
                         monitored=import_request.monitored,
                         media_profile_id=import_request.media_profile_id,
-                        file_manager=file_manager
+                        file_manager=file_manager,
                     )
 
                 imported_items.append(result)
 
             except Exception as e:
-                failed_items.append({
-                    'file': matched_file.get('scanned_file', {}).get('file_path'),
-                    'error': str(e)
-                })
+                failed_items.append({"file": matched_file.get("scanned_file", {}).get("file_path"), "error": str(e)})
 
         return ImportResponse(
             success_count=len(imported_items),
             failed_count=len(failed_items),
             imported_items=imported_items,
-            failed_items=failed_items
+            failed_items=failed_items,
         )
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error importing files: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error importing files: {str(e)}"
         )
+
+
+async def _resolve_movie_dest(conn, matched_file, tmdb_id, media_profile_id, source_path, root_folder_path):
+    """Build the destination path for an imported movie via the naming token engine."""
+    prof = None
+    if media_profile_id:
+        prof = await conn.fetchrow(
+            "SELECT movie_naming_format, movie_folder_format, illegal_char_replacement, "
+            "colon_replacement FROM media_profiles WHERE id = $1",
+            media_profile_id,
+        )
+    naming = (prof and prof["movie_naming_format"]) or "{Movie CleanTitle} ({Release Year})"
+    folder = (prof and prof["movie_folder_format"]) or "{Movie CleanTitle} ({Release Year})"
+    illegal = (prof and prof["illegal_char_replacement"]) or ""
+    colon = (prof and prof["colon_replacement"]) or " -"
+    row = {
+        "title": matched_file.get("title"),
+        "release_date": matched_file.get("release_date"),
+        "tmdb_id": tmdb_id,
+        "imdb_id": matched_file.get("imdb_id"),
+    }
+    ctx = naming_tokens.build_movie_context(row, source_path, Path(source_path).name)
+    folder_name = naming_tokens.render(folder, ctx, illegal_replacement=illegal, colon_replacement=colon)
+    filename = naming_tokens.render(
+        naming,
+        ctx,
+        illegal_replacement=illegal,
+        colon_replacement=colon,
+        extension=Path(source_path).suffix,
+    )
+    return os.path.join(root_folder_path, folder_name, filename)
 
 
 async def _import_movie(
@@ -216,38 +237,30 @@ async def _import_movie(
     copy_mode: str,
     monitored: bool,
     media_profile_id: Optional[int],
-    file_manager: FileManager
+    file_manager: FileManager,
 ) -> dict:
     """Import a single movie file."""
-    scanned_file = matched_file.get('scanned_file', {})
-    source_path = scanned_file.get('file_path')
+    scanned_file = matched_file.get("scanned_file", {})
+    source_path = scanned_file.get("file_path")
 
     # Check if movie already exists by TMDB ID
-    tmdb_id = matched_file.get('id')
-    existing = await conn.fetchrow(
-        "SELECT id, file_path FROM movies WHERE tmdb_id = $1", tmdb_id
-    )
+    tmdb_id = matched_file.get("id")
+    existing = await conn.fetchrow("SELECT id, file_path FROM movies WHERE tmdb_id = $1", tmdb_id)
 
     if existing:
         # Update existing movie with file info
-        movie_id = existing['id']
+        movie_id = existing["id"]
 
         # Organize file
-        new_file_path = file_manager.format_movie_filename(
-            title=matched_file.get('title'),
-            year=matched_file.get('release_date', '')[:4] if matched_file.get('release_date') else None,
-            quality=scanned_file.get('quality'),
-            tmdb_id=tmdb_id,
-            pattern="{title} ({year})"
+        destination_path = await _resolve_movie_dest(
+            conn, matched_file, tmdb_id, media_profile_id, source_path, root_folder_path
         )
-
-        destination_path = os.path.join(root_folder_path, new_file_path)
 
         # Organize file (move or copy)
         file_manager.organize_file(
             source_path=source_path,
             destination_path=destination_path,
-            operation='move' if copy_mode == 'move' else 'copy'
+            operation="move" if copy_mode == "move" else "copy",
         )
 
         # Update database
@@ -259,9 +272,9 @@ async def _import_movie(
             WHERE id = $4
             """,
             destination_path,
-            scanned_file.get('file_size'),
-            scanned_file.get('quality'),
-            movie_id
+            scanned_file.get("file_size"),
+            scanned_file.get("quality"),
+            movie_id,
         )
 
     else:
@@ -271,65 +284,50 @@ async def _import_movie(
             INSERT INTO movies (
                 title, original_title, overview, poster_path, backdrop_path,
                 release_date, genres, rating, vote_count, popularity,
-                tmdb_id, imdb_id, monitored, media_profile_id, root_folder_path,
+                tmdb_id, imdb_id, monitored, media_profile_id,
                 has_file, file_path, file_size, quality_detected, status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             RETURNING id
             """,
-            matched_file.get('title'),
-            matched_file.get('original_title'),
-            matched_file.get('overview'),
-            matched_file.get('poster_path'),
-            matched_file.get('backdrop_path'),
-            matched_file.get('release_date'),
-            matched_file.get('genres'),
-            matched_file.get('vote_average'),
-            matched_file.get('vote_count'),
-            matched_file.get('popularity'),
+            matched_file.get("title"),
+            matched_file.get("original_title"),
+            matched_file.get("overview"),
+            matched_file.get("poster_path"),
+            matched_file.get("backdrop_path"),
+            matched_file.get("release_date"),
+            matched_file.get("genres"),
+            matched_file.get("vote_average"),
+            matched_file.get("vote_count"),
+            matched_file.get("popularity"),
             tmdb_id,
-            matched_file.get('imdb_id'),
+            matched_file.get("imdb_id"),
             monitored,
             media_profile_id,
-            root_folder_path,
             True,
             source_path,  # Will be updated after organization
-            scanned_file.get('file_size'),
-            scanned_file.get('quality'),
-            'completed'
+            scanned_file.get("file_size"),
+            scanned_file.get("quality"),
+            "completed",
         )
 
-        movie_id = row['id']
+        movie_id = row["id"]
 
         # Organize file
-        new_file_path = file_manager.format_movie_filename(
-            title=matched_file.get('title'),
-            year=matched_file.get('release_date', '')[:4] if matched_file.get('release_date') else None,
-            quality=scanned_file.get('quality'),
-            tmdb_id=tmdb_id,
-            pattern="{title} ({year})"
+        destination_path = await _resolve_movie_dest(
+            conn, matched_file, tmdb_id, media_profile_id, source_path, root_folder_path
         )
-
-        destination_path = os.path.join(root_folder_path, new_file_path)
 
         file_manager.organize_file(
             source_path=source_path,
             destination_path=destination_path,
-            operation='move' if copy_mode == 'move' else 'copy'
+            operation="move" if copy_mode == "move" else "copy",
         )
 
         # Update file path
-        await conn.execute(
-            "UPDATE movies SET file_path = $1 WHERE id = $2",
-            destination_path,
-            movie_id
-        )
+        await conn.execute("UPDATE movies SET file_path = $1 WHERE id = $2", destination_path, movie_id)
 
-    return {
-        'id': movie_id,
-        'title': matched_file.get('title'),
-        'file_path': destination_path
-    }
+    return {"id": movie_id, "title": matched_file.get("title"), "file_path": destination_path}
 
 
 async def _import_show(
@@ -339,7 +337,7 @@ async def _import_show(
     copy_mode: str,
     monitored: bool,
     media_profile_id: Optional[int],
-    file_manager: FileManager
+    file_manager: FileManager,
 ) -> dict:
     """Import a single show episode file."""
     # TODO: Implement show import logic
@@ -354,7 +352,7 @@ async def _import_anime(
     copy_mode: str,
     monitored: bool,
     media_profile_id: Optional[int],
-    file_manager: FileManager
+    file_manager: FileManager,
 ) -> dict:
     """Import a single anime file."""
     # TODO: Implement anime import logic
@@ -370,10 +368,7 @@ async def estimate_scan(
     Estimate scan time for a directory.
     """
     if not os.path.exists(directory_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Directory not found: {directory_path}"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Directory not found: {directory_path}")
 
     try:
         scanner = LibraryScanner()
@@ -382,6 +377,5 @@ async def estimate_scan(
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error estimating scan time: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error estimating scan time: {str(e)}"
         )
