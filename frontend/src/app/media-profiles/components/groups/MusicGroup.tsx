@@ -2,18 +2,15 @@
 import NamingPreview from "../shared/NamingPreview";
 
 import { useState } from "react";
-import { X } from "lucide-react";
+import { X, Check } from "lucide-react";
 import { MediaProfileFormData, MusicTab } from "../types";
-import { INDEXERS_BY_TYPE, MUSIC_PRESETS } from "../constants";
-
-const AUDIO_QUALITIES = [
-	{ value: "flac", label: "FLAC", description: "Lossless" },
-	{ value: "mp3_320", label: "MP3 320", description: "320 kbps" },
-	{ value: "mp3_256", label: "MP3 256", description: "256 kbps" },
-	{ value: "mp3_128", label: "MP3 128", description: "128 kbps" },
-	{ value: "aac", label: "AAC", description: "Lossy" },
-	{ value: "ogg", label: "OGG", description: "Vorbis" },
-];
+import {
+	INDEXERS_BY_TYPE,
+	MUSIC_PRESETS,
+	MUSIC_QUALITY_GROUPS,
+	MUSIC_QUALITY_TIERS_HIGH_TO_LOW,
+	MUSIC_TIER_LABELS,
+} from "../constants";
 
 const MUSIC_TOKENS = [
 	{ token: "{artist}", description: "Artist name", example: "Pink Floyd" },
@@ -192,65 +189,96 @@ export default function MusicGroup({
 
 			<div>
 				<label className="block text-sm font-semibold mb-2">
-					Preferred Audio Quality
+					Allowed Audio Quality
 				</label>
 				<p className="text-xs text-muted-foreground mb-3">
-					Select allowed formats in order of preference
+					Select the quality tiers to download. FLAC bit depth and
+					sample rate are confirmed from the file after download.
 				</p>
-				<div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-					{AUDIO_QUALITIES.map((quality) => {
-						const isSelected =
-							formData.music_preferred_quality.includes(
-								quality.value,
-							);
-						const position =
-							formData.music_preferred_quality.indexOf(
-								quality.value,
-							);
-						return (
-							<button
-								key={quality.value}
-								type="button"
-								onClick={() => {
-									if (isSelected) {
-										setFormData({
-											...formData,
-											music_preferred_quality:
-												formData.music_preferred_quality.filter(
-													(q) => q !== quality.value,
-												),
-										});
-									} else {
-										setFormData({
-											...formData,
-											music_preferred_quality: [
-												...formData.music_preferred_quality,
-												quality.value,
-											],
-										});
-									}
-								}}
-								className={`relative flex flex-col items-center gap-1 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-									isSelected
-										? "bg-primary/10 border-primary shadow-md"
-										: "bg-muted/30 border-border hover:border-muted-foreground/30 hover:bg-muted/50"
-								}`}
-							>
-								{isSelected && (
-									<span className="absolute top-2 left-2 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
-										{position + 1}
-									</span>
-								)}
-								<span className="font-semibold text-sm">
-									{quality.label}
-								</span>
-								<span className="text-xs text-muted-foreground">
-									{quality.description}
-								</span>
-							</button>
-						);
-					})}
-				</div>
+				{MUSIC_QUALITY_GROUPS.map((group) => (
+					<div key={group.label} className="mb-4">
+						<p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+							{group.label}
+						</p>
+						<div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+							{group.tiers.map((tier) => {
+								const isSelected =
+									formData.music_quality_tiers.includes(
+										tier.value,
+									);
+								return (
+									<button
+										key={tier.value}
+										type="button"
+										onClick={() => {
+											if (isSelected) {
+												setFormData({
+													...formData,
+													music_quality_tiers:
+														formData.music_quality_tiers.filter(
+															(t) =>
+																t !==
+																tier.value,
+														),
+												});
+											} else {
+												setFormData({
+													...formData,
+													music_quality_tiers: [
+														...formData.music_quality_tiers,
+														tier.value,
+													],
+												});
+											}
+										}}
+										className={`relative flex flex-col items-center gap-1 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+											isSelected
+												? "bg-primary/10 border-primary shadow-md"
+												: "bg-muted/30 border-border hover:border-muted-foreground/30 hover:bg-muted/50"
+										}`}
+									>
+										{isSelected && (
+											<span className="absolute top-2 left-2 w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+												<Check className="w-3 h-3" />
+											</span>
+										)}
+										<span className="font-semibold text-sm text-center">
+											{tier.label}
+										</span>
+										<span className="text-xs text-muted-foreground text-center">
+											{tier.description}
+										</span>
+									</button>
+								);
+							})}
+						</div>
+					</div>
+				))}
+			</div>
+
+			<div>
+				<label className="block text-sm font-semibold mb-2">
+					Quality Cutoff
+				</label>
+				<p className="text-xs text-muted-foreground mb-3">
+					Once an album reaches this quality, upgrade searches stop.
+				</p>
+				<select
+					value={formData.music_quality_cutoff}
+					onChange={(e) =>
+						setFormData({
+							...formData,
+							music_quality_cutoff: e.target.value,
+						})
+					}
+					className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+				>
+					{MUSIC_QUALITY_TIERS_HIGH_TO_LOW.map((tier) => (
+						<option key={tier} value={tier}>
+							{MUSIC_TIER_LABELS[tier]}
+						</option>
+					))}
+				</select>
 			</div>
 
 			<div className="space-y-4">

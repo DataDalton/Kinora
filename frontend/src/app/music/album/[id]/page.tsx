@@ -120,7 +120,16 @@ export default function AlbumDetailPage() {
 		queryKey: ["files", "album", albumId],
 		queryFn: async () => {
 			const response = await api.get(`/files/album/${albumId}`);
-			return response.data as { files: FileInfo[]; grab_mode?: string };
+			return response.data as {
+				files: FileInfo[];
+				grab_mode?: string;
+				quality_cutoff?: {
+					meets_cutoff: boolean;
+					current_quality: string | null;
+					cutoff_quality: string;
+					upgrade_allowed: boolean;
+				};
+			};
 		},
 		enabled: !!album?.has_file,
 	});
@@ -639,6 +648,7 @@ export default function AlbumDetailPage() {
 								mediaId={album.id}
 								files={files?.files || []}
 								grabMode={files?.grab_mode}
+								qualityCutoff={files?.quality_cutoff}
 							/>
 						)}
 

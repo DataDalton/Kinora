@@ -4,6 +4,7 @@ SQLAlchemy Core table definitions for Alembic migrations.
 These are ONLY used for migration generation, not runtime queries.
 Runtime queries use raw asyncpg for maximum performance.
 """
+
 from sqlalchemy import (
     MetaData,
     Table,
@@ -475,7 +476,12 @@ mediaProfiles = Table(
     Column("music_album_folder_format", Text, default="{album} ({year})"),
     Column("music_track_naming_format", Text, default="{track:00} - {title}"),
     Column("music_multi_disc_format", Text, default="{disc:00}-{track:00} - {title}"),
-    Column("music_preferred_quality", ARRAY(Text), server_default="{'flac','mp3_320','mp3_256','aac'}"),
+    Column(
+        "music_quality_tiers",
+        ARRAY(Text),
+        server_default="{'lossless_24_192','lossless_24_96','lossless_24_48','lossless_24_unknown','lossless_16_48','lossless_16_44','lossless_unknown','mp3_320','mp3_256'}",
+    ),
+    Column("music_quality_cutoff", String(50), server_default="lossless_16_44"),
     Column("music_embed_lyrics", Boolean, default=True),
     Column("music_embed_artwork", Boolean, default=True),
     # File output settings
@@ -486,7 +492,9 @@ mediaProfiles = Table(
     # Torrent validation settings
     Column("validation_enabled", Boolean, default=True),
     Column("validation_mode", String(20), server_default="allowlist"),
-    Column("forbidden_extensions", ARRAY(Text), server_default="'{.exe,.bat,.cmd,.sh,.msi,.dll,.scr,.com,.ps1,.vbs,.jar}'"),
+    Column(
+        "forbidden_extensions", ARRAY(Text), server_default="'{.exe,.bat,.cmd,.sh,.msi,.dll,.scr,.com,.ps1,.vbs,.jar}'"
+    ),
     Column("validation_failure_action", String(20), default="pause_notify"),
     Column("movie_allowed_extensions", ARRAY(Text), server_default="'{.mkv,.mp4,.avi,.m4v,.mov,.wmv,.flv,.webm,.ts}'"),
     Column("show_allowed_extensions", ARRAY(Text), server_default="'{.mkv,.mp4,.avi,.m4v,.mov,.wmv,.flv,.webm,.ts}'"),
@@ -627,6 +635,29 @@ blocklist = Table(
     Column("blocked_at", DateTime, server_default=func.now(), nullable=False),
     Index("idx_blocklist_media", "media_type", "media_id"),
     Index("idx_blocklist_title", "release_title"),
+)
+
+# Per-file media metadata (one row per physical file, populated from ffprobe)
+mediaFiles = Table(
+    "media_files",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("media_type", String(20), nullable=False),
+    Column("media_id", Integer, nullable=False),
+    Column("file_path", String(1000), nullable=False, unique=True),
+    Column("file_name", String(500)),
+    Column("file_size", BigInteger),
+    Column("quality", String(100)),
+    Column("resolution", String(50)),
+    Column("codec", String(50)),
+    Column("audio_codec", String(50)),
+    Column("audio_channels", String(50)),
+    Column("container", String(20)),
+    Column("bit_depth", String(20)),
+    Column("hdr", Boolean, server_default="false", nullable=False),
+    Column("created_at", DateTime, server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime, server_default=func.now(), nullable=False),
+    Index("idx_media_files_media", "media_type", "media_id"),
 )
 
 # Collections table

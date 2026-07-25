@@ -1,20 +1,31 @@
-from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
 class FileInfo(BaseModel):
-    """Schema for file information"""
+    """Schema for a single media file with detected quality attributes."""
 
-    path: str
-    name: str
-    size: int
-    extension: str
-    is_directory: bool
-    modified_at: datetime
+    file_path: str
+    file_name: str
+    file_size: Optional[int] = None
     quality: Optional[str] = None
-    codec: Optional[str] = None
     resolution: Optional[str] = None
+    codec: Optional[str] = None
+    audio_codec: Optional[str] = None
+    audio_channels: Optional[str] = None
+    container: Optional[str] = None
+    bit_depth: Optional[str] = None
+    hdr: bool = False
+    created_at: Optional[str] = None
+
+
+class QualityCutoff(BaseModel):
+    """Cutoff status for a media item, shown on the detail page file panel."""
+
+    meets_cutoff: bool
+    current_quality: Optional[str] = None
+    cutoff_quality: str
+    upgrade_allowed: bool
 
 
 class MediaFiles(BaseModel):
@@ -27,6 +38,7 @@ class MediaFiles(BaseModel):
     files: List[FileInfo] = Field(default_factory=list)
     total_size: int = 0
     grab_mode: Optional[str] = None
+    quality_cutoff: Optional[QualityCutoff] = None
 
 
 class RenameFileRequest(BaseModel):

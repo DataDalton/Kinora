@@ -100,7 +100,16 @@ export default function TrackDetailPage() {
 		queryKey: ["files", "track", trackId],
 		queryFn: async () => {
 			const response = await api.get(`/files/track/${trackId}`);
-			return response.data as { files: FileInfo[]; grab_mode?: string };
+			return response.data as {
+				files: FileInfo[];
+				grab_mode?: string;
+				quality_cutoff?: {
+					meets_cutoff: boolean;
+					current_quality: string | null;
+					cutoff_quality: string;
+					upgrade_allowed: boolean;
+				};
+			};
 		},
 		enabled: !!track?.has_file,
 	});
@@ -619,6 +628,7 @@ export default function TrackDetailPage() {
 								mediaId={track.id}
 								files={files?.files || []}
 								grabMode={files?.grab_mode}
+								qualityCutoff={files?.quality_cutoff}
 							/>
 						)}
 

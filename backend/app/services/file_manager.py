@@ -46,13 +46,17 @@ class FileManager:
 
     MUSIC_TOKENS = {
         "{artist}": "artist",
+        "{albumartist}": "albumartist",
         "{album}": "album",
         "{year}": "year",
         "{track:00}": "track_number",
+        "{track}": "track_number",
         "{disc:00}": "disc_number",
+        "{disc}": "disc_number",
         "{title}": "title",
         "{genre}": "genre",
         "{format}": "format",
+        "{bitrate}": "bitrate",
         "{quality}": "quality",
     }
 
@@ -71,8 +75,8 @@ class FileManager:
         pattern: str,
         movie_data: Dict[str, Any],
         include_extension: bool = True,
-        illegal_replacement: str = '',
-        colon_replacement: str = ' -',
+        illegal_replacement: str = "",
+        colon_replacement: str = " -",
     ) -> str:
         """
         Format movie filename using pattern and tokens
@@ -98,8 +102,8 @@ class FileManager:
         pattern: str,
         show_data: Dict[str, Any],
         include_extension: bool = True,
-        illegal_replacement: str = '',
-        colon_replacement: str = ' -',
+        illegal_replacement: str = "",
+        colon_replacement: str = " -",
     ) -> str:
         """
         Format TV show episode filename using pattern and tokens
@@ -129,8 +133,8 @@ class FileManager:
         pattern: str,
         anime_data: Dict[str, Any],
         include_extension: bool = True,
-        illegal_replacement: str = '',
-        colon_replacement: str = ' -',
+        illegal_replacement: str = "",
+        colon_replacement: str = " -",
     ) -> str:
         """
         Format anime episode filename using pattern and tokens
@@ -160,8 +164,8 @@ class FileManager:
         pattern: str,
         track_data: Dict[str, Any],
         include_extension: bool = True,
-        illegal_replacement: str = '',
-        colon_replacement: str = ' -',
+        illegal_replacement: str = "",
+        colon_replacement: str = " -",
     ) -> str:
         """
         Format music track filename using pattern and tokens
@@ -315,12 +319,7 @@ class FileManager:
         indexer = BaseIndexer()
         return indexer.parse_quality(filename)
 
-    def _clean_filename(
-        self,
-        filename: str,
-        illegal_replacement: str = '',
-        colon_replacement: str = ' -'
-    ) -> str:
+    def _clean_filename(self, filename: str, illegal_replacement: str = "", colon_replacement: str = " -") -> str:
         """
         Clean filename by replacing invalid characters.
 
@@ -330,15 +329,15 @@ class FileManager:
             colon_replacement: String to replace colons with (default: ' -')
         """
         # Handle colons separately with custom replacement
-        filename = filename.replace(':', colon_replacement)
+        filename = filename.replace(":", colon_replacement)
 
         # Replace other invalid characters
-        invalid_chars = ['<', '>', '"', '/', '\\', '|', '?', '*']
+        invalid_chars = ["<", ">", '"', "/", "\\", "|", "?", "*"]
         for char in invalid_chars:
             filename = filename.replace(char, illegal_replacement)
 
         # Replace multiple spaces with single space
-        filename = ' '.join(filename.split())
+        filename = " ".join(filename.split())
 
         # Remove leading/trailing spaces
         filename = filename.strip()
@@ -358,9 +357,7 @@ class FileManager:
             "percent_used": (stat.used / stat.total) * 100,
         }
 
-    def has_sufficient_space(
-        self, path: str, required_bytes: int, buffer_gb: int = 5
-    ) -> bool:
+    def has_sufficient_space(self, path: str, required_bytes: int, buffer_gb: int = 5) -> bool:
         """
         Check if path has sufficient disk space
         Includes buffer for safety

@@ -243,8 +243,9 @@ async def _import_movie(
     scanned_file = matched_file.get("scanned_file", {})
     source_path = scanned_file.get("file_path")
 
-    # Check if movie already exists by TMDB ID
-    tmdb_id = matched_file.get("id")
+    # Check if movie already exists by TMDB ID. The matcher normalizes the id to
+    # tmdb_id, so read that first and fall back to the raw id.
+    tmdb_id = matched_file.get("tmdb_id") or matched_file.get("id")
     existing = await conn.fetchrow("SELECT id, file_path FROM movies WHERE tmdb_id = $1", tmdb_id)
 
     if existing:
@@ -330,6 +331,37 @@ async def _import_movie(
     return {"id": movie_id, "title": matched_file.get("title"), "file_path": destination_path}
 
 
+async def _resolve_root_folder_id(conn, root_folder_path: str) -> Optional[int]:
+    """Resolve the root_folders.id for a destination root path."""
+    return await conn.fetchval("SELECT id FROM root_folders WHERE root_path = $1", root_folder_path)
+
+
+async def _resolve_show_dest(conn, show_row, scanned_file, media_profile_id, source_path, root_folder_path):
+    """Build the destination path for an imported show episode via the naming engine."""
+    prof = None
+    if media_profile_id:
+        prof = await conn.fetchrow(
+            "SELECT show_naming_format, show_folder_format, illegal_char_replacement, "
+            "colon_replacement FROM media_profiles WHERE id = $1",
+            media_profile_id,
+        )
+    naming = (prof and prof["show_naming_format"]) or "{Show Title} - S{Season:00}E{Episode:00}"
+    folder = (prof and prof["show_folder_format"]) or "{Show Title}/Season {Season:00}"
+    illegal = (prof and prof["illegal_char_replacement"]) or ""
+    colon = (prof and prof["colon_replacement"]) or " -"
+    episode_info = {
+        "season_number": scanned_file.get("season") or 1,
+        "episode_number": scanned_file.get("episode"),
+        "episode_title": scanned_file.get("episode_title") or "",
+    }
+    ctx = naming_tokens.build_show_context(show_row, episode_info, source_path, Path(source_path).name)
+    folder_name = naming_tokens.render(folder, ctx, illegal_replacement=illegal, colon_replacement=colon)
+    filename = naming_tokens.render(
+        naming, ctx, illegal_replacement=illegal, colon_replacement=colon, extension=Path(source_path).suffix
+    )
+    return os.path.join(root_folder_path, folder_name, filename)
+
+
 async def _import_show(
     conn: asyncpg.Connection,
     matched_file: dict,
@@ -339,10 +371,117 @@ async def _import_show(
     media_profile_id: Optional[int],
     file_manager: FileManager,
 ) -> dict:
-    """Import a single show episode file."""
-    # TODO: Implement show import logic
-    # This is more complex as we need to handle seasons and episodes
-    raise NotImplementedError("Show import not yet implemented")
+    """
+    Import a single show episode file. Find-or-create the show by TMDB id, organize
+    the episode with the naming engine, and point the show at the organized file.
+    This mirrors how the download organizer handles a completed show download.
+    """
+    scanned_file = matched_file.get("scanned_file", {})
+    source_path = scanned_file.get("file_path")
+    if not source_path:
+        raise ValueError("Scanned file has no path")
+
+    tmdb_id = matched_file.get("tmdb_id") or matched_file.get("id")
+    root_folder_id = await _resolve_root_folder_id(conn, root_folder_path)
+
+    existing = await conn.fetchrow("SELECT id FROM shows WHERE tmdb_id = $1", tmdb_id) if tmdb_id else None
+    if existing:
+        show_id = existing["id"]
+    else:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO shows (
+                title, original_title, overview, poster_path, backdrop_path,
+                first_air_date, release_date, genres, rating, vote_count, popularity,
+                tmdb_id, imdb_id, tvdb_id, monitored, media_profile_id, root_folder_id,
+                number_of_seasons, number_of_episodes, has_file, status
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            RETURNING id
+            """,
+            matched_file.get("title"),
+            matched_file.get("original_title"),
+            matched_file.get("overview"),
+            matched_file.get("poster_path"),
+            matched_file.get("backdrop_path"),
+            matched_file.get("first_air_date"),
+            matched_file.get("release_date"),
+            matched_file.get("genres"),
+            matched_file.get("rating"),
+            matched_file.get("vote_count"),
+            matched_file.get("popularity"),
+            tmdb_id,
+            matched_file.get("imdb_id"),
+            matched_file.get("tvdb_id"),
+            monitored,
+            media_profile_id,
+            root_folder_id,
+            matched_file.get("number_of_seasons"),
+            matched_file.get("number_of_episodes"),
+            True,
+            "completed",
+        )
+        show_id = row["id"]
+
+    show_row = {
+        "title": matched_file.get("title"),
+        "first_air_date": matched_file.get("first_air_date"),
+        "release_date": matched_file.get("release_date"),
+        "tmdb_id": tmdb_id,
+        "tvdb_id": matched_file.get("tvdb_id"),
+    }
+    destination_path = await _resolve_show_dest(
+        conn, show_row, scanned_file, media_profile_id, source_path, root_folder_path
+    )
+
+    file_manager.organize_file(
+        source_path=source_path,
+        destination_path=destination_path,
+        operation="move" if copy_mode == "move" else "copy",
+    )
+
+    await conn.execute(
+        """
+        UPDATE shows
+        SET file_path = $1, file_size = $2, quality_detected = $3, has_file = TRUE,
+            status = 'completed', root_folder_id = COALESCE(root_folder_id, $4), updated_at = NOW()
+        WHERE id = $5
+        """,
+        destination_path,
+        scanned_file.get("file_size"),
+        scanned_file.get("quality"),
+        root_folder_id,
+        show_id,
+    )
+
+    return {"id": show_id, "title": matched_file.get("title"), "file_path": destination_path}
+
+
+async def _resolve_anime_dest(conn, anime_row, scanned_file, media_profile_id, source_path, root_folder_path):
+    """Build the destination path for an imported anime episode via the naming engine."""
+    prof = None
+    if media_profile_id:
+        prof = await conn.fetchrow(
+            "SELECT anime_naming_format, anime_folder_format, illegal_char_replacement, "
+            "colon_replacement FROM media_profiles WHERE id = $1",
+            media_profile_id,
+        )
+    naming = (prof and prof["anime_naming_format"]) or "{Anime Title} - {Episode:00}"
+    folder = (prof and prof["anime_folder_format"]) or "{Anime Title}"
+    illegal = (prof and prof["illegal_char_replacement"]) or ""
+    colon = (prof and prof["colon_replacement"]) or " -"
+    episode_info = {
+        "season_number": scanned_file.get("season") or 1,
+        "episode_number": scanned_file.get("episode"),
+        "absolute_episode": scanned_file.get("episode"),
+        "episode_title": scanned_file.get("episode_title") or "",
+    }
+    ctx = naming_tokens.build_anime_context(anime_row, episode_info, source_path, Path(source_path).name)
+    folder_name = naming_tokens.render(folder, ctx, illegal_replacement=illegal, colon_replacement=colon)
+    filename = naming_tokens.render(
+        naming, ctx, illegal_replacement=illegal, colon_replacement=colon, extension=Path(source_path).suffix
+    )
+    return os.path.join(root_folder_path, folder_name, filename)
 
 
 async def _import_anime(
@@ -354,9 +493,92 @@ async def _import_anime(
     media_profile_id: Optional[int],
     file_manager: FileManager,
 ) -> dict:
-    """Import a single anime file."""
-    # TODO: Implement anime import logic
-    raise NotImplementedError("Anime import not yet implemented")
+    """
+    Import a single anime file. Find-or-create the anime by Anilist id, organize the
+    episode with the naming engine, and point the anime at the organized file.
+    """
+    scanned_file = matched_file.get("scanned_file", {})
+    source_path = scanned_file.get("file_path")
+    if not source_path:
+        raise ValueError("Scanned file has no path")
+
+    anilist_id = matched_file.get("anilist_id") or matched_file.get("id")
+    root_folder_id = await _resolve_root_folder_id(conn, root_folder_path)
+
+    existing = await conn.fetchrow("SELECT id FROM anime WHERE anilist_id = $1", anilist_id) if anilist_id else None
+    if existing:
+        anime_id = existing["id"]
+    else:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO anime (
+                title, original_title, overview, poster_path, backdrop_path, release_date,
+                genres, rating, popularity, anilist_id, mal_id, monitored, media_profile_id,
+                root_folder_id, episodes, duration, season_year, season_period, format,
+                source, studios, is_adult, has_file, status
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+            RETURNING id
+            """,
+            matched_file.get("title"),
+            matched_file.get("original_title"),
+            matched_file.get("overview"),
+            matched_file.get("poster_path"),
+            matched_file.get("backdrop_path"),
+            matched_file.get("release_date"),
+            matched_file.get("genres"),
+            matched_file.get("rating"),
+            matched_file.get("popularity"),
+            anilist_id,
+            matched_file.get("mal_id"),
+            monitored,
+            media_profile_id,
+            root_folder_id,
+            matched_file.get("episodes"),
+            matched_file.get("duration"),
+            matched_file.get("season_year"),
+            matched_file.get("season_period"),
+            matched_file.get("format"),
+            matched_file.get("source"),
+            matched_file.get("studios"),
+            matched_file.get("is_adult", False),
+            True,
+            "completed",
+        )
+        anime_id = row["id"]
+
+    anime_row = {
+        "title": matched_file.get("title"),
+        "season_year": matched_file.get("season_year"),
+        "tmdb_id": matched_file.get("tmdb_id"),
+        "anilist_id": anilist_id,
+        "mal_id": matched_file.get("mal_id"),
+    }
+    destination_path = await _resolve_anime_dest(
+        conn, anime_row, scanned_file, media_profile_id, source_path, root_folder_path
+    )
+
+    file_manager.organize_file(
+        source_path=source_path,
+        destination_path=destination_path,
+        operation="move" if copy_mode == "move" else "copy",
+    )
+
+    await conn.execute(
+        """
+        UPDATE anime
+        SET file_path = $1, file_size = $2, quality_detected = $3, has_file = TRUE,
+            status = 'completed', root_folder_id = COALESCE(root_folder_id, $4), updated_at = NOW()
+        WHERE id = $5
+        """,
+        destination_path,
+        scanned_file.get("file_size"),
+        scanned_file.get("quality"),
+        root_folder_id,
+        anime_id,
+    )
+
+    return {"id": anime_id, "title": matched_file.get("title"), "file_path": destination_path}
 
 
 @router.get("/estimate")

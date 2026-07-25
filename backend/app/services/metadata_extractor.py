@@ -27,6 +27,22 @@ class MetadataExtractor:
         ".webm",
     }
 
+    AUDIO_EXTENSIONS = {
+        ".flac",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".ogg",
+        ".opus",
+        ".wav",
+        ".wma",
+        ".alac",
+        ".ape",
+        ".wv",
+        ".dsf",
+        ".dff",
+    }
+
     def __init__(self, ffprobe_path: str = "ffprobe"):
         """
         Initialize metadata extractor.
@@ -167,6 +183,9 @@ class MetadataExtractor:
                     "channel_layout": audio.get("channel_layout"),
                     "sample_rate": audio.get("sample_rate"),
                     "bit_rate": int(audio.get("bit_rate", 0)),
+                    # Bit depth drives the lossless music tier. FLAC and ALAC report it
+                    # in bits_per_raw_sample, PCM in bits_per_sample.
+                    "bit_depth": self._parse_audio_bit_depth(audio),
                 }
 
                 # Extract language from stream tags
@@ -204,6 +223,18 @@ class MetadataExtractor:
         if "10" in pf or "p010" in pf:
             return 10
         return 8
+
+    def _parse_audio_bit_depth(self, audio_stream: Dict[str, Any]) -> Optional[int]:
+        """Read the audio sample bit depth from an ffprobe audio stream."""
+        for key in ("bits_per_raw_sample", "bits_per_sample"):
+            value = audio_stream.get(key)
+            try:
+                depth = int(value) if value else 0
+            except TypeError, ValueError:
+                depth = 0
+            if depth > 0:
+                return depth
+        return None
 
     def _parse_dynamic_range(self, video_stream: Dict[str, Any]) -> Optional[str]:
         """
@@ -251,6 +282,10 @@ class MetadataExtractor:
     def is_video_file(self, file_path: str) -> bool:
         """Check if file has a video extension."""
         return Path(file_path).suffix.lower() in self.VIDEO_EXTENSIONS
+
+    def is_audio_file(self, file_path: str) -> bool:
+        """Check if file has an audio extension."""
+        return Path(file_path).suffix.lower() in self.AUDIO_EXTENSIONS
 
     def is_sample(self, file_path: str) -> bool:
         """Check if file appears to be a sample/trailer based on filename or size."""

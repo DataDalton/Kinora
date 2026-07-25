@@ -16,6 +16,7 @@ import {
 	ExternalLink,
 	HardDrive,
 	Calendar,
+	Loader2,
 } from "lucide-react";
 
 interface DownloadHistoryEntry {
@@ -72,6 +73,8 @@ const getStatusIcon = (status: string) => {
 			return <XCircle className="w-4 h-4 text-destructive" />;
 		case "downloading":
 			return <Download className="w-4 h-4 text-blue-500 animate-pulse" />;
+		case "processing":
+			return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />;
 		default:
 			return <Clock className="w-4 h-4 text-yellow-500" />;
 	}
@@ -85,6 +88,8 @@ const getStatusLabel = (status: string): string => {
 			return "Failed";
 		case "downloading":
 			return "Downloading";
+		case "processing":
+			return "Importing";
 		case "pending":
 			return "Pending";
 		default:

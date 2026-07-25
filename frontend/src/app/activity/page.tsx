@@ -71,6 +71,7 @@ export default function ActivityPage() {
 	const getStatusBadge = (status: string) => {
 		const colors: any = {
 			downloading: "bg-blue-100 text-blue-800",
+			processing: "bg-blue-100 text-blue-800",
 			completed: "bg-green-100 text-green-800",
 			failed: "bg-red-100 text-red-800",
 			pending: "bg-yellow-100 text-yellow-800",
@@ -86,7 +87,10 @@ export default function ActivityPage() {
 	};
 
 	const activeDownloads =
-		downloads?.filter((d: Download) => d.status === "downloading") || [];
+		downloads?.filter(
+			(d: Download) =>
+				d.status === "downloading" || d.status === "processing",
+		) || [];
 	const completedDownloads =
 		downloads?.filter((d: Download) => d.status === "completed") || [];
 	const failedDownloads =

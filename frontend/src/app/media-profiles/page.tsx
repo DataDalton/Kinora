@@ -20,6 +20,7 @@ import {
 	FileOutputGroup,
 } from "./components";
 import { ClipboardList } from "lucide-react";
+import { MUSIC_TIER_LABELS } from "./components/constants";
 
 interface MediaProfile {
 	id: number;
@@ -92,7 +93,8 @@ interface MediaProfile {
 	music_album_folder_format?: string;
 	music_track_naming_format?: string;
 	music_multi_disc_format?: string;
-	music_preferred_quality?: string[];
+	music_quality_tiers?: string[];
+	music_quality_cutoff?: string;
 	music_embed_lyrics?: boolean;
 	music_embed_artwork?: boolean;
 	// File output settings
@@ -242,7 +244,8 @@ export default function MediaProfilesPage() {
 				music_album_folder_format: data.music_album_folder_format,
 				music_track_naming_format: data.music_track_naming_format,
 				music_multi_disc_format: data.music_multi_disc_format,
-				music_preferred_quality: data.music_preferred_quality,
+				music_quality_tiers: data.music_quality_tiers,
+				music_quality_cutoff: data.music_quality_cutoff,
 				music_embed_lyrics: data.music_embed_lyrics,
 				music_embed_artwork: data.music_embed_artwork,
 				// File output settings
@@ -362,7 +365,8 @@ export default function MediaProfilesPage() {
 				music_album_folder_format: data.music_album_folder_format,
 				music_track_naming_format: data.music_track_naming_format,
 				music_multi_disc_format: data.music_multi_disc_format,
-				music_preferred_quality: data.music_preferred_quality,
+				music_quality_tiers: data.music_quality_tiers,
+				music_quality_cutoff: data.music_quality_cutoff,
 				music_embed_lyrics: data.music_embed_lyrics,
 				music_embed_artwork: data.music_embed_artwork,
 				// File output settings
@@ -522,9 +526,10 @@ export default function MediaProfilesPage() {
 			music_multi_disc_format:
 				profile.music_multi_disc_format ||
 				defaults.music_multi_disc_format,
-			music_preferred_quality:
-				profile.music_preferred_quality ||
-				defaults.music_preferred_quality,
+			music_quality_tiers:
+				profile.music_quality_tiers || defaults.music_quality_tiers,
+			music_quality_cutoff:
+				profile.music_quality_cutoff || defaults.music_quality_cutoff,
 			music_embed_lyrics: profile.music_embed_lyrics ?? true,
 			music_embed_artwork: profile.music_embed_artwork ?? true,
 			// File output settings
@@ -613,10 +618,10 @@ export default function MediaProfilesPage() {
 		}
 		if (
 			formData.music_indexers.length > 0 &&
-			formData.music_preferred_quality.length === 0
+			formData.music_quality_tiers.length === 0
 		) {
 			errors.push(
-				"Music quality preferences are required when music indexers are selected",
+				"At least one music quality tier is required when music indexers are selected",
 			);
 		}
 
@@ -873,15 +878,18 @@ export default function MediaProfilesPage() {
 
 		// Music quality
 		if (
-			profile.music_preferred_quality &&
-			profile.music_preferred_quality.length > 0
+			profile.music_quality_tiers &&
+			profile.music_quality_tiers.length > 0
 		) {
+			const cutoffLabel = profile.music_quality_cutoff
+				? MUSIC_TIER_LABELS[profile.music_quality_cutoff] ||
+					profile.music_quality_cutoff
+				: null;
 			summaryItems.push({
 				label: "Music Quality",
-				value: profile.music_preferred_quality
-					.slice(0, 3)
-					.join(", ")
-					.toUpperCase(),
+				value:
+					`${profile.music_quality_tiers.length} tier(s)` +
+					(cutoffLabel ? `, cutoff ${cutoffLabel}` : ""),
 			});
 		}
 

@@ -7,6 +7,7 @@ from app.services.media_profile import MediaProfile, media_profile_service
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.torrent_validator import validate_and_resume_torrent
 from app.core.webtransport import webtransport_manager
+from app.services.notifications import create_notification, SEVERITY_INFO
 from app.core.cache import cacheSet
 
 
@@ -140,7 +141,9 @@ async def check_and_grab_movie(conn, release, movie, profile):
 
     # Add to download client
     try:
-        if release.magnet:
+        # Resolve the magnet on demand (deferred during the RSS scan for speed).
+        await search_engine.resolve_download_source(release)
+        if release.magnet or release.torrent_url:
             client = await get_qbittorrent_client()
             if not client:
                 return False
@@ -153,7 +156,7 @@ async def check_and_grab_movie(conn, release, movie, profile):
 
             # Add torrent paused with validating tag for pre-download validation
             torrent_hash = await client.add_torrent(
-                torrent=release.magnet,
+                torrent=release.magnet or release.torrent_url,
                 save_path=savePath,
                 category="movies",
                 tags=["kinora", "validating", f"movie-{movie['id']}"],
@@ -256,7 +259,9 @@ async def check_and_grab_show(conn, release, show, profile):
 
     # Add to download client
     try:
-        if release.magnet:
+        # Resolve the magnet on demand (deferred during the RSS scan for speed).
+        await search_engine.resolve_download_source(release)
+        if release.magnet or release.torrent_url:
             client = await get_qbittorrent_client()
             if not client:
                 return False
@@ -268,7 +273,7 @@ async def check_and_grab_show(conn, release, show, profile):
 
             # Add torrent paused with validating tag for pre-download validation
             torrentHash = await client.add_torrent(
-                torrent=release.magnet,
+                torrent=release.magnet or release.torrent_url,
                 save_path=savePath,
                 category="tv",
                 tags=["kinora", "validating", f"show-{show['id']}", f"s{matchedSeason:02d}e{matchedEpisode:02d}"],
@@ -324,16 +329,13 @@ async def check_and_grab_show(conn, release, show, profile):
                 show["id"],
             )
 
-            # Send notification via WebTransport
-            await webtransport_manager.send_notification(
-                1,  # TODO: Get actual user_id from show
-                "new_download",
-                {
-                    "title": f"Downloading {show['title']} S{matchedSeason:02d}E{matchedEpisode:02d}",
-                    "message": release.title,
-                    "media_type": "show",
-                    "media_id": show["id"],
-                },
+            # Persist an in-app notification and push it to all connected clients.
+            await create_notification(
+                type="new_download",
+                title=f"Downloading {show['title']} S{matchedSeason:02d}E{matchedEpisode:02d}",
+                message=release.title,
+                severity=SEVERITY_INFO,
+                data={"media_type": "show", "media_id": show["id"]},
             )
 
             return True

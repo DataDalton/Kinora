@@ -750,6 +750,25 @@ async def download_release(
         # Get torrent source (prefer .torrent URL, fallback to magnet)
         torrent_source = data.torrent_url or data.magnet_link
 
+        # The magnet is deferred at search time for indexers that need a detail-page
+        # fetch (1337x). Resolve it now from the release's detail page, and persist it
+        # on the request so the download_history row can re-add the torrent later.
+        if not torrent_source and data.indexer_page_url:
+            from app.services.automation.search_engine import search_engine
+            from app.services.indexers.base import TorrentRelease
+
+            release = TorrentRelease(
+                title=data.title or "",
+                indexer=data.indexer or "",
+                detail_url=data.indexer_page_url,
+            )
+            await search_engine.resolve_download_source(release)
+            if release.magnet and not data.magnet_link:
+                data.magnet_link = release.magnet
+            if release.torrent_url and not data.torrent_url:
+                data.torrent_url = release.torrent_url
+            torrent_source = data.torrent_url or data.magnet_link
+
         if not torrent_source:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="No torrent URL or magnet link provided"

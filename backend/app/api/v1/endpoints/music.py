@@ -21,18 +21,28 @@ def parseReleaseDate(dateStr: str | None):
         return None
     try:
         return datetime.strptime(dateStr, "%Y-%m-%d").date()
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 
 from app.schemas.music import (
-    Artist, ArtistCreate, ArtistUpdate, ArtistSearch,
-    Album, AlbumCreate, AlbumUpdate, AlbumSearch,
-    Track, TrackCreate, TrackUpdate, TrackSearch
+    Artist,
+    ArtistCreate,
+    ArtistUpdate,
+    ArtistSearch,
+    Album,
+    AlbumCreate,
+    AlbumUpdate,
+    AlbumSearch,
+    Track,
+    TrackCreate,
+    TrackUpdate,
+    TrackSearch,
 )
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
 from app.services.metadata.deezer import deezer_service
+from app.services import music_quality
 
 router = APIRouter()
 
@@ -66,7 +76,8 @@ async def get_artists(
         ORDER BY a.created_at DESC
         LIMIT $1 OFFSET $2
         """,
-        limit, skip
+        limit,
+        skip,
     )
     return [dict(row) for row in rows]
 
@@ -211,7 +222,7 @@ async def get_albums(
         ORDER BY al.release_date DESC
         LIMIT $1 OFFSET $2
         """,
-        *params
+        *params,
     )
     return [dict(row) for row in rows]
 
@@ -277,18 +288,20 @@ async def add_album(
                 try:
                     deezerArtist = await deezer_service.get_artist(album_data.artist_id)
                     if deezerArtist:
-                        newArtist = await artistRepo.create({
-                            "name": deezerArtist.get("name"),
-                            "picture": deezerArtist.get("picture"),
-                            "picture_medium": deezerArtist.get("picture_medium"),
-                            "picture_big": deezerArtist.get("picture_big"),
-                            "picture_xl": deezerArtist.get("picture_xl"),
-                            "deezer_id": deezerArtist.get("id"),
-                            "monitored": True,
-                            "has_files": False,
-                            "nb_album": deezerArtist.get("nb_album"),
-                            "nb_fan": deezerArtist.get("nb_fan"),
-                        })
+                        newArtist = await artistRepo.create(
+                            {
+                                "name": deezerArtist.get("name"),
+                                "picture": deezerArtist.get("picture"),
+                                "picture_medium": deezerArtist.get("picture_medium"),
+                                "picture_big": deezerArtist.get("picture_big"),
+                                "picture_xl": deezerArtist.get("picture_xl"),
+                                "deezer_id": deezerArtist.get("id"),
+                                "monitored": True,
+                                "has_files": False,
+                                "nb_album": deezerArtist.get("nb_album"),
+                                "nb_fan": deezerArtist.get("nb_fan"),
+                            }
+                        )
                         internalArtistId = newArtist["id"]
                         artistName = newArtist["name"]
                 except Exception as e:
@@ -484,7 +497,9 @@ async def get_tracks(
             ORDER BY t.disk_number, t.track_position
             LIMIT $2 OFFSET $3
             """,
-            album_id, limit, skip
+            album_id,
+            limit,
+            skip,
         )
     else:
         rows = await conn.fetch(
@@ -497,7 +512,8 @@ async def get_tracks(
             ORDER BY t.disk_number, t.track_position
             LIMIT $1 OFFSET $2
             """,
-            limit, skip
+            limit,
+            skip,
         )
     return [Track(**dict(row)) for row in rows]
 
@@ -518,7 +534,7 @@ async def get_track(
         LEFT JOIN albums a ON t.album_id = a.id
         WHERE t.id = $1
         """,
-        track_id
+        track_id,
     )
 
     if not row:
@@ -593,8 +609,7 @@ async def update_track(
     # Build update query
     setClause = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updateData.keys()))
     row = await conn.fetchrow(
-        f"UPDATE tracks SET {setClause}, updated_at = NOW() WHERE id = $1 RETURNING *",
-        track_id, *updateData.values()
+        f"UPDATE tracks SET {setClause}, updated_at = NOW() WHERE id = $1 RETURNING *", track_id, *updateData.values()
     )
     return Track(**dict(row))
 
@@ -670,25 +685,27 @@ async def add_artist_discography(
             continue
 
         # Add album to library
-        newAlbum = await albumRepo.create({
-            "title": albumInfo.get("title"),
-            "cover": albumInfo.get("cover"),
-            "cover_medium": albumInfo.get("cover_medium"),
-            "cover_big": albumInfo.get("cover_big"),
-            "cover_xl": albumInfo.get("cover_xl"),
-            "release_date": parseReleaseDate(albumInfo.get("release_date")),
-            "deezer_id": albumInfo.get("id"),
-            "artist_id": artist_id,
-            "monitored": monitored,
-            "media_profile_id": media_profile_id,
-            "root_folder_id": artist.get("root_folder_id"),
-            "nb_tracks": albumInfo.get("nb_tracks"),
-            "record_type": albumInfo.get("record_type"),
-            "explicit_lyrics": albumInfo.get("explicit_lyrics", False),
-            "artist_name": artist["name"],
-            "status": "wanted",
-            "has_file": False,
-        })
+        newAlbum = await albumRepo.create(
+            {
+                "title": albumInfo.get("title"),
+                "cover": albumInfo.get("cover"),
+                "cover_medium": albumInfo.get("cover_medium"),
+                "cover_big": albumInfo.get("cover_big"),
+                "cover_xl": albumInfo.get("cover_xl"),
+                "release_date": parseReleaseDate(albumInfo.get("release_date")),
+                "deezer_id": albumInfo.get("id"),
+                "artist_id": artist_id,
+                "monitored": monitored,
+                "media_profile_id": media_profile_id,
+                "root_folder_id": artist.get("root_folder_id"),
+                "nb_tracks": albumInfo.get("nb_tracks"),
+                "record_type": albumInfo.get("record_type"),
+                "explicit_lyrics": albumInfo.get("explicit_lyrics", False),
+                "artist_name": artist["name"],
+                "status": "wanted",
+                "has_file": False,
+            }
+        )
         addedAlbums.append(newAlbum)
 
     return {
@@ -753,20 +770,22 @@ async def add_album_tracks(
             continue
 
         # Add track to library
-        newTrack = await trackRepo.create({
-            "title": trackInfo.get("title"),
-            "duration": trackInfo.get("duration"),
-            "track_position": trackInfo.get("track_position"),
-            "disk_number": trackInfo.get("disk_number", 1),
-            "deezer_id": trackInfo.get("id"),
-            "album_id": album_id,
-            "isrc": trackInfo.get("isrc"),
-            "explicit_lyrics": trackInfo.get("explicit_lyrics", False),
-            "preview": trackInfo.get("preview"),
-            "artist_name": trackInfo.get("artist", {}).get("name"),
-            "album_title": album["title"],
-            "has_file": False,
-        })
+        newTrack = await trackRepo.create(
+            {
+                "title": trackInfo.get("title"),
+                "duration": trackInfo.get("duration"),
+                "track_position": trackInfo.get("track_position"),
+                "disk_number": trackInfo.get("disk_number", 1),
+                "deezer_id": trackInfo.get("id"),
+                "album_id": album_id,
+                "isrc": trackInfo.get("isrc"),
+                "explicit_lyrics": trackInfo.get("explicit_lyrics", False),
+                "preview": trackInfo.get("preview"),
+                "artist_name": trackInfo.get("artist", {}).get("name"),
+                "album_title": album["title"],
+                "has_file": False,
+            }
+        )
         addedTracks.append(newTrack)
 
     # Update album track count
@@ -819,10 +838,11 @@ async def search_and_download_album(
     if not profile:
         # Use default music profile settings
         from app.services.media_profile import MediaProfile
+
         profile = MediaProfile(
             id=0,
             name="Default Music",
-            music_preferred_quality=["flac", "mp3_320", "mp3_256"],
+            music_quality_tiers=music_quality.DEFAULT_TIERS,
         )
 
     # Search and download
@@ -885,10 +905,11 @@ async def search_and_download_track(
 
     if not profile:
         from app.services.media_profile import MediaProfile
+
         profile = MediaProfile(
             id=0,
             name="Default Music",
-            music_preferred_quality=["flac", "mp3_320", "mp3_256"],
+            music_quality_tiers=music_quality.DEFAULT_TIERS,
         )
 
     # Search and download
@@ -920,13 +941,14 @@ async def search_and_download_discography(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """Search and download all wanted albums for an artist."""
-    from app.services.automation.search_engine import search_engine
-    from app.services.media_profile import media_profile_service, MediaProfile
+    """
+    Search and download all wanted albums for an artist. The per-album indexer
+    search runs in the background so the request returns immediately. Downloads appear
+    in the activity feed and download history as they happen.
+    """
+    from app.tasks.music_monitor import search_discography
 
     artistRepo = ArtistRepository(conn)
-    albumRepo = AlbumRepository(conn)
-
     artist = await artistRepo.getById(artist_id)
     if not artist:
         raise HTTPException(
@@ -934,53 +956,19 @@ async def search_and_download_discography(
             detail="Artist not found",
         )
 
-    # Get all wanted albums for this artist
-    albums = await conn.fetch(
-        "SELECT * FROM albums WHERE artist_id = $1 AND status = 'wanted' AND monitored = TRUE",
+    wanted_count = await conn.fetchval(
+        "SELECT COUNT(*) FROM albums WHERE artist_id = $1 AND status = 'wanted' AND monitored = TRUE",
         artist_id,
     )
 
-    if not albums:
-        return {
-            "message": "No wanted albums to download",
-            "started": [],
-            "failed": [],
-        }
+    if not wanted_count:
+        return {"message": "No wanted albums to search", "queued": 0}
 
-    started = []
-    failed = []
-
-    for album in albums:
-        searchQuery = f"{artist['name']} {album['title']}"
-
-        # Get media profile
-        profile = None
-        if album["media_profile_id"]:
-            profile = await media_profile_service.get_profile(album["media_profile_id"])
-
-        if not profile:
-            profile = MediaProfile(
-                id=0,
-                name="Default Music",
-                music_preferred_quality=["flac", "mp3_320", "mp3_256"],
-            )
-
-        torrentHash = await search_engine.search_music_and_download(
-            query=searchQuery,
-            profile=profile,
-            tags=["music", artist["name"]],
-        )
-
-        if torrentHash:
-            await albumRepo.update(album["id"], {"status": "downloading"})
-            started.append({"album": album["title"], "hash": torrentHash})
-        else:
-            failed.append(album["title"])
+    search_discography.delay(artist_id)
 
     return {
-        "message": f"Started {len(started)} downloads, {len(failed)} failed",
-        "started": started,
-        "failed": failed,
+        "message": f"Searching {wanted_count} wanted album(s) in the background",
+        "queued": wanted_count,
     }
 
 
@@ -1145,9 +1133,7 @@ async def delete_artist_with_files(
                     errors.append(f"Failed to delete {album['file_path']}: {str(e)}")
 
         # Remove now-empty artist folders (the parent of each deleted album folder).
-        artistFolders = {
-            os.path.dirname(a["file_path"]) for a in albums if a["file_path"]
-        }
+        artistFolders = {os.path.dirname(a["file_path"]) for a in albums if a["file_path"]}
         for folder in artistFolders:
             try:
                 if os.path.isdir(folder) and not os.listdir(folder):
@@ -1278,15 +1264,18 @@ async def refresh_artist_metadata(
             detail="Artist not found on Deezer",
         )
 
-    updated = await repo.update(artist_id, {
-        "name": deezerData.get("name"),
-        "picture": deezerData.get("picture"),
-        "picture_medium": deezerData.get("picture_medium"),
-        "picture_big": deezerData.get("picture_big"),
-        "picture_xl": deezerData.get("picture_xl"),
-        "nb_album": deezerData.get("nb_album"),
-        "nb_fan": deezerData.get("nb_fan"),
-    })
+    updated = await repo.update(
+        artist_id,
+        {
+            "name": deezerData.get("name"),
+            "picture": deezerData.get("picture"),
+            "picture_medium": deezerData.get("picture_medium"),
+            "picture_big": deezerData.get("picture_big"),
+            "picture_xl": deezerData.get("picture_xl"),
+            "nb_album": deezerData.get("nb_album"),
+            "nb_fan": deezerData.get("nb_fan"),
+        },
+    )
 
     return {
         "message": "Artist metadata refreshed successfully",
@@ -1330,17 +1319,20 @@ async def refresh_album_metadata(
             detail="Album not found on Deezer",
         )
 
-    updated = await repo.update(album_id, {
-        "title": deezerData.get("title"),
-        "cover": deezerData.get("cover"),
-        "cover_medium": deezerData.get("cover_medium"),
-        "cover_big": deezerData.get("cover_big"),
-        "cover_xl": deezerData.get("cover_xl"),
-        "release_date": parseReleaseDate(deezerData.get("release_date")),
-        "nb_tracks": deezerData.get("nb_tracks"),
-        "record_type": deezerData.get("record_type"),
-        "upc": deezerData.get("upc"),
-    })
+    updated = await repo.update(
+        album_id,
+        {
+            "title": deezerData.get("title"),
+            "cover": deezerData.get("cover"),
+            "cover_medium": deezerData.get("cover_medium"),
+            "cover_big": deezerData.get("cover_big"),
+            "cover_xl": deezerData.get("cover_xl"),
+            "release_date": parseReleaseDate(deezerData.get("release_date")),
+            "nb_tracks": deezerData.get("nb_tracks"),
+            "record_type": deezerData.get("record_type"),
+            "upc": deezerData.get("upc"),
+        },
+    )
 
     return {
         "message": "Album metadata refreshed successfully",
@@ -1384,15 +1376,18 @@ async def refresh_track_metadata(
             detail="Track not found on Deezer",
         )
 
-    updated = await repo.update(track_id, {
-        "title": deezerData.get("title"),
-        "duration": deezerData.get("duration"),
-        "track_position": deezerData.get("track_position"),
-        "disk_number": deezerData.get("disk_number", 1),
-        "isrc": deezerData.get("isrc"),
-        "explicit_lyrics": deezerData.get("explicit_lyrics", False),
-        "preview": deezerData.get("preview"),
-    })
+    updated = await repo.update(
+        track_id,
+        {
+            "title": deezerData.get("title"),
+            "duration": deezerData.get("duration"),
+            "track_position": deezerData.get("track_position"),
+            "disk_number": deezerData.get("disk_number", 1),
+            "isrc": deezerData.get("isrc"),
+            "explicit_lyrics": deezerData.get("explicit_lyrics", False),
+            "preview": deezerData.get("preview"),
+        },
+    )
 
     return {
         "message": "Track metadata refreshed successfully",
@@ -1473,7 +1468,7 @@ async def get_artist_discography(
     # Get library album Deezer IDs for comparison
     libraryRows = await conn.fetch(
         "SELECT deezer_id, id, status, monitored, has_file FROM albums WHERE artist_id = $1 AND deezer_id IS NOT NULL",
-        artist_id
+        artist_id,
     )
     libraryAlbumMap = {row["deezer_id"]: dict(row) for row in libraryRows}
 

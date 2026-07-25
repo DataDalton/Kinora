@@ -96,6 +96,58 @@ async def async_search_upgrades():
 
                     await asyncio.sleep(2)
 
+            # Music albums upgrade by quality tier rather than resolution.
+            album_rows = await conn.fetch("""
+                SELECT al.id, al.title, al.media_profile_id, al.quality_detected,
+                       ar.name AS artist_name,
+                       COALESCE(al.upgrade_allowed, mp.upgrade_allowed) AS effective_upgrade
+                FROM albums al
+                INNER JOIN media_profiles mp ON al.media_profile_id = mp.id
+                LEFT JOIN artists ar ON al.artist_id = ar.id
+                WHERE al.monitored = TRUE AND al.has_file = TRUE
+                  AND al.status NOT IN ('downloading', 'processing')
+                  AND COALESCE(al.upgrade_allowed, mp.upgrade_allowed) = TRUE
+                  AND al.quality_detected IS NOT NULL
+                LIMIT 50
+                """)
+            if album_rows:
+                album_profile_ids = list({r["media_profile_id"] for r in album_rows})
+                album_profile_rows = await conn.fetch(
+                    "SELECT * FROM media_profiles WHERE id = ANY($1)", album_profile_ids
+                )
+                album_profiles = {r["id"]: MediaProfile.from_row(dict(r)) for r in album_profile_rows}
+
+                for row in album_rows:
+                    item = dict(row)
+                    profile = album_profiles.get(item["media_profile_id"])
+                    if not profile:
+                        continue
+
+                    artist_name = item.get("artist_name")
+                    query = f"{artist_name} {item['title']}".strip() if artist_name else item["title"]
+
+                    try:
+                        torrent_hash = await search_engine.search_music_and_download(
+                            query=query,
+                            profile=profile,
+                            tags=["kinora", "music", f"album-{item['id']}"],
+                            history_conn=conn,
+                            history_media_id=item["id"],
+                            current_quality=item["quality_detected"],
+                            grab_mode="upgrade",
+                            upgrade_allowed=item["effective_upgrade"],
+                        )
+                        if torrent_hash:
+                            await conn.execute(
+                                "UPDATE albums SET status = 'downloading', updated_at = NOW() WHERE id = $1",
+                                item["id"],
+                            )
+                            grabbed += 1
+                    except Exception as e:
+                        print(f"Album upgrade search error for {query}: {e}")
+
+                    await asyncio.sleep(2)
+
         return {
             "status": "success",
             "upgrades_grabbed": grabbed,

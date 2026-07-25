@@ -1,4 +1,5 @@
-from typing import List, Optional
+import re
+from typing import List, Optional, Dict
 from datetime import datetime
 from bs4 import BeautifulSoup
 
@@ -6,6 +7,71 @@ from app.services.indexers.base import BaseIndexer, TorrentRelease
 from app.services.cloudflare.flaresolverr import flaresolverr
 from app.core.config import settings
 from app.core.http_client import http_get
+
+
+def _load_chrome_targets() -> Dict[int, str]:
+    """Map each curl_cffi desktop Chrome major version to its impersonate token."""
+    tokens: List[str] = []
+    try:
+        import typing
+        from curl_cffi.requests.impersonate import BrowserTypeLiteral
+
+        tokens = [t for t in typing.get_args(BrowserTypeLiteral) if isinstance(t, str)]
+    except Exception:
+        tokens = []
+    if not tokens:
+        # Fallback for curl_cffi 0.15.x if the literal cannot be enumerated.
+        tokens = [
+            "chrome99",
+            "chrome100",
+            "chrome101",
+            "chrome104",
+            "chrome107",
+            "chrome110",
+            "chrome116",
+            "chrome119",
+            "chrome120",
+            "chrome123",
+            "chrome124",
+            "chrome131",
+            "chrome133a",
+            "chrome136",
+            "chrome142",
+            "chrome145",
+            "chrome146",
+        ]
+    mapping: Dict[int, str] = {}
+    for token in tokens:
+        if "android" in token:
+            continue
+        match = re.fullmatch(r"chrome(\d+)[a-z]?", token)
+        if match:
+            mapping[int(match.group(1))] = token
+    return mapping
+
+
+_CHROME_TARGET_BY_VERSION = _load_chrome_targets()
+
+
+def _impersonate_for_ua(user_agent: Optional[str]) -> str:
+    """
+    Pick the curl_cffi Chrome impersonation target closest to the FlareSolverr
+    browser, so the TLS fingerprint matches the user-agent we send with the reused
+    clearance cookie. curl_cffi ships a fixed set of Chrome profiles, so we choose the
+    highest one at or below the browser's major version (or the highest available when
+    the browser is newer than every profile).
+    """
+    default = "chrome"
+    if not user_agent or not _CHROME_TARGET_BY_VERSION:
+        return default
+    match = re.search(r"Chrome/(\d+)", user_agent)
+    if not match:
+        return default
+    major = int(match.group(1))
+    versions = _CHROME_TARGET_BY_VERSION
+    at_or_below = [v for v in versions if v <= major]
+    chosen = max(at_or_below) if at_or_below else max(versions)
+    return versions[chosen]
 
 
 class LeetxIndexer(BaseIndexer):
@@ -35,12 +101,23 @@ class LeetxIndexer(BaseIndexer):
     def __init__(self):
         self.current_url = self.base_url
         self.bypass = flaresolverr if self.requires_cloudflare_bypass else None
+        # The cf_clearance value that failed the fast path, if any. Reuse is verified to
+        # work, but if a cookie is ever rejected (different egress IP, stricter
+        # challenge) we skip the fast path for that value until a fresh solve issues a
+        # new one, so a broken reuse never costs more than one probe per cookie.
+        self._fast_failed_clearance: Optional[str] = None
 
     async def _fetch_html(self, url: str) -> str:
         """
         Fetch HTML from URL with Cloudflare bypass if needed
         """
         if self.requires_cloudflare_bypass and self.bypass:
+            # Fast path: reuse the Cloudflare clearance from a prior solve and fetch
+            # with the impersonating HTTP client, skipping the browser entirely.
+            fast = await self._fetch_fast(url)
+            if fast is not None:
+                return fast
+            # Fall back to a full FlareSolverr solve, which refreshes the clearance.
             try:
                 result = await self.bypass.get(url, max_timeout=30000)
                 return result.get("solution", {}).get("response", "")
@@ -50,6 +127,52 @@ class LeetxIndexer(BaseIndexer):
             response = await http_get(url, timeout=settings.INDEXER_REQUEST_TIMEOUT)
             response.raise_for_status()
             return response.text
+
+    async def _fetch_fast(self, url: str) -> Optional[str]:
+        """
+        Fetch a page reusing the cached Cloudflare clearance cookie and user-agent.
+        Returns HTML on success, or None when there is no clearance yet or the response
+        looks like a Cloudflare challenge, in which case the caller does a full solve.
+        """
+        cookies = getattr(self.bypass, "clearance_cookies", None)
+        user_agent = getattr(self.bypass, "user_agent", None)
+        if not cookies or not user_agent:
+            return None
+
+        clearance = cookies.get("cf_clearance")
+        # Skip the fast path for a clearance value that already failed so we never pay
+        # a wasted round trip before every solve. A fresh solve changes the value and
+        # we probe again once.
+        if clearance and clearance == self._fast_failed_clearance:
+            return None
+
+        try:
+            from app.core.http_client import get_http_client
+
+            client = await get_http_client()
+            headers = {
+                "User-Agent": user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer": self.current_url + "/",
+            }
+            response = await client.get(
+                url,
+                headers=headers,
+                cookies=cookies,
+                impersonate=_impersonate_for_ua(user_agent),
+                timeout=15,
+                allow_redirects=True,
+            )
+            markers = ("just a moment", "cf-chl", "challenge-platform", "checking your browser")
+            if response.status_code != 200 or any(
+                marker in (response.text or "")[:2000].lower() for marker in markers
+            ):
+                self._fast_failed_clearance = clearance
+                return None
+            return response.text
+        except Exception:
+            self._fast_failed_clearance = clearance
+            return None
 
     async def search(
         self,
@@ -119,8 +242,10 @@ class LeetxIndexer(BaseIndexer):
         # Uploader
         uploader = cols[5].text.strip() if len(cols) > 5 else None
 
-        # Fetch magnet link (requires visiting detail page)
-        magnet = await self._fetch_magnet(detail_url)
+        # The magnet lives on the detail page. It is resolved on demand at download
+        # time via ensure_download_source, not fetched for every search result, so a
+        # search is a single page load instead of one fetch per row.
+        magnet = None
 
         # Parse quality info based on category
         if category == "music":
@@ -139,6 +264,9 @@ class LeetxIndexer(BaseIndexer):
                 category=category,
                 audio_format=music_info.get("audio_format"),
                 audio_bitrate=music_info.get("audio_bitrate"),
+                bit_depth=music_info.get("bit_depth"),
+                sample_rate=music_info.get("sample_rate"),
+                quality_tier=music_info.get("quality_tier"),
                 is_lossless=music_info.get("is_lossless", False),
                 is_discography=music_info.get("is_discography", False),
                 artist=music_info.get("artist"),
@@ -174,6 +302,12 @@ class LeetxIndexer(BaseIndexer):
                 is_proper="PROPER" in title.upper(),
                 is_repack="REPACK" in title.upper(),
             )
+
+    async def ensure_download_source(self, release: TorrentRelease) -> TorrentRelease:
+        """Resolve the magnet from the detail page when it was deferred during search."""
+        if not (release.magnet or release.torrent_url) and release.detail_url:
+            release.magnet = await self._fetch_magnet(release.detail_url)
+        return release
 
     async def _fetch_magnet(self, detail_url: str) -> Optional[str]:
         """

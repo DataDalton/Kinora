@@ -1,0 +1,20 @@
+# DOMAIN defaults to localhost. Caddy serves localhost and other internal names with
+# its own local CA (private HTTPS, no public exposure, no Let's Encrypt). Set DOMAIN to
+# a real public domain and Caddy provisions and renews a Let's Encrypt certificate
+# automatically. HTTP/3, HTTP/2, and HTTP/1.1 with automatic HTTP-to-HTTPS redirect are
+# all handled here at the edge, and the proxied backend and frontend speak plain HTTP/1.1.
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	# API requests and the realtime WebSocket go to the backend. reverse_proxy upgrades
+	# the WebSocket connection on /ws automatically.
+	@backend path /api/* /ws/*
+	handle @backend {
+		reverse_proxy backend:8000
+	}
+
+	# Everything else is served by the Next.js frontend.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

@@ -34,7 +34,6 @@ routes = [
   "GET /v1/openvpn/status",
   "PUT /v1/openvpn/status",
   "GET /v1/openvpn/portforwarded",
-  "GET /v1/portforwarded",
   "GET /v1/dns/status",
   "GET /v1/version",
 ]

@@ -5,6 +5,7 @@ from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile
+from app.services import music_quality
 from app.services.metadata.deezer import deezer_service
 from app.core.cache import cacheSet
 
@@ -87,7 +88,7 @@ async def async_search_wanted_music():
                     profile = MediaProfile(
                         id=0,
                         name="Default Music",
-                        music_preferred_quality=["flac", "mp3_320", "mp3_256"],
+                        music_quality_tiers=music_quality.DEFAULT_TIERS,
                     )
 
                 # Search and download. The paired folder (hardlink target + organize path)
@@ -300,7 +301,7 @@ async def async_search_discography(artist_id: int):
                 profile = MediaProfile(
                     id=0,
                     name="Default Music",
-                    music_preferred_quality=["flac", "mp3_320", "mp3_256"],
+                    music_quality_tiers=music_quality.DEFAULT_TIERS,
                 )
 
                 if album["media_profile_id"]:

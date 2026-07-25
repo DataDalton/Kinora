@@ -20,6 +20,22 @@ class FlareSolverrBypass(BaseCloudflareBypass):
             raise ValueError("FLARESOLVERR_URL not configured")
         self.session_id: Optional[str] = None
         self.session_ttl_minutes: int = 30
+        # Cloudflare clearance from the last successful solve. Reused by indexers to
+        # fetch follow-up pages with a plain impersonating HTTP client instead of the
+        # browser (verified to pass 1337x when backend and FlareSolverr share an egress IP).
+        self.clearance_cookies: Dict[str, str] = {}
+        self.user_agent: Optional[str] = None
+
+    def _capture_clearance(self, data: Dict[str, Any]) -> None:
+        """Store the cf_clearance cookies and user-agent from a FlareSolverr solution."""
+        solution = data.get("solution") or {}
+        cookies = solution.get("cookies") or []
+        parsed = {c["name"]: c["value"] for c in cookies if c.get("name") and c.get("value")}
+        if parsed:
+            self.clearance_cookies = parsed
+        user_agent = solution.get("userAgent")
+        if user_agent:
+            self.user_agent = user_agent
 
     async def _ensure_session(self) -> str:
         """
@@ -152,6 +168,7 @@ class FlareSolverrBypass(BaseCloudflareBypass):
         if data.get("status") != "ok":
             raise Exception(f"FlareSolverr error: {data.get('message')}")
 
+        self._capture_clearance(data)
         return data
 
     async def post(
@@ -200,6 +217,7 @@ class FlareSolverrBypass(BaseCloudflareBypass):
         if data.get("status") != "ok":
             raise Exception(f"FlareSolverr error: {data.get('message')}")
 
+        self._capture_clearance(data)
         return data
 
     async def test_connection(self) -> bool:

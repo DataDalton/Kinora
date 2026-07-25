@@ -88,7 +88,8 @@ export interface MediaProfileFormData {
 	music_album_folder_format: string;
 	music_track_naming_format: string;
 	music_multi_disc_format: string;
-	music_preferred_quality: string[];
+	music_quality_tiers: string[];
+	music_quality_cutoff: string;
 	music_embed_lyrics: boolean;
 	music_embed_artwork: boolean;
 	// Torrent validation settings

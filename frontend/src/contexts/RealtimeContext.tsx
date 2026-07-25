@@ -10,7 +10,15 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { RealtimeClient } from "@/lib/realtime";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+// Resolve the realtime WebSocket URL. An explicit NEXT_PUBLIC_WS_URL wins, otherwise it
+// is derived from the current page origin so it works on any domain served by the proxy
+// with no rebuild. Called only on the client, where window is defined.
+function resolveWsUrl(): string {
+	const configured = process.env.NEXT_PUBLIC_WS_URL;
+	if (configured) return configured;
+	const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+	return `${protocol}://${window.location.host}/ws`;
+}
 
 function readToken(): string | null {
 	if (typeof document === "undefined") return null;
@@ -26,7 +34,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 	const queryClient = useQueryClient();
 	const [client] = useState<RealtimeClient | null>(() =>
 		typeof window !== "undefined"
-			? new RealtimeClient(WS_URL, readToken)
+			? new RealtimeClient(resolveWsUrl(), readToken)
 			: null,
 	);
 

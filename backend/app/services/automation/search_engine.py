@@ -9,13 +9,16 @@ Search strategy:
 
 from typing import List, Optional
 import asyncio
+import hashlib
 
 from app.services.indexers.base import TorrentRelease
 from app.services.indexers.leetx import leetx_indexer
 from app.services.indexers.yts import yts_indexer
 from app.services.indexers.nyaa import NyaaIndexer
 from app.services.media_profile import MediaProfile, media_profile_service
+from app.services import music_quality
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
+from app.core.cache import cacheGet, cacheSet
 from app.services.torrent_validator import validate_and_resume_torrent
 from app.services.folder_selector import folderSelector
 
@@ -200,18 +203,11 @@ class SearchEngine:
         Returns combined and deduplicated results.
         Uses selected_indexers if provided, otherwise falls back to type-based defaults.
         """
-        # Map indexer names to instances
-        indexer_map = {
-            "1337x": leetx_indexer,
-            "YTS": yts_indexer,
-            "Nyaa": self.nyaa_indexer,
-        }
-
         tasks = []
 
         # Use selected indexers if provided
         if selected_indexers:
-            indexers = [indexer_map[name] for name in selected_indexers if name in indexer_map and indexer_map[name]]
+            indexers = [self._indexer_by_name(name) for name in selected_indexers if self._indexer_by_name(name)]
         # Fall back to media type based selection
         elif media_type == "anime":
             indexers = self.anime_indexers
@@ -220,6 +216,14 @@ class SearchEngine:
             category = "music"  # Force music category for 1337x
         else:
             indexers = self.general_indexers
+
+        # Short-TTL cache so repeated identical searches (re-runs, cascade retries,
+        # search-again after blocklist) skip the indexer round trip. Magnets are
+        # resolved on demand at download time, so cached results are complete.
+        cache_key = self._search_cache_key(query, category, media_type, selected_indexers)
+        cached = await cacheGet(cache_key)
+        if cached is not None:
+            return [TorrentRelease.from_dict(item) for item in cached][:max_results]
 
         for indexer in indexers:
             task = asyncio.create_task(
@@ -261,7 +265,46 @@ class SearchEngine:
             unique_releases.append(release)
 
         # Limit total results
-        return unique_releases[:max_results]
+        result = unique_releases[:max_results]
+
+        # Cache non-empty result sets for a short window (10 minutes). Empty results are
+        # never cached, so a transient failure or a Cloudflare challenge is retried on the
+        # next search (which also refreshes the clearance) instead of returning empty for
+        # the whole window.
+        if result:
+            await cacheSet(cache_key, [release.to_dict() for release in result], expire=600)
+
+        return result
+
+    def _indexer_by_name(self, name: Optional[str]):
+        """Resolve an indexer instance from its display name."""
+        return {
+            "1337x": leetx_indexer,
+            "YTS": yts_indexer,
+            "Nyaa": self.nyaa_indexer,
+        }.get(name)
+
+    def _search_cache_key(self, query, category, media_type, selected_indexers) -> str:
+        """Build a deterministic cache key for a search."""
+        idx = ",".join(sorted(selected_indexers)) if selected_indexers else (media_type or "auto")
+        raw = f"{query}|{category}|{media_type}|{idx}".lower()
+        return "idxsearch:" + hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    async def resolve_download_source(self, release: TorrentRelease) -> None:
+        """
+        Fill a chosen release's magnet or torrent source on demand. Search defers this
+        for indexers that need a detail-page fetch (1337x), so only the selected
+        release pays the cost instead of every result.
+        """
+        if release.torrent_url or release.magnet:
+            return
+        indexer = self._indexer_by_name(release.indexer)
+        if not indexer:
+            return
+        try:
+            await indexer.ensure_download_source(release)
+        except Exception as e:
+            print(f"Failed to resolve download source for '{release.title}': {e}")
 
     async def cascading_search(
         self,
@@ -466,6 +509,9 @@ class SearchEngine:
             ):
                 return None
 
+        # Resolve the magnet on demand for the one release we are grabbing.
+        await self.resolve_download_source(best_release)
+
         # Prefer .torrent file if available, fallback to magnet
         torrent_source = best_release.torrent_url or best_release.magnet
 
@@ -622,49 +668,47 @@ class SearchEngine:
         preferred_uploaders: Optional[List[str]] = None,
         blocked_uploaders: Optional[List[str]] = None,
         blocklisted_titles: Optional[set] = None,
+        min_tier: Optional[str] = None,
     ) -> Optional[TorrentRelease]:
         """
-        Music-specific cascading search
+        Music cascading search over the profile's allowed quality tiers, highest
+        quality first. Each tier maps to a search term (the lossless rungs share the
+        FLAC search since a title rarely states bit depth or sample rate), and the
+        first tier that yields an allowed release wins.
 
-        Priority order (highest to lowest):
-        1. Audio format (FLAC -> MP3 320 -> MP3 256 -> MP3 128)
-        2. Uploader preferences
-
-        Cascade: FLAC -> mp3_320 -> mp3_256 -> mp3_128 -> aac -> ogg
+        min_tier restricts the search to tiers strictly above a current tier, used by
+        the upgrade search so it never re-downloads the same or lower quality.
         """
-        # Get preferred quality order from profile
-        quality_order = getattr(profile, "music_preferred_quality", None) or [
-            "flac",
-            "mp3_320",
-            "mp3_256",
-            "mp3_128",
-            "aac",
-            "ogg",
-        ]
+        allowed = getattr(profile, "music_quality_tiers", None) or music_quality.DEFAULT_TIERS
+        # Order allowed tiers highest quality first for the cascade.
+        ordered = sorted(set(allowed), key=music_quality.rank, reverse=True)
+        if min_tier is not None:
+            ordered = [tier for tier in ordered if music_quality.rank(tier) > music_quality.rank(min_tier)]
+            if not ordered:
+                return None
+        allowed_set = set(ordered)
 
-        # Get per-media-type indexers and timing
         selected_indexers = profile.get_indexers_for_type("music")
         search_timeout = profile.search_timeout
         max_results = profile.max_results
 
-        # Map quality values to search terms
-        format_search_terms = {
-            "flac": "FLAC",
-            "mp3_320": "MP3 320",
-            "mp3_256": "MP3 256",
-            "mp3_128": "MP3 128",
-            "aac": "AAC",
-            "ogg": "OGG",
-        }
+        # Dedupe the per-tier search terms while preserving the highest-first order.
+        seen_terms = set()
+        search_plan = []
+        for tier in ordered:
+            term = music_quality.SEARCH_TERMS.get(tier, "")
+            if term in seen_terms:
+                continue
+            seen_terms.add(term)
+            search_plan.append(term)
 
         print(f"Music cascading search: {query}")
-        print(f"Quality order: {quality_order}")
+        print(f"Allowed tiers (high to low): {ordered}")
         if selected_indexers:
             print(f"Selected indexers: {selected_indexers}")
 
-        for quality in quality_order:
-            search_term = format_search_terms.get(quality, quality.upper())
-            search_query = f"{query} {search_term}"
+        for search_term in search_plan:
+            search_query = f"{query} {search_term}".strip()
 
             print(f"\nSearching: {search_query}")
 
@@ -682,16 +726,23 @@ class SearchEngine:
             if not releases:
                 continue
 
-            # Filter by quality and preferences
             filtered_releases = []
             for release in releases:
                 # Skip releases the user has blocklisted for this album.
                 if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
                     continue
-                if not self._meets_music_requirements(release, profile):
+                if blocked_uploaders and release.uploader in blocked_uploaders:
                     continue
 
-                if blocked_uploaders and release.uploader in blocked_uploaders:
+                tier = self._release_tier(release)
+                # Accept a release whose tier is unknown so a mislabeled torrent is not
+                # dropped, unless an allowed set or min_tier would exclude it.
+                if tier is not None:
+                    if tier not in allowed_set:
+                        continue
+                    if min_tier is not None and music_quality.rank(tier) <= music_quality.rank(min_tier):
+                        continue
+                elif min_tier is not None:
                     continue
 
                 filtered_releases.append(release)
@@ -699,67 +750,32 @@ class SearchEngine:
             if not filtered_releases:
                 continue
 
-            # Select best release (most seeders for music)
             best_release = self._select_best_music_release(filtered_releases, profile, preferred_uploaders)
 
             if best_release:
                 print(f"\n[OK] Selected: {best_release.title}")
+                print(f"  Tier: {self._release_tier(best_release)}")
                 print(f"  Format: {best_release.audio_format}")
-                print(f"  Bitrate: {best_release.audio_bitrate}")
-                print(f"  Lossless: {best_release.is_lossless}")
                 print(f"  Seeders: {best_release.seeders}")
                 return best_release
 
         print(f"\n[FAIL] No acceptable music release found")
         return None
 
+    def _release_tier(self, release: TorrentRelease) -> Optional[str]:
+        """Best-effort music quality tier for a release from its parsed title fields."""
+        return getattr(release, "quality_tier", None) or music_quality.tier_from_release(release)
+
     def _meets_music_requirements(self, release: TorrentRelease, profile: MediaProfile) -> bool:
-        """
-        Check if music release meets profile requirements
-        """
-        preferred_quality = getattr(profile, "music_preferred_quality", None) or []
-
-        if not preferred_quality:
+        """Whether a release's quality tier is in the profile's allowed tiers."""
+        allowed = getattr(profile, "music_quality_tiers", None)
+        if not allowed:
             return True
-
-        # Map release format to quality values
-        format_to_quality = {
-            "FLAC": "flac",
-            "MP3": "mp3_320",  # Default MP3 to 320
-            "AAC": "aac",
-            "OGG": "ogg",
-            "ALAC": "flac",  # Treat ALAC as equivalent to FLAC
-            "WAV": "flac",  # Treat WAV as lossless
-        }
-
-        # Map bitrate to quality
-        bitrate_to_quality = {
-            "320": "mp3_320",
-            "256": "mp3_256",
-            "192": "mp3_192",
-            "128": "mp3_128",
-            "V0": "mp3_320",  # V0 is roughly equivalent to 320
-            "V2": "mp3_256",
-        }
-
-        # Determine release quality
-        release_quality = None
-
-        if release.audio_format:
-            release_quality = format_to_quality.get(release.audio_format.upper())
-
-        # Override with bitrate if available
-        if release.audio_bitrate:
-            bitrate_quality = bitrate_to_quality.get(release.audio_bitrate)
-            if bitrate_quality:
-                release_quality = bitrate_quality
-
-        # If we can't determine quality, accept it
-        if not release_quality:
+        tier = self._release_tier(release)
+        # Accept when the tier cannot be determined so a mislabeled torrent is not dropped.
+        if tier is None:
             return True
-
-        # Check if release quality is in preferred list
-        return release_quality in preferred_quality
+        return tier in allowed
 
     def _select_best_music_release(
         self,
@@ -768,16 +784,16 @@ class SearchEngine:
         preferred_uploaders: Optional[List[str]] = None,
     ) -> Optional[TorrentRelease]:
         """
-        Select best music release based on seeders and preferences
+        Select the best music release. Ranks by parsed quality tier first, then by
+        preferred uploader, then by seeders.
         """
         if not releases:
             return None
 
-        # Sort by: lossless first, then seeders
         def score_release(release: TorrentRelease) -> tuple:
-            lossless_score = 1 if release.is_lossless else 0
+            tier_score = music_quality.rank(self._release_tier(release))
             uploader_score = 1 if preferred_uploaders and release.uploader in preferred_uploaders else 0
-            return (lossless_score, uploader_score, release.seeders)
+            return (tier_score, uploader_score, release.seeders)
 
         releases.sort(key=score_release, reverse=True)
         return releases[0]
@@ -792,19 +808,41 @@ class SearchEngine:
         blocked_uploaders: Optional[List[str]] = None,
         history_conn=None,
         history_media_id: Optional[int] = None,
+        current_quality: Optional[str] = None,
+        grab_mode: str = "auto",
+        upgrade_allowed: Optional[bool] = None,
     ) -> Optional[str]:
         """
-        Search for music with cascading quality, select best, and download.
-        Returns torrent hash if successful. When history_conn and history_media_id
-        are provided, records a download_history row (with the re-addable source).
+        Search for music across the profile's quality tiers, select the best release,
+        and download. Returns torrent hash if successful. When history_conn and
+        history_media_id are provided, records a download_history row.
+
+        For an upgrade (grab_mode 'upgrade' with current_quality set as the album's
+        current tier), the search only considers tiers above the current one and only
+        proceeds when the found release beats it.
         """
+        upgrade = grab_mode == "upgrade" and current_quality is not None
         blocklisted_titles = await _fetch_blocklisted_titles(history_conn, "album", history_media_id)
         best_release = await self.music_cascading_search(
-            query, profile, preferred_uploaders, blocked_uploaders, blocklisted_titles=blocklisted_titles
+            query,
+            profile,
+            preferred_uploaders,
+            blocked_uploaders,
+            blocklisted_titles=blocklisted_titles,
+            min_tier=current_quality if upgrade else None,
         )
 
         if not best_release:
             return None
+
+        # Upgrade gate: only proceed when the found release is a worthwhile upgrade.
+        if upgrade:
+            candidate_tier = self._release_tier(best_release)
+            if not music_quality.needs_music_upgrade(current_quality, candidate_tier, profile, upgrade_allowed):
+                return None
+
+        # Resolve the magnet on demand for the one release we are grabbing.
+        await self.resolve_download_source(best_release)
 
         torrent_source = best_release.torrent_url or best_release.magnet
 
@@ -847,6 +885,8 @@ class SearchEngine:
                     best_release,
                     history_media_id,
                     "album",
+                    grab_mode=grab_mode,
+                    was_upgrade=(grab_mode == "upgrade"),
                     root_folder_id=root_folder_id,
                 )
 

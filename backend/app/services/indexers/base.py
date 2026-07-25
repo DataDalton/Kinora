@@ -37,12 +37,38 @@ class TorrentRelease:
     # Music-specific fields
     audio_format: Optional[str] = None  # FLAC, MP3, AAC, OGG, etc.
     audio_bitrate: Optional[str] = None  # 320, 256, 128, V0, etc.
+    bit_depth: Optional[int] = None  # Lossless bit depth parsed from title (16, 24)
+    sample_rate: Optional[int] = None  # Lossless sample rate in Hz parsed from title (44100, 96000)
+    quality_tier: Optional[str] = None  # Best-effort music quality tier from the title
     is_lossless: bool = False
     is_discography: bool = False
     artist: Optional[str] = None
     album: Optional[str] = None
     year: Optional[int] = None
     raw_data: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a JSON-safe dict for caching. raw_data is dropped."""
+        from dataclasses import asdict
+
+        data = asdict(self)
+        data.pop("raw_data", None)
+        if self.upload_date is not None:
+            data["upload_date"] = self.upload_date.isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TorrentRelease":
+        """Rebuild a TorrentRelease from a cached dict."""
+        data = dict(data)
+        data.pop("raw_data", None)
+        upload_date = data.get("upload_date")
+        if isinstance(upload_date, str):
+            try:
+                data["upload_date"] = datetime.fromisoformat(upload_date)
+            except ValueError:
+                data["upload_date"] = None
+        return cls(**data)
 
 
 class BaseIndexer(ABC):
@@ -75,6 +101,16 @@ class BaseIndexer(ABC):
         Get recent uploads from RSS feed
         """
         pass
+
+    async def ensure_download_source(self, release: TorrentRelease) -> TorrentRelease:
+        """
+        Resolve the magnet or torrent source for a chosen release when it was not
+        captured during search. Indexers whose listings already include the source
+        (YTS, Nyaa) keep the default no-op. Indexers that require a detail-page fetch
+        (1337x) override this so the fetch happens once, at download time, rather than
+        for every search result.
+        """
+        return release
 
     @abstractmethod
     async def test_connection(self) -> bool:
@@ -314,7 +350,9 @@ class BaseIndexer(ABC):
 
         title_upper = title.upper()
 
-        # Audio Format (FLAC, MP3, AAC, OGG, ALAC, WAV, APE, WMA)
+        # Audio Format. FLAC and ALAC are checked before DSD/SACD so a PCM rip of an
+        # SACD titled "... SACD ... FLAC" is read as FLAC, while a pure "[DSD 64]" or
+        # "SACD" release with no PCM format falls through to DSD.
         audio_format = None
         is_lossless = False
 
@@ -330,6 +368,9 @@ class BaseIndexer(ABC):
         elif "APE" in title_upper:
             audio_format = "APE"
             is_lossless = True
+        elif "DSD" in title_upper or "DSF" in title_upper or "DFF" in title_upper or "SACD" in title_upper:
+            audio_format = "DSD"
+            is_lossless = True
         elif "MP3" in title_upper:
             audio_format = "MP3"
         elif "AAC" in title_upper:
@@ -341,30 +382,66 @@ class BaseIndexer(ABC):
         elif "WMA" in title_upper:
             audio_format = "WMA"
 
-        # Bitrate (320, 256, 192, 128, V0, V2, 24BIT, 16BIT)
+        # Lossless indicators.
+        if "LOSSLESS" in title_upper or "HI-RES" in title_upper or "HIRES" in title_upper:
+            is_lossless = True
+
+        # Lossless bit depth and sample rate. A combined form like "24-96" or "24/192"
+        # is parsed first, then standalone bit depth and sample rate tokens.
+        def _sr_hz(token):
+            return {
+                "44": 44100,
+                "441": 44100,
+                "48": 48000,
+                "480": 48000,
+                "88": 88200,
+                "882": 88200,
+                "96": 96000,
+                "960": 96000,
+                "176": 176400,
+                "1764": 176400,
+                "192": 192000,
+            }.get(token.replace(".", ""))
+
+        _sr_token = r"(44\.1|441|44|48\.0|480|48|88\.2|882|88|96\.0|960|96|176\.4|1764|176|192)"
+
+        bit_depth = None
+        sample_rate = None
+
+        combo = re.search(r"\b(24|16)[\-/ ]" + _sr_token + r"\b", title_upper)
+        if combo:
+            bit_depth = int(combo.group(1))
+            sample_rate = _sr_hz(combo.group(2))
+            is_lossless = True
+
+        if bit_depth is None:
+            if "24BIT" in title_upper or "24-BIT" in title_upper or "24 BIT" in title_upper:
+                bit_depth = 24
+                is_lossless = True
+            elif "16BIT" in title_upper or "16-BIT" in title_upper or "16 BIT" in title_upper:
+                bit_depth = 16
+
+        if sample_rate is None:
+            sr_match = re.search(_sr_token + r"\s*K?HZ", title_upper)
+            if sr_match:
+                sample_rate = _sr_hz(sr_match.group(1))
+
+        # Lossy bitrate (320, 256, 192, 128, V0, V2). Only parsed for lossy releases so a
+        # lossless sample rate like "192kHz" is never read as a 192 kbps bitrate.
         audio_bitrate = None
-
-        if "320" in title_upper or "320KBPS" in title_upper or "320 KBPS" in title_upper:
-            audio_bitrate = "320"
-        elif "256" in title_upper or "256KBPS" in title_upper or "256 KBPS" in title_upper:
-            audio_bitrate = "256"
-        elif "192" in title_upper or "192KBPS" in title_upper or "192 KBPS" in title_upper:
-            audio_bitrate = "192"
-        elif "128" in title_upper or "128KBPS" in title_upper or "128 KBPS" in title_upper:
-            audio_bitrate = "128"
-        elif "V0" in title_upper:
-            audio_bitrate = "V0"
-        elif "V2" in title_upper:
-            audio_bitrate = "V2"
-        elif "24BIT" in title_upper or "24-BIT" in title_upper or "24 BIT" in title_upper:
-            audio_bitrate = "24bit"
-            is_lossless = True
-        elif "16BIT" in title_upper or "16-BIT" in title_upper or "16 BIT" in title_upper:
-            audio_bitrate = "16bit"
-
-        # Check for lossless indicators
-        if "LOSSLESS" in title_upper:
-            is_lossless = True
+        if not is_lossless:
+            if "320" in title_upper:
+                audio_bitrate = "320"
+            elif "256" in title_upper:
+                audio_bitrate = "256"
+            elif "192" in title_upper:
+                audio_bitrate = "192"
+            elif "128" in title_upper:
+                audio_bitrate = "128"
+            elif "V0" in title_upper:
+                audio_bitrate = "V0"
+            elif "V2" in title_upper:
+                audio_bitrate = "V2"
 
         # Discography detection
         is_discography = any(
@@ -405,9 +482,16 @@ class BaseIndexer(ABC):
         if group_match:
             release_group = group_match.group(1)
 
+        from app.services import music_quality
+
+        quality_tier = music_quality.tier_from_fields(audio_format, audio_bitrate, is_lossless, bit_depth, sample_rate)
+
         return {
             "audio_format": audio_format,
             "audio_bitrate": audio_bitrate,
+            "bit_depth": bit_depth,
+            "sample_rate": sample_rate,
+            "quality_tier": quality_tier,
             "is_lossless": is_lossless,
             "is_discography": is_discography,
             "artist": artist,

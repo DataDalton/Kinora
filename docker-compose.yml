@@ -132,7 +132,9 @@ services:
       BACKEND_PORT: 8000
       BACKEND_WORKERS: 4
       BACKEND_RELOAD: false
-      CORS_ORIGINS: http://localhost:3000,http://localhost:8000
+      # Requests go same-origin through Caddy, so CORS is not normally exercised. These
+      # cover direct-to-backend access during debugging.
+      CORS_ORIGINS: https://localhost,http://localhost:3000,http://localhost:8000
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       FLARESOLVERR_URL: http://flaresolverr:8191
       CLOUDFLARE_BYPASS_METHOD: flaresolverr
@@ -149,12 +151,13 @@ services:
       SUBTITLE_LANGUAGES: en
     volumes:
       - ./backend:/app
+      - /app/.venv
       - media-data:/media
       - downloads-data:/downloads
       - torrents-data:/torrents
       - kinora-secrets:/secrets
-    ports:
-      - "8000:8000"
+    # No published port. The backend is reached through the Caddy proxy on the internal
+    # network. Publish 8000 here only for direct API debugging.
     depends_on:
       bootstrap:
         condition: service_completed_successfully
@@ -200,6 +203,7 @@ services:
       FLARESOLVERR_URL: http://flaresolverr:8191
     volumes:
       - ./backend:/app
+      - /app/.venv
       - media-data:/media
       - downloads-data:/downloads
       - torrents-data:/torrents
@@ -243,6 +247,7 @@ services:
       TMDB_API_KEY: ${TMDB_API_KEY:-}
     volumes:
       - ./backend:/app
+      - /app/.venv
       - kinora-secrets:/secrets
     depends_on:
       bootstrap:
@@ -260,20 +265,46 @@ services:
       context: ./frontend
       dockerfile: ../docker/frontend.Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
+        # Same-origin through Caddy, resolved from the browser location at runtime, so
+        # changing DOMAIN needs no frontend rebuild. API is a relative path. The
+        # WebSocket URL is derived from the page origin when left empty.
+        NEXT_PUBLIC_API_URL: /api/v1
+        NEXT_PUBLIC_WS_URL: ""
     container_name: kinora-frontend
     volumes:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
-    ports:
-      - "3000:3000"
+    # No published port. Served through the Caddy proxy on the internal network.
     depends_on:
       - backend
     networks:
       - kinora-network
     restart: unless-stopped
+
+  # TLS-terminating reverse proxy and single front door. Serves https://{DOMAIN} with
+  # HTTP/3, HTTP/2, and HTTP/1.1, routing /api and /ws to the backend and everything else
+  # to the frontend. DOMAIN=localhost (default) uses Caddy's internal CA for private
+  # HTTPS with no public exposure, and a real DOMAIN switches on automatic Let's Encrypt.
+  caddy:
+    image: caddy:2-alpine
+    container_name: kinora-caddy
+    restart: unless-stopped
+    environment:
+      DOMAIN: localhost # localhost = private HTTPS via internal CA. Set your public domain (e.g. media.example.com) for automatic Let's Encrypt.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 (QUIC)
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data # issued certificates (internal CA and Let's Encrypt) persist here
+      - caddy-config:/config
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - kinora-network
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -398,3 +429,5 @@ volumes:
   qbittorrent-config:
   kinora-secrets:
   gluetun-auth:
+  caddy-data:
+  caddy-config:

@@ -165,7 +165,7 @@ export default function AnimeDetailPage() {
     queryKey: ['files', 'anime', animeId],
     queryFn: async () => {
       const response = await api.get(`/files/anime/${animeId}`);
-      return response.data as { files: FileInfo[]; grab_mode?: string };
+      return response.data as { files: FileInfo[]; grab_mode?: string; quality_cutoff?: { meets_cutoff: boolean; current_quality: string | null; cutoff_quality: string; upgrade_allowed: boolean } };
     },
     enabled: !!anime?.has_file,
   });
@@ -722,6 +722,7 @@ export default function AnimeDetailPage() {
                   mediaId={anime.id}
                   files={files?.files || []}
                   grabMode={files?.grab_mode}
+                  qualityCutoff={files?.quality_cutoff}
                 />
               )}
 

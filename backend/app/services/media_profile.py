@@ -61,8 +61,11 @@ class MediaProfile:
     show_indexers: Optional[List[str]] = None
     anime_indexers: Optional[List[str]] = None
     music_indexers: Optional[List[str]] = None
-    # Music release-selection quality order (flac, mp3_320, ...), highest priority first
-    music_preferred_quality: Optional[List[str]] = None
+    # Music quality ladder. music_quality_tiers is the allowed set, ordered highest
+    # priority first (see app.services.music_quality for the tier keys). Once an album
+    # reaches music_quality_cutoff, upgrade searches stop.
+    music_quality_tiers: Optional[List[str]] = None
+    music_quality_cutoff: Optional[str] = None
     # Common settings
     languages: Optional[List[str]] = None
     subtitle_languages: Optional[List[str]] = None

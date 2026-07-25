@@ -108,7 +108,18 @@ class MediaProfileCreate(BaseModel):
     music_album_folder_format: Optional[str] = "{album} ({year})"
     music_track_naming_format: Optional[str] = "{track:00} - {title}"
     music_multi_disc_format: Optional[str] = "{disc:00}-{track:00} - {title}"
-    music_preferred_quality: Optional[List[str]] = ["flac", "mp3_320", "mp3_256", "aac"]
+    music_quality_tiers: Optional[List[str]] = [
+        "lossless_24_192",
+        "lossless_24_96",
+        "lossless_24_48",
+        "lossless_24_unknown",
+        "lossless_16_48",
+        "lossless_16_44",
+        "lossless_unknown",
+        "mp3_320",
+        "mp3_256",
+    ]
+    music_quality_cutoff: Optional[str] = "lossless_16_44"
     music_embed_lyrics: Optional[bool] = True
     music_embed_artwork: Optional[bool] = True
     # File output settings
@@ -255,7 +266,8 @@ class MediaProfileUpdate(BaseModel):
     music_album_folder_format: Optional[str] = None
     music_track_naming_format: Optional[str] = None
     music_multi_disc_format: Optional[str] = None
-    music_preferred_quality: Optional[List[str]] = None
+    music_quality_tiers: Optional[List[str]] = None
+    music_quality_cutoff: Optional[str] = None
     music_embed_lyrics: Optional[bool] = None
     music_embed_artwork: Optional[bool] = None
     # File output settings
@@ -371,7 +383,8 @@ class MediaProfileResponse(BaseModel):
     music_album_folder_format: Optional[str]
     music_track_naming_format: Optional[str]
     music_multi_disc_format: Optional[str]
-    music_preferred_quality: Optional[List[str]]
+    music_quality_tiers: Optional[List[str]]
+    music_quality_cutoff: Optional[str]
     music_embed_lyrics: Optional[bool]
     music_embed_artwork: Optional[bool]
     # File output settings

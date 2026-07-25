@@ -157,13 +157,125 @@ export const SPECIAL_EDITIONS = [
 	"Extended",
 	"Theatrical",
 ];
-export const MUSIC_QUALITY = [
-	"flac",
+// Music quality tiers, grouped for the profile UI. Ordered lowest to highest
+// quality within each group. The value strings match the backend tier keys in
+// app/services/music_quality.py.
+export const MUSIC_QUALITY_GROUPS: {
+	label: string;
+	tiers: { value: string; label: string; description: string }[];
+}[] = [
+	{
+		label: "Lossy",
+		tiers: [
+			{ value: "ogg", label: "OGG / Opus", description: "Lossy" },
+			{ value: "aac", label: "AAC", description: "Lossy" },
+			{ value: "mp3_128", label: "MP3 128", description: "128 kbps" },
+			{ value: "mp3_192", label: "MP3 192", description: "192 kbps" },
+			{
+				value: "mp3_256",
+				label: "MP3 256 / V2",
+				description: "256 kbps",
+			},
+			{
+				value: "mp3_320",
+				label: "MP3 320 / V0",
+				description: "320 kbps",
+			},
+		],
+	},
+	{
+		label: "Lossless",
+		tiers: [
+			{
+				value: "lossless_unknown",
+				label: "Lossless (unspecified)",
+				description: "FLAC/ALAC, bit depth and sample rate unknown",
+			},
+			{
+				value: "lossless_16_44",
+				label: "FLAC 16-bit / 44.1kHz",
+				description: "CD quality",
+			},
+			{
+				value: "lossless_16_48",
+				label: "FLAC 16-bit / 48kHz",
+				description: "Lossless",
+			},
+		],
+	},
+	{
+		label: "Hi-Res",
+		tiers: [
+			{
+				value: "lossless_24_unknown",
+				label: "FLAC 24-bit (rate unspecified)",
+				description: "Hi-Res, sample rate confirmed after download",
+			},
+			{
+				value: "lossless_24_48",
+				label: "FLAC 24-bit / 44.1-48kHz",
+				description: "Hi-Res",
+			},
+			{
+				value: "lossless_24_96",
+				label: "FLAC 24-bit / 88.2-96kHz",
+				description: "Hi-Res",
+			},
+			{
+				value: "lossless_24_192",
+				label: "FLAC 24-bit / 176.4-192kHz",
+				description: "Hi-Res",
+			},
+			{ value: "dsd", label: "DSD / SACD", description: "1-bit DSD" },
+		],
+	},
+];
+
+// Flat tier list highest quality first, for the cutoff selector and ordering.
+export const MUSIC_QUALITY_TIERS_HIGH_TO_LOW = [
+	"dsd",
+	"lossless_24_192",
+	"lossless_24_96",
+	"lossless_24_48",
+	"lossless_24_unknown",
+	"lossless_16_48",
+	"lossless_16_44",
+	"lossless_unknown",
 	"mp3_320",
 	"mp3_256",
+	"mp3_192",
 	"mp3_128",
 	"aac",
 	"ogg",
+];
+
+export const MUSIC_TIER_LABELS: Record<string, string> = {
+	ogg: "OGG / Opus",
+	aac: "AAC",
+	mp3_128: "MP3 128",
+	mp3_192: "MP3 192",
+	mp3_256: "MP3 256 / V2",
+	mp3_320: "MP3 320 / V0",
+	lossless_unknown: "Lossless (unspecified)",
+	lossless_16_44: "FLAC 16-bit / 44.1kHz (CD)",
+	lossless_16_48: "FLAC 16-bit / 48kHz",
+	lossless_24_unknown: "FLAC 24-bit (Hi-Res, rate unspecified)",
+	lossless_24_48: "FLAC 24-bit / 44.1-48kHz (Hi-Res)",
+	lossless_24_96: "FLAC 24-bit / 88.2-96kHz (Hi-Res)",
+	lossless_24_192: "FLAC 24-bit / 176.4-192kHz (Hi-Res)",
+	dsd: "DSD / SACD",
+};
+
+export const DEFAULT_MUSIC_QUALITY_TIERS = [
+	"lossless_24_192",
+	"lossless_24_96",
+	"lossless_24_48",
+	"lossless_24_unknown",
+	"lossless_16_48",
+	"lossless_16_44",
+	"lossless_unknown",
+	"mp3_320",
+	"mp3_256",
 ];
 
 // Indexers by media type
@@ -254,7 +366,8 @@ export const createDefaultFormData = (
 	music_album_folder_format: DEFAULT_NAMING.music.albumFolder,
 	music_track_naming_format: DEFAULT_NAMING.music.track,
 	music_multi_disc_format: DEFAULT_NAMING.music.multiDisc,
-	music_preferred_quality: ["flac", "mp3_320", "mp3_256", "aac"],
+	music_quality_tiers: DEFAULT_MUSIC_QUALITY_TIERS,
+	music_quality_cutoff: "lossless_16_44",
 	music_embed_lyrics: true,
 	music_embed_artwork: true,
 	// Torrent validation settings

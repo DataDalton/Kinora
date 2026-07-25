@@ -15,6 +15,8 @@ import {
 	ArrowUpCircle,
 	Copy,
 	Check,
+	Trash2,
+	X,
 } from "lucide-react";
 
 interface FileInfo {
@@ -80,6 +82,7 @@ export default function FileQualityInfo({
 	onRescanComplete,
 }: FileQualityInfoProps) {
 	const [copiedPath, setCopiedPath] = useState<string | null>(null);
+	const [confirmingPath, setConfirmingPath] = useState<string | null>(null);
 	const queryClient = useQueryClient();
 
 	const rescanMutation = useMutation({
@@ -90,6 +93,24 @@ export default function FileQualityInfo({
 			return response.data;
 		},
 		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: [mediaType, mediaId] });
+			queryClient.invalidateQueries({
+				queryKey: ["files", mediaType, mediaId],
+			});
+			onRescanComplete?.();
+		},
+	});
+
+	const deleteVersionMutation = useMutation({
+		mutationFn: async (filePath: string) => {
+			const response = await api.delete(
+				`/files/${mediaType}/${mediaId}/version`,
+				{ params: { file_path: filePath } },
+			);
+			return response.data;
+		},
+		onSuccess: () => {
+			setConfirmingPath(null);
 			queryClient.invalidateQueries({ queryKey: [mediaType, mediaId] });
 			queryClient.invalidateQueries({
 				queryKey: ["files", mediaType, mediaId],
@@ -328,6 +349,47 @@ export default function FileQualityInfo({
 											</span>
 										)}
 									</div>
+								</div>
+								<div className="shrink-0">
+									{confirmingPath === file.file_path ? (
+										<div className="flex items-center gap-1">
+											<button
+												onClick={() =>
+													deleteVersionMutation.mutate(
+														file.file_path,
+													)
+												}
+												disabled={
+													deleteVersionMutation.isPending
+												}
+												className="p-1.5 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded transition"
+												title="Confirm delete"
+											>
+												<Check className="w-4 h-4" />
+											</button>
+											<button
+												onClick={() =>
+													setConfirmingPath(null)
+												}
+												className="p-1.5 bg-muted hover:bg-muted/80 rounded transition"
+												title="Cancel"
+											>
+												<X className="w-4 h-4" />
+											</button>
+										</div>
+									) : (
+										<button
+											onClick={() =>
+												setConfirmingPath(
+													file.file_path,
+												)
+											}
+											className="p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded transition"
+											title="Delete this version"
+										>
+											<Trash2 className="w-4 h-4" />
+										</button>
+									)}
 								</div>
 							</div>
 						</div>

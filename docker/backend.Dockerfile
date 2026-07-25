@@ -38,8 +38,10 @@ FROM base AS development
 # Copy application code
 COPY . .
 
-# Start server with reload and HTTP/2 (init runs before server starts)
-CMD ["uv", "run", "python", "scripts/start.py", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--reload", "--http", "2", "app.main:app"]
+# Start server with reload (init runs before server starts). http=auto serves HTTP/1.1
+# for direct browser/curl access and negotiates HTTP/2 when asked. HTTP/2 and HTTP/3 for
+# browsers are terminated at the Caddy reverse proxy over TLS, which talks HTTP/1.1 here.
+CMD ["uv", "run", "python", "scripts/start.py", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--reload", "--http", "auto", "app.main:app"]
 
 # Production stage
 FROM base AS production
@@ -47,5 +49,7 @@ FROM base AS production
 # Copy application code
 COPY . .
 
-# Start server with HTTP/2, backpressure handling, and worker respawning (init runs before server starts)
-CMD ["uv", "run", "python", "scripts/start.py", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--http", "2", "--backpressure", "1024", "--respawn-failed-workers", "app.main:app"]
+# Start server with backpressure handling and worker respawning (init runs before server
+# starts). http=auto serves HTTP/1.1 and negotiates HTTP/2 when asked. Browser-facing
+# HTTP/2 and HTTP/3 over TLS are terminated at the Caddy reverse proxy, which talks HTTP/1.1 here.
+CMD ["uv", "run", "python", "scripts/start.py", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--http", "auto", "--backpressure", "1024", "--respawn-failed-workers", "app.main:app"]
