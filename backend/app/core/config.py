@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # Credentials the bundled qBittorrent is seeded with (see the bootstrap script).
     QBITTORRENT_USERNAME: str = "admin"
     QBITTORRENT_PASSWORD: str = "adminadmin"
+    # Gluetun control server URL. The bundled qBittorrent shares gluetun's network
+    # namespace, so the auto-configured client points its VPN safety checks here.
+    GLUETUN_URL: str = "http://gluetun:8000"
 
     # Auto-create the library and download root folders under MEDIA_ROOT/DOWNLOADS_ROOT
     # on first boot, so the setup wizard needs no folder step. Off by default so host

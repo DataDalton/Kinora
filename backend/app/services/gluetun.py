@@ -72,15 +72,17 @@ async def _load_gluetun_config() -> Optional[Dict[str, Any]]:
 
 
 def _auth_headers(config: Dict[str, Any]) -> Dict[str, str]:
+    # Gluetun's control-server apikey auth reads the key from the X-API-Key header.
     if config.get("api_key"):
-        return {"Authorization": f"Bearer {config['api_key']}"}
+        return {"X-API-Key": config["api_key"]}
     return {}
 
 
 class GluetunClient:
     def __init__(self, url: str, api_key: Optional[str] = None):
         self.url = url.rstrip("/")
-        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        # Gluetun's control-server apikey auth reads the key from the X-API-Key header.
+        self.headers = {"X-API-Key": api_key} if api_key else {}
 
     async def _get(self, path: str) -> Optional[Any]:
         try:

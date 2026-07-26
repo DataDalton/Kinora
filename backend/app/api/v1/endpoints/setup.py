@@ -89,7 +89,13 @@ async def ensure_bundled_download_client() -> None:
     if not settings.QBITTORRENT_AUTOCONFIG:
         return
     try:
+        import json
         from app.db import get_pool
+
+        # The bundled qBittorrent shares gluetun's network namespace, so point its VPN
+        # safety checks at the gluetun control server. The API key is read from the
+        # secrets volume at query time, so it is not stored here.
+        gluetun_automation = json.dumps({"gluetun_enabled": True, "gluetun_url": settings.GLUETUN_URL})
 
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -97,22 +103,42 @@ async def ensure_bundled_download_client() -> None:
             # check-then-insert cannot race into duplicate rows.
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock(4915623)")
-                existing = await conn.fetchval("SELECT COUNT(*) FROM download_clients")
+                existing = await conn.fetchrow(
+                    "SELECT id, client_type, automation_settings FROM download_clients ORDER BY id LIMIT 1"
+                )
                 if existing:
+                    # Backfill the gluetun defaults onto the bundled client when VPN was
+                    # never configured, so the authoritative VPN check works without manual
+                    # setup. A client the user has already configured is never overridden.
+                    automation = existing["automation_settings"]
+                    if isinstance(automation, str):
+                        try:
+                            automation = json.loads(automation)
+                        except Exception:
+                            automation = {}
+                    automation = automation or {}
+                    if existing["client_type"] == "qbittorrent" and not automation:
+                        await conn.execute(
+                            "UPDATE download_clients SET automation_settings = $1::jsonb WHERE id = $2",
+                            gluetun_automation,
+                            existing["id"],
+                        )
+                        print("[INIT] Backfilled gluetun defaults onto the bundled qBittorrent")
                     return
                 await conn.execute(
                     """
                     INSERT INTO download_clients (
                         name, client_type, host, port, username, encrypted_password,
-                        use_ssl, is_enabled, is_default, test_status
+                        use_ssl, is_enabled, is_default, test_status, automation_settings
                     )
-                    VALUES ($1, 'qbittorrent', $2, $3, $4, $5, FALSE, TRUE, TRUE, 'untested')
+                    VALUES ($1, 'qbittorrent', $2, $3, $4, $5, FALSE, TRUE, TRUE, 'untested', $6::jsonb)
                     """,
                     "qBittorrent (bundled)",
                     settings.QBITTORRENT_HOST,
                     settings.QBITTORRENT_PORT,
                     settings.QBITTORRENT_USERNAME,
                     encrypt_value(settings.QBITTORRENT_PASSWORD),
+                    gluetun_automation,
                 )
                 print(
                     f"[INIT] Registered bundled qBittorrent at "
@@ -120,6 +146,45 @@ async def ensure_bundled_download_client() -> None:
                 )
     except Exception as e:
         print(f"[INIT] Bundled qBittorrent auto-config skipped: {e}")
+
+
+async def ensure_qbittorrent_interface_binding() -> None:
+    """
+    Bind the bundled qBittorrent to the VPN tunnel interface as a kill switch on top of
+    gluetun's firewall. Runs only when QBITTORRENT_AUTOCONFIG is on and qBittorrent is not
+    already bound. The VPN interface is auto-detected from qBittorrent's own interface list
+    (tun* or wg*), so it works whether gluetun names it tun0 or wg0, and it binds only to an
+    interface that actually exists. A manual binding is never overridden.
+    """
+    if not settings.QBITTORRENT_AUTOCONFIG:
+        return
+    try:
+        from app.services.download_clients.qbittorrent import get_qbittorrent_client
+
+        client = await get_qbittorrent_client()
+        if not client:
+            return
+
+        prefs = await client.get_preferences()
+        if prefs.get("current_network_interface"):
+            return  # Already bound, respect the existing choice.
+
+        interfaces = await client.get_network_interfaces()
+        vpn_interface = None
+        for iface in interfaces:
+            value = iface.get("value") or iface.get("name") or ""
+            if value.startswith("tun") or value.startswith("wg"):
+                vpn_interface = value
+                break
+
+        if not vpn_interface:
+            print("[INIT] No VPN interface found on qBittorrent, leaving it unbound")
+            return
+
+        await client.set_preferences({"current_network_interface": vpn_interface})
+        print(f"[INIT] Bound qBittorrent to VPN interface {vpn_interface}")
+    except Exception as e:
+        print(f"[INIT] qBittorrent interface binding skipped: {e}")
 
 
 class SetupStatusResponse(BaseModel):

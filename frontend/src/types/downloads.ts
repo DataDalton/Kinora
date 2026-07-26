@@ -227,6 +227,8 @@ export interface ConnectionSafety {
 
 export interface GluetunStatus {
 	configured: boolean;
+	reachable?: boolean;
+	vpn_status?: string | null;
 	running?: boolean;
 	public_ip?: string | null;
 	country?: string | null;

@@ -969,6 +969,20 @@ async def connection_safety(
     kinora_ip = await get_kinora_public_ip()
     gluetun = await get_gluetun_client()
 
+    # qBittorrent's interface binding, read once and reported in both modes so the UI can
+    # show whether the client is pinned to the VPN tunnel as a kill switch.
+    client = await get_qbittorrent_client()
+    iface = ""
+    iface_addr = ""
+    if client:
+        try:
+            prefs = await client.get_preferences()
+            iface = prefs.get("current_network_interface") or ""
+            iface_addr = prefs.get("current_interface_address") or ""
+        except Exception:
+            iface = ""
+            iface_addr = ""
+
     if gluetun:
         pub = await gluetun.get_public_ip()
         vpn_status = await gluetun.get_vpn_status()
@@ -1000,10 +1014,12 @@ async def connection_safety(
             "provider": provider,
             "vpn_up": vpn_up,
             "forwarded_port": forwarded_port,
+            "interface_bound": bool(iface),
+            "client_interface": iface,
+            "client_interface_address": iface_addr,
         }
 
     # Heuristic fallback via qBittorrent interface binding.
-    client = await get_qbittorrent_client()
     if not client:
         return {
             "configured": False,
@@ -1013,9 +1029,6 @@ async def connection_safety(
             "kinora_public_ip": kinora_ip,
         }
 
-    prefs = await client.get_preferences()
-    iface = prefs.get("current_network_interface") or ""
-    iface_addr = prefs.get("current_interface_address") or ""
     bound = bool(iface)
 
     row = await _get_enabled_client_row(conn)
@@ -1063,6 +1076,10 @@ async def gluetun_status(
 
     return {
         "configured": True,
+        # Raw control-server status. None means the control server could not be reached;
+        # a string like "stopped"/"crashed" means gluetun answered but the tunnel is down.
+        "reachable": vpn_status is not None,
+        "vpn_status": vpn_status,
         "running": vpn_status == "running",
         "public_ip": pub.get("public_ip") if pub else None,
         "country": pub.get("country") if pub else None,

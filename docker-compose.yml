@@ -175,6 +175,9 @@ services:
       QBITTORRENT_PORT: 8080
       QBITTORRENT_USERNAME: admin
       QBITTORRENT_PASSWORD: adminadmin
+      # Gluetun control server. qBittorrent shares gluetun's netns, so the bundled
+      # client points its VPN safety checks here.
+      GLUETUN_URL: http://gluetun:8000
       # Auto-create the library and download root folders under /kinora on first boot.
       AUTO_ROOT_FOLDERS: "true"
       CELERY_BROKER_URL: redis://dragonfly:6379/0

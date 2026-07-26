@@ -42,10 +42,15 @@ async def lifespan(app: FastAPI):
     await init_pool()
     # Register the bundled qBittorrent and create the root folders on first boot (Docker
     # only, never overriding a manually configured client or existing folders).
-    from app.api.v1.endpoints.setup import ensure_bundled_download_client, ensure_bundled_root_folders
+    from app.api.v1.endpoints.setup import (
+        ensure_bundled_download_client,
+        ensure_bundled_root_folders,
+        ensure_qbittorrent_interface_binding,
+    )
 
     await ensure_bundled_download_client()
     await ensure_bundled_root_folders()
+    await ensure_qbittorrent_interface_binding()
     yield
     # Shutdown: Close database connection pool and HTTP client
     await close_pool()
