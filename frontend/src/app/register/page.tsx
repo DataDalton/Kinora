@@ -10,13 +10,16 @@ import {
 	ArrowRight,
 	ArrowLeft,
 	Shield,
+	Key,
+	ChevronDown,
+	ChevronUp,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import HolographicGrid from "@/components/HolographicGrid";
 
-type RegistrationStep = "credentials" | "2fa";
+type RegistrationStep = "credentials" | "setup" | "2fa";
 
 export default function RegisterPage() {
 	const router = useRouter();
@@ -28,6 +31,20 @@ export default function RegisterPage() {
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [checking, setChecking] = useState(true);
+
+	// Inline first-run setup (shown after the security step for the first admin only).
+	const [needsSetup, setNeedsSetup] = useState(false);
+	const [tmdbKey, setTmdbKey] = useState("");
+	const [customizeQbit, setCustomizeQbit] = useState(false);
+	const [qbit, setQbit] = useState({
+		name: "qBittorrent",
+		host: "gluetun",
+		port: 8080,
+		username: "admin",
+		password: "adminadmin",
+		use_ssl: false,
+	});
+	const [setupError, setSetupError] = useState("");
 
 	useEffect(() => {
 		const checkRegistrationStatus = async () => {
@@ -82,6 +99,18 @@ export default function RegisterPage() {
 			document.cookie = `access_token=${access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
 			document.cookie = `refresh_token=${refresh_token}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
 
+			// Everyone goes to the optional security step next. The first admin with setup
+			// not yet complete then continues to the inline setup step afterward. qBittorrent
+			// and root folders are already auto-configured, so the only required input there
+			// is the TMDB key.
+			try {
+				const status = await api.get("/setup/status");
+				setNeedsSetup(
+					!status.data.is_setup_complete && status.data.is_admin,
+				);
+			} catch {
+				setNeedsSetup(false);
+			}
 			setCurrentStep("2fa");
 			setLoading(false);
 		} catch (err: any) {
@@ -89,6 +118,34 @@ export default function RegisterPage() {
 				err.response?.data?.detail ||
 					"Registration failed. Please try again.",
 			);
+			setLoading(false);
+		}
+	};
+
+	const handleSetup = async (e: React.FormEvent) => {
+		e.preventDefault();
+		setSetupError("");
+		if (!tmdbKey.trim()) {
+			setSetupError("A TMDB API key is required.");
+			return;
+		}
+		setLoading(true);
+		try {
+			// qBittorrent is auto-configured. Only send an override when the user customized it.
+			if (customizeQbit) {
+				await api.post("/setup/qbittorrent", qbit);
+			}
+			await api.post("/setup/tmdb", { api_key: tmdbKey });
+			// Finalize: seeds the default system settings and marks setup complete.
+			await api.post("/setup/complete");
+			router.push("/");
+		} catch (err: any) {
+			setSetupError(
+				err.response?.data?.detail ||
+					"Could not save setup. Check your TMDB key" +
+						(customizeQbit ? " and qBittorrent settings." : "."),
+			);
+		} finally {
 			setLoading(false);
 		}
 	};
@@ -110,7 +167,7 @@ export default function RegisterPage() {
 			<div
 				className={cn(
 					"relative w-full z-10 transition-all",
-					currentStep === "credentials" ? "max-w-md" : "max-w-4xl",
+					currentStep === "2fa" ? "max-w-4xl" : "max-w-md",
 				)}
 			>
 				<div className="text-center mb-8">
@@ -153,6 +210,24 @@ export default function RegisterPage() {
 								Security (Optional)
 							</span>
 						</div>
+						{needsSetup && (
+							<>
+								<ArrowRight className="w-4 h-4 text-muted-foreground" />
+								<div
+									className={cn(
+										"flex items-center gap-2 px-4 py-2 rounded-lg transition-all",
+										currentStep === "setup"
+											? "bg-primary text-primary-foreground"
+											: "bg-muted text-muted-foreground",
+									)}
+								>
+									<Key className="w-4 h-4" />
+									<span className="text-sm font-medium">
+										Setup
+									</span>
+								</div>
+							</>
+						)}
 					</div>
 
 					{currentStep === "credentials" && (
@@ -296,6 +371,179 @@ export default function RegisterPage() {
 						</>
 					)}
 
+					{currentStep === "setup" && (
+						<>
+							<h2 className="text-2xl font-bold text-foreground mb-2 text-center">
+								Configure Kinora
+							</h2>
+							<p className="text-sm text-muted-foreground mb-6 text-center">
+								Your download client and library folders are set
+								up automatically. Add your TMDB API key to
+								enable search and metadata.
+							</p>
+							<form className="space-y-6" onSubmit={handleSetup}>
+								{setupError && (
+									<div className="rounded-lg bg-destructive/10 border border-destructive/50 p-4">
+										<div className="text-sm text-destructive font-medium">
+											{setupError}
+										</div>
+									</div>
+								)}
+								<div>
+									<label
+										htmlFor="tmdb"
+										className="block text-sm font-semibold text-foreground mb-2"
+									>
+										TMDB API Key
+									</label>
+									<input
+										id="tmdb"
+										type="text"
+										required
+										value={tmdbKey}
+										onChange={(e) =>
+											setTmdbKey(e.target.value)
+										}
+										className={cn(
+											"w-full px-4 py-3 rounded-lg",
+											"bg-background border-2 border-input",
+											"text-foreground placeholder:text-muted-foreground",
+											"focus:outline-none focus:border-primary focus:ring-4 focus:ring-ring/20",
+											"transition-all duration-200",
+										)}
+										placeholder="Your TMDB API key"
+									/>
+									<p className="text-xs text-muted-foreground mt-2">
+										Free from{" "}
+										<a
+											href="https://www.themoviedb.org/settings/api"
+											target="_blank"
+											rel="noopener noreferrer"
+											className="text-primary underline hover:no-underline"
+										>
+											themoviedb.org
+										</a>{" "}
+										under Settings, API.
+									</p>
+								</div>
+								<div className="border border-border rounded-lg">
+									<button
+										type="button"
+										onClick={() =>
+											setCustomizeQbit((v) => !v)
+										}
+										className="w-full flex items-center justify-between px-4 py-3 text-sm cursor-pointer"
+									>
+										<span className="font-medium text-foreground">
+											Download client (auto-configured)
+										</span>
+										{customizeQbit ? (
+											<ChevronUp className="w-4 h-4" />
+										) : (
+											<ChevronDown className="w-4 h-4" />
+										)}
+									</button>
+									{customizeQbit && (
+										<div className="px-4 pb-4 space-y-3">
+											<p className="text-xs text-muted-foreground">
+												qBittorrent is already
+												connected. Change these only to
+												point Kinora at a different
+												client.
+											</p>
+											<div className="grid grid-cols-2 gap-3">
+												<input
+													placeholder="Host"
+													value={qbit.host}
+													onChange={(e) =>
+														setQbit({
+															...qbit,
+															host: e.target
+																.value,
+														})
+													}
+													className="px-3 py-2 rounded-lg bg-background border-2 border-input text-foreground text-sm"
+												/>
+												<input
+													placeholder="Port"
+													type="number"
+													value={qbit.port}
+													onChange={(e) =>
+														setQbit({
+															...qbit,
+															port: Number(
+																e.target.value,
+															),
+														})
+													}
+													className="px-3 py-2 rounded-lg bg-background border-2 border-input text-foreground text-sm"
+												/>
+												<input
+													placeholder="Username"
+													value={qbit.username}
+													onChange={(e) =>
+														setQbit({
+															...qbit,
+															username:
+																e.target.value,
+														})
+													}
+													className="px-3 py-2 rounded-lg bg-background border-2 border-input text-foreground text-sm"
+												/>
+												<input
+													placeholder="Password"
+													type="password"
+													value={qbit.password}
+													onChange={(e) =>
+														setQbit({
+															...qbit,
+															password:
+																e.target.value,
+														})
+													}
+													className="px-3 py-2 rounded-lg bg-background border-2 border-input text-foreground text-sm"
+												/>
+											</div>
+										</div>
+									)}
+								</div>
+								<div className="flex gap-3">
+									<button
+										type="button"
+										onClick={() => setCurrentStep("2fa")}
+										disabled={loading}
+										className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+									>
+										<ArrowLeft className="w-4 h-4" />
+										Back
+									</button>
+									<button
+										type="submit"
+										disabled={loading}
+										className={cn(
+											"flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg",
+											"bg-primary text-primary-foreground font-semibold",
+											"hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-ring/20",
+											"transition-all duration-200 disabled:opacity-50 cursor-pointer",
+										)}
+									>
+										{loading ? (
+											<>
+												<Loader2 className="w-5 h-5 animate-spin" />
+												Saving...
+											</>
+										) : (
+											<>
+												Finish
+												<ArrowRight className="w-5 h-5" />
+											</>
+										)}
+									</button>
+								</div>
+							</form>
+						</>
+					)}
+
 					{currentStep === "2fa" && (
 						<div className="space-y-6">
 							<div className="text-center mb-6">
@@ -328,10 +576,14 @@ export default function RegisterPage() {
 									Back
 								</button>
 								<button
-									onClick={() => router.push("/")}
+									onClick={() =>
+										needsSetup
+											? setCurrentStep("setup")
+											: router.push("/")
+									}
 									className="flex-1 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center justify-center gap-2 font-medium cursor-pointer"
 								>
-									Skip for now
+									{needsSetup ? "Continue" : "Skip for now"}
 									<ArrowRight className="w-4 h-4" />
 								</button>
 							</div>

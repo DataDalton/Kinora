@@ -19,6 +19,20 @@ if [ ! -f "$SECRETS_DIR/gluetun_api_key" ]; then
   echo "bootstrap: generated gluetun control-server API key"
 fi
 
+# PostgreSQL password (generate once). A fresh database (empty data volume) gets a strong
+# random password. An already-initialized database keeps the historical default password,
+# so upgrading an existing install never causes a password mismatch. Postgres, PgBouncer,
+# and the backend all read this same file.
+if [ ! -f "$SECRETS_DIR/postgres_password" ]; then
+  if [ -z "$(ls -A /var/lib/postgresql 2>/dev/null)" ]; then
+    gen 40 > "$SECRETS_DIR/postgres_password"
+    echo "bootstrap: generated postgres password (fresh database)"
+  else
+    printf 'kinora_password' > "$SECRETS_DIR/postgres_password"
+    echo "bootstrap: preserved existing postgres password"
+  fi
+fi
+
 # gluetun control-server auth config using the generated key (generate once)
 if [ ! -f "$AUTH_DIR/config.toml" ]; then
   KEY=$(cat "$SECRETS_DIR/gluetun_api_key")
@@ -41,6 +55,48 @@ auth = "apikey"
 apikey = "$KEY"
 EOF
   echo "bootstrap: generated gluetun auth config"
+fi
+
+# qBittorrent config (seed once, never overwrite an existing one). Sets a known WebUI
+# login (admin / adminadmin) so qBittorrent does not generate a random temporary
+# password and reset the WebUI section on first run, accepts the legal notice so the
+# WebUI starts unattended, binds the WebUI on 8080, and whitelists the internal Docker
+# subnets. The backend connects with these credentials. The WebUI is localhost-bound, so
+# change this password from the qBittorrent UI if you want. A quoted heredoc keeps the
+# backslashes in the setting keys and the password hash literal.
+QBT_DIR=/qbittorrent-config/qBittorrent
+if [ -d /qbittorrent-config ] && [ ! -f "$QBT_DIR/qBittorrent.conf" ]; then
+  mkdir -p "$QBT_DIR"
+  cat > "$QBT_DIR/qBittorrent.conf" <<'QBTCONF'
+[LegalNotice]
+Accepted=true
+
+[Preferences]
+WebUI\Address=*
+WebUI\Port=8080
+WebUI\Username=admin
+WebUI\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVBHS5iD5rllja3anrbYVjt8YnfUnP07XFR7B79MPClEuI0AbfzhoUf1Ja7ijzS/YR4Tz2KJw==)"
+WebUI\AuthSubnetWhitelistEnabled=true
+WebUI\AuthSubnetWhitelist=10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+WebUI\HostHeaderValidation=false
+WebUI\CSRFProtection=false
+WebUI\LocalHostAuth=false
+
+[BitTorrent]
+Session\DefaultSavePath=/kinora/torrents
+Session\TempPath=/kinora/torrents/.incomplete
+QBTCONF
+  # qBittorrent runs as PUID/PGID (default 1000), so match ownership.
+  chown -R "${PUID:-1000}:${PGID:-1000}" /qbittorrent-config/qBittorrent 2>/dev/null || true
+  echo "bootstrap: seeded qBittorrent config (known WebUI login for auto-connect)"
+fi
+
+# Create the media and torrents folders inside the data location so they exist for the
+# setup folder browser and qBittorrent, and are owned by the app user (PUID/PGID).
+if [ -d /kinora ]; then
+  mkdir -p /kinora/media /kinora/torrents
+  chown -R "${PUID:-1000}:${PGID:-1000}" /kinora 2>/dev/null || true
+  echo "bootstrap: prepared /kinora/media and /kinora/torrents"
 fi
 
 echo "bootstrap: complete"

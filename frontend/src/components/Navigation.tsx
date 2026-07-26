@@ -276,9 +276,8 @@ export default function Navigation() {
 		.split("; ")
 		.find((row) => row.startsWith("access_token="));
 	const isAuthPage = pathname === "/login" || pathname === "/register";
-	const isSetupPage = pathname === "/setup";
 
-	if (!token || isAuthPage || isSetupPage) return null;
+	if (!token || isAuthPage) return null;
 
 	return (
 		<>

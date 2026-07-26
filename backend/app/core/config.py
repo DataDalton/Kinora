@@ -66,6 +66,24 @@ class Settings(BaseSettings):
     DRAGONFLY_DB: int = 0
     DRAGONFLY_URL: str = ""
 
+    # Bundled qBittorrent auto-configuration. When enabled (set by the Docker compose)
+    # and no download client is configured yet, the backend registers the bundled
+    # qBittorrent so setup is not required. A manually configured client always wins.
+    # Off by default so host development does not register an unreachable client.
+    QBITTORRENT_AUTOCONFIG: bool = False
+    QBITTORRENT_HOST: str = "gluetun"
+    QBITTORRENT_PORT: int = 8080
+    # Credentials the bundled qBittorrent is seeded with (see the bootstrap script).
+    QBITTORRENT_USERNAME: str = "admin"
+    QBITTORRENT_PASSWORD: str = "adminadmin"
+
+    # Auto-create the library and download root folders under MEDIA_ROOT/DOWNLOADS_ROOT
+    # on first boot, so the setup wizard needs no folder step. Off by default so host
+    # development does not create folders on the developer's machine.
+    AUTO_ROOT_FOLDERS: bool = False
+    MEDIA_ROOT: str = "/kinora/media"
+    DOWNLOADS_ROOT: str = "/kinora/torrents"
+
     # Backend
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
@@ -96,10 +114,18 @@ class Settings(BaseSettings):
         if not self.JWT_SECRET_KEY:
             self.JWT_SECRET_KEY = self._get_or_create_secret_key("jwt_secret_key")
 
-        # Auto-compute DATABASE_URL if not provided
+        # Prefer the PostgreSQL password from the secrets volume when present. The
+        # bootstrap writes it there (a strong value for fresh installs, the historical
+        # default for existing ones), so backend, migrations, and PgBouncer all agree.
+        secret_password = self._read_secret_file("postgres_password")
+        if secret_password:
+            self.POSTGRES_PASSWORD = secret_password
+
+        # Auto-compute DATABASE_URL if not provided. postgresql:// (not postgres://) so
+        # SQLAlchemy, used by Alembic migrations, accepts it. asyncpg accepts it too.
         if not self.DATABASE_URL:
             self.DATABASE_URL = (
-                f"postgres://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
                 f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             )
 
@@ -130,6 +156,17 @@ class Settings(BaseSettings):
             self.PGBOUNCER_PORT = 6432
 
         return self
+
+    def _read_secret_file(self, name: str) -> Optional[str]:
+        """Read a value written by the bootstrap into the secrets dir, or None if absent."""
+        secrets_dir = os.getenv("KINORA_SECRETS_DIR", ".")
+        path = Path(secrets_dir) / name
+        try:
+            if path.is_file():
+                return path.read_text().strip() or None
+        except OSError:
+            pass
+        return None
 
     def _get_or_create_secret_key(self, key_name: str) -> str:
         """

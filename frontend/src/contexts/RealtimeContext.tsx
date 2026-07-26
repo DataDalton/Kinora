@@ -17,7 +17,8 @@ function resolveWsUrl(): string {
 	const configured = process.env.NEXT_PUBLIC_WS_URL;
 	if (configured) return configured;
 	const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-	return `${protocol}://${window.location.host}/ws`;
+	// The ws router is mounted under the /api/v1 prefix on the backend.
+	return `${protocol}://${window.location.host}/api/v1/ws`;
 }
 
 function readToken(): string | null {

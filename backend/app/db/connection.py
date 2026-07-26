@@ -17,24 +17,25 @@ _pool: Optional[asyncpg.Pool] = None
 def getDsn() -> str:
     """Build DSN pointing to PgBouncer (port 6432), not PostgreSQL directly.
 
-    Defaults to localhost:6432 for local development (Docker exposes pgbouncer on 6432).
-    In Docker, set PGBOUNCER_HOST=pgbouncer to use the internal network.
+    Reads through settings so the password resolves from the secrets file when present
+    (Docker) and PgBouncer host/port reflect the environment auto-detection.
     """
-    user = os.environ.get("POSTGRES_USER", "kinora")
-    password = os.environ.get("POSTGRES_PASSWORD", "kinora_password")
-    host = os.environ.get("PGBOUNCER_HOST", "localhost")
-    port = os.environ.get("PGBOUNCER_PORT", "6432")
-    db = os.environ.get("POSTGRES_DB", "kinora")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    from app.core.config import settings
+
+    return (
+        f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
+        f"@{settings.PGBOUNCER_HOST}:{settings.PGBOUNCER_PORT}/{settings.POSTGRES_DB}"
+    )
 
 
 def getDirectDsn() -> str:
     """Build DSN for direct PostgreSQL connection (for migrations).
 
-    Defaults to localhost:5432 for local development.
-    In Docker, DATABASE_URL points to the postgres container.
+    Reads through settings, which computes DATABASE_URL from the secrets-file password.
     """
-    return os.environ.get("DATABASE_URL", "postgresql://kinora:kinora_password@localhost:5432/kinora")
+    from app.core.config import settings
+
+    return settings.DATABASE_URL
 
 
 async def initPool() -> asyncpg.Pool:

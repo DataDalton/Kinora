@@ -3,6 +3,7 @@
 Startup script that waits for PostgreSQL and runs Alembic migrations before starting the server.
 This ensures migrations run once before workers spawn, preventing race conditions.
 """
+
 import asyncio
 import os
 import subprocess
@@ -13,10 +14,21 @@ async def waitForPostgres(maxRetries: int = 30, delay: float = 1.0) -> None:
     """Wait for PostgreSQL to be ready before running migrations."""
     import asyncpg
 
-    dsn = os.environ.get(
-        "DATABASE_URL",
-        "postgresql://kinora:kinora_password@postgres:5432/kinora"
-    )
+    # Prefer an explicit DATABASE_URL, otherwise build the DSN from the connection
+    # settings plus the generated password read from the secrets file. A hardcoded
+    # default would use the old static password and fail against a freshly generated one.
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        user = os.environ.get("POSTGRES_USER", "kinora")
+        host = os.environ.get("POSTGRES_HOST", "postgres")
+        port = os.environ.get("POSTGRES_PORT", "5432")
+        db = os.environ.get("POSTGRES_DB", "kinora")
+        password = os.environ.get("POSTGRES_PASSWORD", "kinora_password")
+        pw_file = os.path.join(os.environ.get("KINORA_SECRETS_DIR", "/secrets"), "postgres_password")
+        if os.path.isfile(pw_file):
+            with open(pw_file) as f:
+                password = f.read().strip() or password
+        dsn = f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
     for i in range(maxRetries):
         try:
@@ -38,7 +50,7 @@ def runMigrations() -> None:
         ["uv", "run", "alembic", "upgrade", "head"],
         capture_output=True,
         text=True,
-        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
 
     if result.returncode != 0:

@@ -28,12 +28,18 @@ target_metadata = metadata
 
 
 def getUrl() -> str:
-    """Get database URL from environment (direct PostgreSQL, not PgBouncer).
+    """Get the direct PostgreSQL URL for migrations (not PgBouncer).
 
-    Defaults to localhost:5432 for local development.
-    In Docker, DATABASE_URL points to the postgres container.
+    Prefers an explicit DATABASE_URL env, otherwise falls back to settings, which
+    computes it from the secrets-file password. Keeps working on the host (localhost)
+    and in Docker (postgres host) with either the default or generated password.
     """
-    return os.environ.get("DATABASE_URL", "postgresql://kinora:kinora_password@localhost:5432/kinora")
+    explicit = os.environ.get("DATABASE_URL")
+    if explicit:
+        return explicit
+    from app.core.config import settings
+
+    return settings.DATABASE_URL
 
 
 def runMigrationsOffline() -> None:

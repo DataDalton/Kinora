@@ -41,6 +41,87 @@ def decrypt_value(encrypted_value: str) -> str:
     return f.decrypt(encrypted_value.encode()).decode()
 
 
+async def ensure_bundled_root_folders() -> None:
+    """
+    Create the library and download root folders on first boot, so the setup wizard needs
+    no folder step. Runs only when AUTO_ROOT_FOLDERS is on and no root folders exist yet.
+    All four media roots live under MEDIA_ROOT and share the DOWNLOADS_ROOT download
+    folder, which is on the same filesystem so completed downloads hardlink in.
+    """
+    if not settings.AUTO_ROOT_FOLDERS:
+        return
+    try:
+        from app.db import get_pool
+
+        media_root = settings.MEDIA_ROOT
+        download_root = settings.DOWNLOADS_ROOT
+        folders = [("movies", "Movies"), ("shows", "TV Shows"), ("anime", "Anime"), ("music", "Music")]
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Serialize across worker processes so the check-then-create cannot race.
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(4915624)")
+                existing = await conn.fetchval("SELECT COUNT(*) FROM root_folders")
+                if existing:
+                    return
+                for media_type, name in folders:
+                    await folderSelector.createFolder(
+                        conn,
+                        mediaType=media_type,
+                        name=name,
+                        rootPath=os.path.join(media_root, media_type),
+                        downloadPath=download_root,
+                    )
+                print(f"[INIT] Auto-created root folders under {media_root}")
+    except Exception as e:
+        print(f"[INIT] Root folder auto-config skipped: {e}")
+
+
+async def ensure_bundled_download_client() -> None:
+    """
+    Register the bundled qBittorrent as the download client on first boot, so the setup
+    wizard is not required for the default Docker deployment. Runs only when
+    QBITTORRENT_AUTOCONFIG is on and no download client exists yet, so a manually
+    configured client is never replaced. qBittorrent bypasses authentication for the
+    internal subnet (seeded into its config), so no password is needed here.
+    """
+    if not settings.QBITTORRENT_AUTOCONFIG:
+        return
+    try:
+        from app.db import get_pool
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Serialize across the worker processes that all run this on startup, so the
+            # check-then-insert cannot race into duplicate rows.
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(4915623)")
+                existing = await conn.fetchval("SELECT COUNT(*) FROM download_clients")
+                if existing:
+                    return
+                await conn.execute(
+                    """
+                    INSERT INTO download_clients (
+                        name, client_type, host, port, username, encrypted_password,
+                        use_ssl, is_enabled, is_default, test_status
+                    )
+                    VALUES ($1, 'qbittorrent', $2, $3, $4, $5, FALSE, TRUE, TRUE, 'untested')
+                    """,
+                    "qBittorrent (bundled)",
+                    settings.QBITTORRENT_HOST,
+                    settings.QBITTORRENT_PORT,
+                    settings.QBITTORRENT_USERNAME,
+                    encrypt_value(settings.QBITTORRENT_PASSWORD),
+                )
+                print(
+                    f"[INIT] Registered bundled qBittorrent at "
+                    f"{settings.QBITTORRENT_HOST}:{settings.QBITTORRENT_PORT}"
+                )
+    except Exception as e:
+        print(f"[INIT] Bundled qBittorrent auto-config skipped: {e}")
+
+
 class SetupStatusResponse(BaseModel):
     """Response for setup status check"""
 
@@ -66,35 +147,6 @@ class TMDBSetupRequest(BaseModel):
     """Request to configure TMDB API key"""
 
     api_key: str = Field(..., min_length=32, description="TMDB API v3 key")
-
-
-class RootFolderSetupItem(BaseModel):
-    """Single root folder configuration for setup"""
-
-    name: str = Field(..., description="Display name for this folder")
-    root_path: str = Field(..., description="Root folder path for organized media")
-    download_path: Optional[str] = Field(None, description="Download folder path (auto-generated if not provided)")
-
-
-class SelectionModeConfig(BaseModel):
-    """Per-media-type selection mode configuration"""
-
-    movies: str = Field(default="most_free_space", description="Selection mode for movies")
-    shows: str = Field(default="most_free_space", description="Selection mode for TV shows")
-    anime: str = Field(default="most_free_space", description="Selection mode for anime")
-    music: str = Field(default="most_free_space", description="Selection mode for music")
-
-
-class RootFoldersSetupRequest(BaseModel):
-    """Request to configure root folders - supports multiple folders per media type"""
-
-    movies: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for movies")
-    shows: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for TV shows")
-    anime: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for anime")
-    music: List[RootFolderSetupItem] = Field(..., min_length=1, description="Root folders for music")
-    selection_modes: SelectionModeConfig = Field(
-        default_factory=SelectionModeConfig, description="Selection mode per media type"
-    )
 
 
 @router.get("/status", response_model=SetupStatusResponse)
@@ -266,82 +318,6 @@ async def setup_tmdb(
     )
 
     return {"status": "success", "message": "TMDB API key configured successfully"}
-
-
-@router.post("/root-folders")
-async def setup_root_folders(
-    config: RootFoldersSetupRequest,
-    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
-    conn: asyncpg.Connection = Depends(get_db),
-):
-    """
-    Configure root folders for media organization.
-    Creates multiple root folders per media type with paired download folders.
-    Only administrators can configure setup.
-    """
-
-    # Map media types to their folder lists
-    mediaTypeFolders = {
-        "movies": config.movies,
-        "shows": config.shows,
-        "anime": config.anime,
-        "music": config.music,
-    }
-
-    createdFolders = []
-    errors = []
-
-    for mediaType, folders in mediaTypeFolders.items():
-        for folderItem in folders:
-            try:
-                # Create the root folder using the folder selector service
-                folder = await folderSelector.createFolder(
-                    conn,
-                    mediaType=mediaType,
-                    name=folderItem.name,
-                    rootPath=folderItem.root_path,
-                    downloadPath=folderItem.download_path,
-                    priority=0,
-                    fillThresholdPercent=None,
-                    fillThresholdGb=None,
-                )
-                createdFolders.append({"mediaType": mediaType, "name": folderItem.name, "id": folder["id"]})
-            except ValueError as e:
-                errors.append(f"{mediaType}/{folderItem.name}: {str(e)}")
-            except Exception as e:
-                errors.append(f"{mediaType}/{folderItem.name}: {str(e)}")
-
-        # Set up folder selection settings for this media type
-        selectionMode = getattr(config.selection_modes, mediaType, "most_free_space")
-        await conn.execute(
-            """
-            INSERT INTO folder_selection_settings (media_type, selection_mode)
-            VALUES ($1, $2)
-            ON CONFLICT (media_type) DO UPDATE SET selection_mode = $2, updated_at = NOW()
-            """,
-            mediaType,
-            selectionMode,
-        )
-
-    if errors:
-        # If some folders failed but others succeeded, return partial success
-        if createdFolders:
-            return {
-                "status": "partial",
-                "message": f"Created {len(createdFolders)} folders with {len(errors)} errors",
-                "created": createdFolders,
-                "errors": errors,
-            }
-        # If all folders failed, raise an error
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to create root folders: {'; '.join(errors)}"
-        )
-
-    return {
-        "status": "success",
-        "message": f"Root folders configured successfully ({len(createdFolders)} folders created)",
-        "created": createdFolders,
-    }
 
 
 @router.post("/complete")
