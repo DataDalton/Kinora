@@ -51,6 +51,13 @@ async def lifespan(app: FastAPI):
     await ensure_bundled_download_client()
     await ensure_bundled_root_folders()
     await ensure_qbittorrent_interface_binding()
+    # Reclaim FlareSolverr browsers held by sessions whose owning process has exited.
+    try:
+        from app.services.cloudflare.flaresolverr import flaresolverr
+
+        await flaresolverr.reap_orphan_sessions()
+    except Exception as e:
+        print(f"FlareSolverr session cleanup skipped: {e}")
     yield
     # Shutdown: Close database connection pool and HTTP client
     await close_pool()
