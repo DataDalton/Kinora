@@ -1,8 +1,10 @@
+import hashlib
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from app.core.cache import cacheGet, cacheSet, CACHE_TTL_SHORT, CACHE_TTL_LONG
 from app.core.http_client import http_post
+from app.services import metadata_cache
 
 
 class AnilistService:
@@ -14,29 +16,46 @@ class AnilistService:
 
     async def _query(self, query: str, variables: Dict[str, Any] = None, ttl: int = CACHE_TTL_LONG) -> Dict[str, Any]:
         """
-        Execute a GraphQL query against Anilist API with caching using shared HTTP client
+        Execute a GraphQL query against Anilist with two-tier caching: Dragonfly
+        first, then the persistent metadata_cache table, then the network. A stale
+        persistent row is served if Anilist is unreachable.
         ttl: Cache duration in seconds. Use CACHE_TTL_SHORT for detail pages, CACHE_TTL_LONG for lists/searches
         """
         if variables is None:
             variables = {}
 
-        cache_key = f"anilist:{query[:50]}:{str(variables)}"
+        # Digest of the full query text so distinct queries never collide.
+        query_digest = hashlib.sha1(query.encode("utf-8")).hexdigest()[:16]
+        cache_key = f"anilist:{query_digest}:{str(dict(sorted(variables.items())))}"
+
         cached = await cacheGet(cache_key)
         if cached:
             return cached
 
-        response = await http_post(
-            self.API_URL,
-            json={"query": query, "variables": variables},
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-        response.raise_for_status()
-        data = response.json()
+        persisted = await metadata_cache.getFresh(cache_key)
+        if persisted is not None:
+            await cacheSet(cache_key, persisted, expire=ttl)
+            return persisted
+
+        try:
+            response = await http_post(
+                self.API_URL,
+                json={"query": query, "variables": variables},
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            stale = await metadata_cache.getStale(cache_key)
+            if stale is not None:
+                return stale
+            raise
 
         if "errors" in data:
             raise Exception(f"Anilist API error: {data['errors']}")
 
         await cacheSet(cache_key, data["data"], expire=ttl)
+        await metadata_cache.setCached(cache_key, "anilist", data["data"], ttl)
         return data["data"]
 
     async def search_anime(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -389,14 +408,17 @@ class AnilistService:
                     if node_format in ("TV", "TV_SHORT"):
                         related_id = node.get("id")
                         if related_id and related_id not in visited:
-                            related.append({
-                                "anilist_id": related_id,
-                                "title": node.get("title", {}).get("english") or node.get("title", {}).get("romaji"),
-                                "format": node_format,
-                                "episodes": node.get("episodes"),
-                                "season_year": node.get("seasonYear"),
-                                "season": node.get("season"),
-                            })
+                            related.append(
+                                {
+                                    "anilist_id": related_id,
+                                    "title": node.get("title", {}).get("english")
+                                    or node.get("title", {}).get("romaji"),
+                                    "format": node_format,
+                                    "episodes": node.get("episodes"),
+                                    "season_year": node.get("seasonYear"),
+                                    "season": node.get("season"),
+                                }
+                            )
                             # Recursively get related entries
                             nested_related = await self.get_all_related_seasons(related_id, visited)
                             related.extend(nested_related)
@@ -422,11 +444,14 @@ class AnilistService:
             "title": title,
             "original_title": original_title,
             "overview": self._clean_description(anilist_data.get("description")),
-            "poster_path": anilist_data.get("coverImage", {}).get("extraLarge") or anilist_data.get("coverImage", {}).get("large"),
+            "poster_path": anilist_data.get("coverImage", {}).get("extraLarge")
+            or anilist_data.get("coverImage", {}).get("large"),
             "backdrop_path": anilist_data.get("bannerImage"),
             "release_date": start_date,
             "genres": [{"name": genre} for genre in anilist_data.get("genres", [])],
-            "rating": anilist_data.get("averageScore") / 10 if anilist_data.get("averageScore") else None,  # Convert to 0-10 scale
+            "rating": (
+                anilist_data.get("averageScore") / 10 if anilist_data.get("averageScore") else None
+            ),  # Convert to 0-10 scale
             "vote_count": None,  # Anilist doesn't provide this
             "popularity": anilist_data.get("popularity"),
             "anilist_id": anilist_data.get("id"),
@@ -468,6 +493,7 @@ class AnilistService:
             return None
 
         import re
+
         clean = re.sub("<.*?>", "", description)
         return clean.strip()
 

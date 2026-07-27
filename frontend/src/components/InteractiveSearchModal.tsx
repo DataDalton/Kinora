@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
@@ -35,6 +35,10 @@ interface TorrentResult {
 	info_hash: string;
 	upload_date: string;
 	uploader: string;
+	// True when the row came from the local release index rather than the live sweep.
+	from_cache?: boolean;
+	// When the index last confirmed this release on its indexer (ISO timestamp).
+	last_seen_at?: string;
 }
 
 interface IndexerStatus {
@@ -220,6 +224,14 @@ export default function InteractiveSearchModal({
 	const [pendingChoice, setPendingChoice] = useState<
 		"satisfied" | "monitoring"
 	>("monitoring");
+	// Instant results from the local release index, shown while the live indexer
+	// sweep is still running. Replaced by the live response when it lands.
+	const [localResults, setLocalResults] = useState<TorrentResult[] | null>(
+		null,
+	);
+	// Monotonic id per local-pass request, so a slow stale response can never
+	// overwrite the results of a newer search.
+	const localSearchSeq = useRef(0);
 
 	// Preview the validation rules that will apply to a grab from this media's profile.
 	// Tracks are validated under their album/music profile rules.
@@ -309,6 +321,9 @@ export default function InteractiveSearchModal({
 			setEffectiveMediaId(mediaId);
 			setManualRelease(null);
 			setPendingGrab(null);
+			setLocalResults(null);
+			// Invalidate any in-flight local pass from a previous open.
+			localSearchSeq.current++;
 		}
 	}, [isOpen, mediaTitle, mediaId]);
 
@@ -471,6 +486,28 @@ export default function InteractiveSearchModal({
 			return;
 		}
 		setManualRelease(null);
+		setLocalResults(null);
+		// Local-index pass renders instantly while the live sweep runs. The
+		// sequence check drops responses from superseded searches.
+		const seq = ++localSearchSeq.current;
+		api.post("/search/interactive", {
+			query: trimmed,
+			media_type: mediaType,
+			media_id: effectiveMediaId,
+			episode_id: episodeId,
+			indexers: selectedIndexers.length > 0 ? selectedIndexers : null,
+			quality: selectedQuality !== "all" ? selectedQuality : null,
+			local_only: true,
+		})
+			.then((response) => {
+				if (seq !== localSearchSeq.current) return;
+				const data = response.data as SearchResponse;
+				setLocalResults(data.results ?? []);
+			})
+			.catch(() => {
+				// The live sweep is the source of truth; a failed local pass just
+				// means no instant results.
+			});
 		refetch();
 	};
 
@@ -515,8 +552,12 @@ export default function InteractiveSearchModal({
 		});
 	};
 
-	const processedResults = searchResults
-		? sortResults(filterResults(searchResults))
+	// Live results win once they arrive; until then the local-index pass fills the list.
+	const activeResults = searchResults ?? localResults;
+	const showingLocalWhileLive =
+		!searchResults && !!localResults && isFetching;
+	const processedResults = activeResults
+		? sortResults(filterResults(activeResults))
 		: [];
 	// A pasted magnet / .torrent URL shows as the only result; otherwise show indexer results.
 	const displayResults = manualRelease ? [manualRelease] : processedResults;
@@ -929,7 +970,9 @@ export default function InteractiveSearchModal({
 				)}
 
 				<div className="flex-1 overflow-y-auto p-4">
-					{isLoading || isFetching ? (
+					{(isLoading || isFetching) &&
+					!manualRelease &&
+					!(localResults && localResults.length > 0) ? (
 						<div className="flex flex-col items-center justify-center py-16">
 							<Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
 							<p className="text-muted-foreground">
@@ -944,17 +987,24 @@ export default function InteractiveSearchModal({
 								) : (
 									<>
 										{processedResults.length} results found
-										{searchResults &&
+										{activeResults &&
 											processedResults.length !==
-												searchResults.length && (
+												activeResults.length && (
 												<span>
 													{" "}
 													(
-													{searchResults.length -
+													{activeResults.length -
 														processedResults.length}{" "}
 													filtered)
 												</span>
 											)}
+										{showingLocalWhileLive && (
+											<span className="flex items-center gap-1 text-yellow-500">
+												<Loader2 className="w-3.5 h-3.5 animate-spin" />
+												From local index, live search
+												running...
+											</span>
+										)}
 									</>
 								)}
 							</div>
@@ -1017,6 +1067,18 @@ export default function InteractiveSearchModal({
 													<span className="flex items-center gap-1">
 														<User className="w-3.5 h-3.5" />
 														{result.uploader}
+													</span>
+												)}
+												{result.from_cache && (
+													<span
+														className="px-2 py-0.5 bg-yellow-500/10 text-yellow-500 rounded"
+														title={
+															result.last_seen_at
+																? `Last seen ${new Date(result.last_seen_at).toLocaleString()}`
+																: "From local index"
+														}
+													>
+														indexed
 													</span>
 												)}
 											</div>

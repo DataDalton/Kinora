@@ -6,13 +6,16 @@ from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile
+from app.services.search_backoff import eligibilityClause, recordSearchAttempt
 from app.core.cache import cacheSet
 
-# (media_type, table, category, year_column)
+# (media_type, table, category, year_column, backoff_date_column)
+# The backoff date column enables the fast retry window for recent releases and is
+# None for anime, whose season_year is an integer rather than a date.
 _UPGRADE_TYPES = (
-    ("movie", "movies", "movies", "release_date"),
-    ("show", "shows", "tv", "first_air_date"),
-    ("anime", "anime", "anime", "season_year"),
+    ("movie", "movies", "movies", "release_date", "release_date"),
+    ("show", "shows", "tv", "first_air_date", "first_air_date"),
+    ("anime", "anime", "anime", "season_year", None),
 )
 
 
@@ -41,7 +44,7 @@ async def async_search_upgrades():
         pool = await get_pool()
 
         async with pool.acquire() as conn:
-            for media_type, table, category, year_col in _UPGRADE_TYPES:
+            for media_type, table, category, year_col, backoff_date_col in _UPGRADE_TYPES:
                 rows = await conn.fetch(f"""
                     SELECT t.id, t.title, t.media_profile_id, t.quality_detected,
                            t.{year_col} AS year_src,
@@ -52,6 +55,8 @@ async def async_search_upgrades():
                       AND t.status NOT IN ('downloading', 'processing')
                       AND COALESCE(t.upgrade_allowed, mp.upgrade_allowed) = TRUE
                       AND t.quality_detected IS NOT NULL
+                      AND {eligibilityClause("t", backoff_date_col)}
+                    ORDER BY t.last_search_at ASC NULLS FIRST
                     LIMIT 50
                     """)
                 if not rows:
@@ -72,6 +77,7 @@ async def async_search_upgrades():
                     if media_type == "movie" and year:
                         query += f" {year}"
 
+                    searchStats = {}
                     try:
                         torrent_hash = await search_engine.search_and_download(
                             query=query,
@@ -84,7 +90,9 @@ async def async_search_upgrades():
                             current_quality=item["quality_detected"],
                             grab_mode="upgrade",
                             upgrade_allowed=item["effective_upgrade"],
+                            search_stats=searchStats,
                         )
+                        await recordSearchAttempt(conn, table, item["id"], found=bool(torrent_hash))
                         if torrent_hash:
                             await conn.execute(
                                 f"UPDATE {table} SET status = 'downloading', updated_at = NOW() WHERE id = $1",
@@ -94,10 +102,12 @@ async def async_search_upgrades():
                     except Exception as e:
                         print(f"Upgrade search error for {query}: {e}")
 
-                    await asyncio.sleep(2)
+                    # Pause only when live indexer queries actually ran.
+                    if searchStats.get("live_queries"):
+                        await asyncio.sleep(2)
 
             # Music albums upgrade by quality tier rather than resolution.
-            album_rows = await conn.fetch("""
+            album_rows = await conn.fetch(f"""
                 SELECT al.id, al.title, al.media_profile_id, al.quality_detected,
                        ar.name AS artist_name,
                        COALESCE(al.upgrade_allowed, mp.upgrade_allowed) AS effective_upgrade
@@ -108,6 +118,8 @@ async def async_search_upgrades():
                   AND al.status NOT IN ('downloading', 'processing')
                   AND COALESCE(al.upgrade_allowed, mp.upgrade_allowed) = TRUE
                   AND al.quality_detected IS NOT NULL
+                  AND {eligibilityClause("al", "release_date")}
+                ORDER BY al.last_search_at ASC NULLS FIRST
                 LIMIT 50
                 """)
             if album_rows:
@@ -126,6 +138,7 @@ async def async_search_upgrades():
                     artist_name = item.get("artist_name")
                     query = f"{artist_name} {item['title']}".strip() if artist_name else item["title"]
 
+                    searchStats = {}
                     try:
                         torrent_hash = await search_engine.search_music_and_download(
                             query=query,
@@ -136,7 +149,9 @@ async def async_search_upgrades():
                             current_quality=item["quality_detected"],
                             grab_mode="upgrade",
                             upgrade_allowed=item["effective_upgrade"],
+                            search_stats=searchStats,
                         )
+                        await recordSearchAttempt(conn, "albums", item["id"], found=bool(torrent_hash))
                         if torrent_hash:
                             await conn.execute(
                                 "UPDATE albums SET status = 'downloading', updated_at = NOW() WHERE id = $1",
@@ -146,7 +161,9 @@ async def async_search_upgrades():
                     except Exception as e:
                         print(f"Album upgrade search error for {query}: {e}")
 
-                    await asyncio.sleep(2)
+                    # Pause only when live indexer queries actually ran.
+                    if searchStats.get("live_queries"):
+                        await asyncio.sleep(2)
 
         return {
             "status": "success",

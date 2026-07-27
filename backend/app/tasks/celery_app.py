@@ -1,7 +1,5 @@
 from celery import Celery
-from celery.schedules import crontab
 import asyncio
-import asyncpg
 
 from app.core.config import settings
 
@@ -24,6 +22,7 @@ celery_app = Celery(
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
+        "app.tasks.dispatcher",
         "app.tasks.rss_monitor",
         "app.tasks.wanted_search",
         "app.tasks.upgrade_search",
@@ -31,11 +30,13 @@ celery_app = Celery(
         "app.tasks.download_monitor",
         "app.tasks.subtitle_search",
         "app.tasks.metadata_refresh",
+        "app.tasks.metadata_prefetch",
         "app.tasks.transcoding",
         "app.tasks.music_monitor",
         "app.tasks.validation_monitor",
         "app.tasks.folder_health",
         "app.tasks.seeding_monitor",
+        "app.tasks.yts_sync",
     ],
 )
 
@@ -60,72 +61,19 @@ celery_app.conf.update(
 )
 
 
-def get_schedule_intervals():
-    """
-    Get schedule intervals from database settings
-    Returns default values if database is not accessible
-    """
-    try:
-
-        async def fetch_settings():
-            conn = await asyncpg.connect(settings.DATABASE_URL)
-            try:
-                rss_interval = await conn.fetchval("SELECT value FROM app_settings WHERE key = 'rss_sync_interval'")
-                auto_search_interval = await conn.fetchval(
-                    "SELECT value FROM app_settings WHERE key = 'auto_search_interval'"
-                )
-                upgrade_search_interval = await conn.fetchval(
-                    "SELECT value FROM app_settings WHERE key = 'upgrade_search_interval'"
-                )
-                return (
-                    int(rss_interval) if rss_interval else 15,
-                    int(auto_search_interval) if auto_search_interval else 60,
-                    int(upgrade_search_interval) if upgrade_search_interval else 360,
-                )
-            finally:
-                await conn.close()
-
-        rss_interval, auto_search_interval, upgrade_search_interval = asyncio.run(fetch_settings())
-    except Exception:
-        rss_interval = 15
-        auto_search_interval = 60
-        upgrade_search_interval = 360
-
-    return rss_interval, auto_search_interval, upgrade_search_interval
-
-
-# Get intervals from database
-rss_interval, auto_search_interval, upgrade_search_interval = get_schedule_intervals()
-
-# Celery Beat schedule
+# Celery Beat schedule. Every long-interval task (searches, RSS, prefetch, catalog
+# sync, daily refresh) is driven by the dispatcher, which re-reads app_settings on
+# every tick and fires anything whose window was missed while the stack was down.
+# Only the short-cycle monitors stay as plain beat entries, their next regular run
+# doubles as the catch-up.
 celery_app.conf.beat_schedule = {
-    "rss-monitor": {
-        "task": "app.tasks.rss_monitor.monitor_rss_feeds",
-        "schedule": crontab(minute=f"*/{rss_interval}"),
-    },
-    "wanted-search": {
-        "task": "app.tasks.wanted_search.search_wanted_media",
-        "schedule": crontab(minute=f"*/{auto_search_interval}"),
-    },
-    "upgrade-search": {
-        "task": "app.tasks.upgrade_search.search_upgrades",
-        "schedule": float(upgrade_search_interval * 60),  # minutes -> seconds
+    "interval-dispatcher": {
+        "task": "app.tasks.dispatcher.dispatch_interval_tasks",
+        "schedule": 60.0,  # Every 60 seconds, fires whichever scheduled tasks are due
     },
     "download-monitor-every-minute": {
         "task": "app.tasks.download_monitor.check_downloads",
         "schedule": 60.0,  # Every 60 seconds
-    },
-    "metadata-refresh-daily": {
-        "task": "app.tasks.metadata_refresh.refresh_all_metadata",
-        "schedule": crontab(hour=3, minute=0),  # 3 AM daily
-    },
-    "music-wanted-search": {
-        "task": "app.tasks.music_monitor.search_wanted_music",
-        "schedule": crontab(minute=f"*/{auto_search_interval}"),  # Same interval as other wanted searches
-    },
-    "music-new-releases": {
-        "task": "app.tasks.music_monitor.check_new_releases",
-        "schedule": crontab(hour="*/6"),  # Every 6 hours check for new releases
     },
     "validation-monitor": {
         "task": "app.tasks.validation_monitor.check_validating_torrents",

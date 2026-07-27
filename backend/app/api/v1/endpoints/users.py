@@ -8,6 +8,7 @@ from app.api.v1.endpoints.auth import (
     require_permission,
     UserWithPermissions,
 )
+from app.core.auth_cache import bumpAuthVersion
 from app.core.permissions import (
     getUserGroups,
     getUserPermissions,
@@ -74,10 +75,7 @@ async def getUser(
     userRow = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
     if not userRow:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     userData = await buildUserWithGroups(conn, dict(userRow))
     return UserWithPermissionsSchema(**userData)
@@ -100,19 +98,13 @@ async def createUser(
     )
 
     if existingUser:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already exists"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
 
     # Validate group IDs if provided
     if userData.groupIds:
         validGroupIds = await validateGroupIds(conn, userData.groupIds)
         if len(validGroupIds) != len(userData.groupIds):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="One or more group IDs are invalid"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more group IDs are invalid")
 
     # Hash password and create user
     hashedPassword = get_password_hash(userData.password)
@@ -134,6 +126,8 @@ async def createUser(
     if userData.groupIds:
         await setUserGroups(conn, userId, userData.groupIds, currentUser.id)
 
+    await bumpAuthVersion()
+
     # Build response with groups
     responseData = await buildUserWithGroups(conn, dict(userRow))
     return UserWithPermissionsSchema(**responseData)
@@ -154,30 +148,21 @@ async def updateUser(
     existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
     if not existingUser:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Prevent self-deactivation
     if userId == currentUser.id and userData.isActive is False:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot deactivate your own account"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot deactivate your own account")
 
     # Check if new username already exists
-    if userData.username and userData.username != existingUser['username']:
+    if userData.username and userData.username != existingUser["username"]:
         usernameExists = await conn.fetchrow(
             "SELECT id FROM users WHERE username = $1 AND id != $2",
             userData.username,
             userId,
         )
         if usernameExists:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username already exists"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
 
     # Prevent removing admin groups from self if user is admin
     if userId == currentUser.id and userData.groupIds is not None:
@@ -202,18 +187,14 @@ async def updateUser(
                     break
             if not willBeAdmin:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot remove your own administrator privileges"
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot remove your own administrator privileges"
                 )
 
     # Validate group IDs if provided
     if userData.groupIds is not None:
         validGroupIds = await validateGroupIds(conn, userData.groupIds)
         if len(validGroupIds) != len(userData.groupIds):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="One or more group IDs are invalid"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more group IDs are invalid")
 
     # Build update query dynamically
     updateFields = []
@@ -257,6 +238,8 @@ async def updateUser(
     if userData.groupIds is not None:
         await setUserGroups(conn, userId, userData.groupIds, currentUser.id)
 
+    await bumpAuthVersion()
+
     # Build response with groups
     responseData = await buildUserWithGroups(conn, dict(userRow))
     return UserWithPermissionsSchema(**responseData)
@@ -276,37 +259,30 @@ async def deleteUser(
     existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
     if not existingUser:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Prevent self-deletion
     if userId == currentUser.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete your own account"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account")
 
     # Check if this is the last admin user
     userIsAdmin = await isUserAdmin(conn, userId)
     if userIsAdmin:
         # Count users with system.admin permission
-        adminCount = await conn.fetchval(
-            """
+        adminCount = await conn.fetchval("""
             SELECT COUNT(DISTINCT ug.user_id)
             FROM user_groups ug
             JOIN permission_group_permissions pgp ON ug.group_id = pgp.group_id
             WHERE pgp.permission_name = 'system.admin'
-            """
-        )
+            """)
         if adminCount <= 1:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete the last administrator account"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the last administrator account"
             )
 
     await conn.execute("DELETE FROM users WHERE id = $1", userId)
+
+    await bumpAuthVersion()
 
     return None
 
@@ -326,18 +302,12 @@ async def setUserGroupsEndpoint(
     userRow = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
     if not userRow:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Validate group IDs
     validGroupIds = await validateGroupIds(conn, groupData.groupIds)
     if len(validGroupIds) != len(groupData.groupIds):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="One or more group IDs are invalid"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more group IDs are invalid")
 
     # Prevent removing admin groups from self if user is admin
     if userId == currentUser.id:
@@ -359,12 +329,13 @@ async def setUserGroupsEndpoint(
                     break
             if not willBeAdmin:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot remove your own administrator privileges"
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot remove your own administrator privileges"
                 )
 
     # Set user groups
     await setUserGroups(conn, userId, validGroupIds, currentUser.id)
+
+    await bumpAuthVersion()
 
     # Build response with groups
     responseData = await buildUserWithGroups(conn, dict(userRow))
@@ -385,10 +356,7 @@ async def getUserPermissionsEndpoint(
     userRow = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
     if not userRow:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     permissions = await getUserPermissions(conn, userId)
 
@@ -410,10 +378,7 @@ async def resetUserPassword(
     existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
     if not existingUser:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Hash new password
     hashedPassword = get_password_hash(passwordData.password)
@@ -428,6 +393,8 @@ async def resetUserPassword(
         hashedPassword,
         userId,
     )
+
+    await bumpAuthVersion()
 
     # Build response with groups
     responseData = await buildUserWithGroups(conn, dict(userRow))
@@ -448,19 +415,13 @@ async def toggleUserActive(
     existingUser = await conn.fetchrow("SELECT * FROM users WHERE id = $1", userId)
 
     if not existingUser:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Prevent self-deactivation
     if userId == currentUser.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot toggle your own account status"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot toggle your own account status")
 
-    newStatus = not existingUser['is_active']
+    newStatus = not existingUser["is_active"]
 
     userRow = await conn.fetchrow(
         """
@@ -472,6 +433,8 @@ async def toggleUserActive(
         newStatus,
         userId,
     )
+
+    await bumpAuthVersion()
 
     # Build response with groups
     responseData = await buildUserWithGroups(conn, dict(userRow))

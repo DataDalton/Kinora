@@ -1,6 +1,6 @@
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import asyncpg
 
@@ -308,27 +308,185 @@ class SystemHealthMonitor:
 
         return results
 
+    @staticmethod
+    def _scheduleLabel(intervalSeconds: int) -> str:
+        if intervalSeconds % 3600 == 0 and intervalSeconds >= 3600:
+            hours = intervalSeconds // 3600
+            return "Every hour" if hours == 1 else f"Every {hours} hours"
+        if intervalSeconds % 60 == 0 and intervalSeconds >= 120:
+            return f"Every {intervalSeconds // 60} minutes"
+        return f"Every {intervalSeconds} seconds"
+
+    @staticmethod
+    def _parseLastRun(timestamp: Optional[str]) -> Optional[datetime]:
+        if not timestamp:
+            return None
+        try:
+            return datetime.fromisoformat(timestamp.replace("Z", ""))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _cronLabel(sched) -> str:
+        """Display text for a celery crontab schedule, built from its original spec."""
+        minute = str(getattr(sched, "_orig_minute", "*"))
+        hour = str(getattr(sched, "_orig_hour", "*"))
+        try:
+            if hour.startswith("*/"):
+                return f"Every {int(hour[2:])} hours"
+            if hour != "*" and "," not in hour:
+                return f"Daily at {int(hour)}:{int(minute):02d} UTC"
+        except ValueError:
+            pass
+        return f"Cron {minute} {hour} (UTC)"
+
+    @staticmethod
+    def _cronNextRun(sched) -> Optional[str]:
+        """Next fire time for a celery crontab schedule, ISO UTC."""
+        try:
+            now = datetime.utcnow()
+            remaining = sched.remaining_estimate(now)
+            return (now + remaining).isoformat() + "Z"
+        except Exception:
+            return None
+
     async def getCeleryTasksStatus(self) -> List[Dict[str, Any]]:
-        """Get status of scheduled Celery tasks."""
+        """
+        Status of every scheduled Celery task. Schedules are derived from the two
+        places that actually run them, never restated here: dispatcher-driven
+        tasks read their interval through the dispatcher's own settings loader,
+        and beat-driven tasks read the live beat_schedule entry. Only the display
+        name and description are authored in this registry.
+        """
+        from app.tasks.celery_app import celery_app
+        from app.tasks.dispatcher import SCHEDULED_TASKS, _load_intervals
+
+        beat_schedule = celery_app.conf.beat_schedule
+        dispatch_minutes = await _load_intervals()
+
+        # taskName matches the task:last_run cache key each task writes. Either
+        # "dispatch" (a key in the dispatcher's SCHEDULED_TASKS) or "beat" (a
+        # beat_schedule entry name) locates the authoritative schedule.
         tasks = [
-            {"taskName": "rss_monitor", "displayName": "RSS Monitor", "schedule": "Every 5 minutes"},
-            {"taskName": "wanted_search", "displayName": "Wanted Media Search", "schedule": "Every 15 minutes"},
-            {"taskName": "download_monitor", "displayName": "Download Monitor", "schedule": "Every 60 seconds"},
-            {"taskName": "metadata_refresh", "displayName": "Metadata Refresh", "schedule": "Daily at 3 AM"},
-            {"taskName": "music_wanted_search", "displayName": "Music Wanted Search", "schedule": "Every 15 minutes"},
-            {"taskName": "music_new_releases", "displayName": "Music New Releases", "schedule": "Every 6 hours"},
-            {"taskName": "validation_monitor", "displayName": "Validation Monitor", "schedule": "Every 5 minutes"},
-            {"taskName": "folder_health", "displayName": "Folder Health Check", "schedule": "Every 5 minutes"},
-            {"taskName": "disk_space_update", "displayName": "Disk Space Update", "schedule": "Every 60 seconds"},
+            {
+                "taskName": "rss_monitor",
+                "displayName": "New Upload Monitor",
+                "description": "Checks indexer new-upload feeds, auto-downloads matches for monitored media, and grows the local release index.",
+                "dispatch": "rss_monitor",
+            },
+            {
+                "taskName": "wanted_search",
+                "displayName": "Wanted Movie Search",
+                "description": "Searches indexers for monitored movies without a file. Items that keep coming up empty back off automatically.",
+                "dispatch": "wanted_search",
+            },
+            {
+                "taskName": "music_wanted_search",
+                "displayName": "Wanted Music Search",
+                "description": "Searches indexers for wanted albums at the profile's allowed quality tiers, with the same automatic backoff.",
+                "dispatch": "music_wanted_search",
+            },
+            {
+                "taskName": "upgrade_search",
+                "displayName": "Upgrade Search",
+                "description": "Looks for higher-quality versions of downloaded items whose profile allows upgrades.",
+                "dispatch": "upgrade_search",
+            },
+            {
+                "taskName": "download_monitor",
+                "displayName": "Download Monitor",
+                "description": "Tracks download progress in qBittorrent and hands completed downloads to the importer.",
+                "beat": "download-monitor-every-minute",
+            },
+            {
+                "taskName": "validation_monitor",
+                "displayName": "Validation Monitor",
+                "description": "Fallback check for torrents stuck in pre-download validation, for example after a restart.",
+                "beat": "validation-monitor",
+            },
+            {
+                "taskName": "seeding_monitor",
+                "displayName": "Seeding Rules",
+                "description": "Applies seeding rules: ratio and time limits, per-indexer requirements, off-peak throttling, and stall recovery.",
+                "beat": "seeding-rules-monitor",
+            },
+            {
+                "taskName": "folder_health",
+                "displayName": "Folder Health Check",
+                "description": "Verifies every root folder is reachable and writable.",
+                "beat": "folder-health-check",
+            },
+            {
+                "taskName": "disk_space_update",
+                "displayName": "Disk Space Update",
+                "description": "Refreshes the cached free-space numbers shown for root folders.",
+                "beat": "folder-disk-space-update",
+            },
+            {
+                "taskName": "metadata_refresh",
+                "displayName": "Metadata Refresh",
+                "description": "Refreshes metadata for library items with missing data or an unreleased status.",
+                "dispatch": "metadata_refresh",
+            },
+            {
+                "taskName": "metadata_prefetch",
+                "displayName": "Metadata Prefetch",
+                "description": "Warms trending, popular, upcoming, and discover metadata so browse pages answer locally.",
+                "dispatch": "metadata_prefetch",
+            },
+            {
+                "taskName": "music_new_releases",
+                "displayName": "Music New Releases",
+                "description": "Checks monitored artists for newly released albums and adds them as wanted.",
+                "dispatch": "music_new_releases",
+            },
+            {
+                "taskName": "yts_sync",
+                "displayName": "YTS Catalog Sync",
+                "description": "Mirrors the YTS catalog into the local release index, a resumable full crawl first, then small delta pulls.",
+                "dispatch": "yts_sync",
+            },
         ]
 
         results = []
         client = await getCacheClient()
 
         for task in tasks:
+            # Resolve the authoritative schedule.
+            intervalSeconds = None
+            cronSchedule = None
+            dailyAtHour = None
+            if "dispatch" in task:
+                spec = SCHEDULED_TASKS.get(task["dispatch"], {})
+                if "daily_at_hour" in spec:
+                    dailyAtHour = spec["daily_at_hour"]
+                else:
+                    minutes = dispatch_minutes.get(task["dispatch"])
+                    intervalSeconds = minutes * 60 if minutes else None
+            else:
+                entry = beat_schedule.get(task["beat"])
+                raw = entry.get("schedule") if entry else None
+                if isinstance(raw, (int, float)):
+                    intervalSeconds = int(raw)
+                elif raw is not None:
+                    cronSchedule = raw
+
+            if intervalSeconds is not None:
+                schedule = self._scheduleLabel(intervalSeconds)
+            elif cronSchedule is not None:
+                schedule = self._cronLabel(cronSchedule)
+            elif dailyAtHour is not None:
+                schedule = f"Daily at {dailyAtHour}:00 UTC"
+            else:
+                schedule = "Not scheduled"
+
             taskStatus = {
-                **task,
+                "taskName": task["taskName"],
+                "displayName": task["displayName"],
+                "description": task["description"],
+                "schedule": schedule,
                 "lastRunTime": None,
+                "nextRunTime": None,
                 "lastDurationMs": None,
                 "lastStatus": None,
                 "status": "unknown",
@@ -345,8 +503,27 @@ class SystemHealthMonitor:
                         taskStatus["lastDurationMs"] = data.get("durationMs")
                         taskStatus["lastStatus"] = data.get("status")
                         taskStatus["status"] = "idle" if data.get("status") == "success" else "failed"
-                except:
+                except Exception:
                     pass
+
+            # Next run: last run plus the interval for interval tasks (the
+            # dispatcher or beat fires them on that cadence), the next cron
+            # occurrence for cron tasks, the next anchor hour for daily tasks.
+            # A missed window fires within a minute of startup, so a computed
+            # time in the past reads as "due now".
+            if intervalSeconds is not None:
+                lastRun = self._parseLastRun(taskStatus["lastRunTime"])
+                if lastRun is not None:
+                    taskStatus["nextRunTime"] = (lastRun + timedelta(seconds=intervalSeconds)).isoformat() + "Z"
+            elif cronSchedule is not None:
+                taskStatus["nextRunTime"] = self._cronNextRun(cronSchedule)
+            elif dailyAtHour is not None:
+                lastRun = self._parseLastRun(taskStatus["lastRunTime"])
+                base = lastRun or datetime.utcnow()
+                candidate = base.replace(hour=dailyAtHour, minute=0, second=0, microsecond=0)
+                if candidate <= base:
+                    candidate += timedelta(days=1)
+                taskStatus["nextRunTime"] = candidate.isoformat() + "Z"
 
             results.append(taskStatus)
 

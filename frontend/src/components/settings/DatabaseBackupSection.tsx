@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { usePermissions } from "@/contexts/PermissionContext";
@@ -14,14 +14,16 @@ import {
 	Check,
 	Eye,
 	EyeOff,
-	ChevronLeft,
-	ChevronRight,
 	AlertTriangle,
+	FileJson,
+	Filter,
 	Loader2,
+	Search,
 	Server,
 	GitBranch,
 	HardDrive,
 	Boxes,
+	X,
 } from "lucide-react";
 
 interface ConnectionInfo {
@@ -54,7 +56,8 @@ interface TableRows {
 	table: string;
 	columns: string[];
 	rows: Record<string, unknown>[];
-	total: number;
+	// Null on follow-up pages, which skip the count query. Page one always counts.
+	total: number | null;
 	limit: number;
 	offset: number;
 }
@@ -89,6 +92,16 @@ function cellText(value: unknown): string {
 	return String(value);
 }
 
+// Debounce a value so search and filter inputs do not fire a request per keystroke.
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+	const [debounced, setDebounced] = useState(value);
+	useEffect(() => {
+		const timer = setTimeout(() => setDebounced(value), delayMs);
+		return () => clearTimeout(timer);
+	}, [value, delayMs]);
+	return debounced;
+}
+
 export default function DatabaseBackupSection() {
 	const { hasPermission } = usePermissions();
 	const canManage = hasPermission("system.admin");
@@ -97,7 +110,29 @@ export default function DatabaseBackupSection() {
 	const [revealPassword, setRevealPassword] = useState(false);
 	const [copied, setCopied] = useState<string | null>(null);
 	const [selectedTable, setSelectedTable] = useState<string | null>(null);
-	const [page, setPage] = useState(0);
+	// Free-text search across all columns, and per-column filter values.
+	const [tableSearch, setTableSearch] = useState("");
+	const [columnFilters, setColumnFilters] = useState<Record<string, string>>(
+		{},
+	);
+	// Columns whose filter input is open (toggled from the header filter button).
+	const [openFilterColumns, setOpenFilterColumns] = useState<Set<string>>(
+		new Set(),
+	);
+	const debouncedSearch = useDebouncedValue(tableSearch, 400);
+	const debouncedFilters = useDebouncedValue(columnFilters, 400);
+
+	const toggleFilterColumn = (column: string) => {
+		setOpenFilterColumns((prev) => {
+			const next = new Set(prev);
+			if (next.has(column)) {
+				next.delete(column);
+			} else {
+				next.add(column);
+			}
+			return next;
+		});
+	};
 	const [downloading, setDownloading] = useState<string | null>(null);
 	const [importKind, setImportKind] = useState<
 		"database" | "settings" | null
@@ -125,16 +160,96 @@ export default function DatabaseBackupSection() {
 		enabled: canManage,
 	});
 
-	const { data: rows, isFetching: rowsLoading } = useQuery<TableRows>({
-		queryKey: ["admin-db-table", selectedTable, page],
-		queryFn: async () =>
+	// Only filters with a value are sent, as a JSON object of column to value.
+	const activeFilters = useMemo(
+		() =>
+			Object.fromEntries(
+				Object.entries(debouncedFilters).filter(
+					([, value]) => value.trim() !== "",
+				),
+			),
+		[debouncedFilters],
+	);
+	const hasActiveFilters =
+		debouncedSearch.trim() !== "" || Object.keys(activeFilters).length > 0;
+
+	// Rows load through an infinite query: scrolling near the bottom of the table
+	// fetches the next page until the (filtered) set is fully loaded.
+	const {
+		data: rowPages,
+		isFetching: rowsLoading,
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+	} = useInfiniteQuery<TableRows>({
+		queryKey: [
+			"admin-db-table",
+			selectedTable,
+			debouncedSearch,
+			activeFilters,
+		],
+		queryFn: async ({ pageParam }) =>
 			(
 				await api.get(`/admin/database/tables/${selectedTable}`, {
-					params: { limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+					params: {
+						limit: PAGE_SIZE,
+						offset: pageParam as number,
+						search: debouncedSearch.trim() || undefined,
+						filters: Object.keys(activeFilters).length
+							? JSON.stringify(activeFilters)
+							: undefined,
+						// The filtered count runs once on the first page. Later
+						// pages reuse it instead of re-counting per scroll step.
+						with_total: (pageParam as number) === 0,
+					},
 				})
 			).data,
+		initialPageParam: 0,
+		getNextPageParam: (lastPage, allPages) => {
+			const total = allPages[0]?.total ?? 0;
+			const nextOffset = lastPage.offset + lastPage.rows.length;
+			return lastPage.rows.length > 0 && nextOffset < total
+				? nextOffset
+				: undefined;
+		},
 		enabled: canManage && !!selectedTable,
 	});
+
+	const tableColumns = rowPages?.pages[0]?.columns ?? [];
+	const tableTotal = rowPages?.pages[0]?.total ?? 0;
+	const allRows = useMemo(
+		() => rowPages?.pages.flatMap((p) => p.rows) ?? [],
+		[rowPages],
+	);
+
+	// Sentinel element at the bottom of the scroll container. When it becomes
+	// visible (within 200px), the next page loads.
+	const scrollRootRef = useRef<HTMLDivElement | null>(null);
+	const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
+
+	useEffect(() => {
+		if (!sentinel) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (
+					entries[0]?.isIntersecting &&
+					hasNextPage &&
+					!isFetchingNextPage
+				) {
+					fetchNextPage();
+				}
+			},
+			{ root: scrollRootRef.current, rootMargin: "200px" },
+		);
+		observer.observe(sentinel);
+		return () => observer.disconnect();
+	}, [sentinel, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+	const clearTableFilters = () => {
+		setTableSearch("");
+		setColumnFilters({});
+		setOpenFilterColumns(new Set());
+	};
 
 	const copyValue = async (label: string, value: string) => {
 		try {
@@ -210,10 +325,6 @@ export default function DatabaseBackupSection() {
 			</div>
 		);
 	}
-
-	const totalPages = rows
-		? Math.max(1, Math.ceil(rows.total / PAGE_SIZE))
-		: 1;
 
 	const infoRow = (label: string, value: string, secret = false) => (
 		<div className="flex items-center justify-between gap-3 py-2 border-b border-border last:border-0">
@@ -461,9 +572,11 @@ export default function DatabaseBackupSection() {
 										key={t.name}
 										onClick={() => {
 											setSelectedTable(t.name);
-											setPage(0);
+											setTableSearch("");
+											setColumnFilters({});
+											setOpenFilterColumns(new Set());
 										}}
-										className={`w-full text-left px-3 py-2 rounded-lg text-sm transition ${
+										className={`w-full text-left px-3 py-2 rounded-lg text-sm transition cursor-pointer ${
 											selectedTable === t.name
 												? "bg-primary/10 text-primary"
 												: "hover:bg-muted"
@@ -487,98 +600,204 @@ export default function DatabaseBackupSection() {
 									</div>
 								) : (
 									<div>
-										<div className="flex items-center justify-between mb-2">
-											<span className="text-sm font-medium">
+										<div className="flex items-center justify-between gap-3 mb-2">
+											<span className="text-sm font-medium whitespace-nowrap">
 												{selectedTable}{" "}
 												<span className="text-muted-foreground">
 													(
-													{rows?.total.toLocaleString() ??
-														0}{" "}
-													rows)
+													{tableTotal.toLocaleString()}{" "}
+													{hasActiveFilters
+														? "matching rows"
+														: "rows"}
+													)
 												</span>
 											</span>
-											<div className="flex items-center gap-2">
+											{hasActiveFilters && (
 												<button
-													onClick={() =>
-														setPage((p) =>
-															Math.max(0, p - 1),
-														)
-													}
-													disabled={
-														page === 0 ||
-														rowsLoading
-													}
-													className="p-1.5 hover:bg-muted rounded transition disabled:opacity-40"
+													onClick={clearTableFilters}
+													className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition whitespace-nowrap cursor-pointer"
+													title="Clear search and column filters"
 												>
-													<ChevronLeft className="w-4 h-4" />
+													<X className="w-3 h-3" />
+													Clear filters
 												</button>
-												<span className="text-xs text-muted-foreground">
-													{page + 1} / {totalPages}
-												</span>
-												<button
-													onClick={() =>
-														setPage((p) => p + 1)
-													}
-													disabled={
-														page + 1 >=
-															totalPages ||
-														rowsLoading
-													}
-													className="p-1.5 hover:bg-muted rounded transition disabled:opacity-40"
-												>
-													<ChevronRight className="w-4 h-4" />
-												</button>
-											</div>
+											)}
+											<span className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap ml-auto">
+												{rowsLoading && (
+													<Loader2 className="w-3.5 h-3.5 animate-spin" />
+												)}
+												{allRows.length.toLocaleString()}{" "}
+												loaded
+											</span>
 										</div>
-										<div className="overflow-x-auto border border-border rounded-lg max-h-[32rem]">
+										<div className="relative mb-2">
+											<Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+											<input
+												type="text"
+												value={tableSearch}
+												onChange={(e) =>
+													setTableSearch(
+														e.target.value,
+													)
+												}
+												placeholder="Search all columns..."
+												className="w-full pl-10 pr-4 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+											/>
+										</div>
+										<div
+											ref={scrollRootRef}
+											className="overflow-x-auto border border-border rounded-lg max-h-[32rem] overflow-y-auto"
+										>
 											<table className="w-full text-xs">
-												<thead className="bg-muted/50 sticky top-0">
+												<thead className="bg-muted sticky top-0 z-10">
 													<tr>
-														{rows?.columns.map(
+														{tableColumns.map(
 															(c) => (
 																<th
 																	key={c}
 																	className="text-left px-3 py-2 font-medium whitespace-nowrap"
 																>
-																	{c}
+																	<span className="flex items-center gap-1">
+																		{c}
+																		<button
+																			onClick={() =>
+																				toggleFilterColumn(
+																					c,
+																				)
+																			}
+																			className={`p-0.5 rounded hover:bg-muted/80 transition cursor-pointer ${
+																				(
+																					columnFilters[
+																						c
+																					] ??
+																					""
+																				).trim() !==
+																				""
+																					? "text-primary"
+																					: openFilterColumns.has(
+																								c,
+																						  )
+																						? "text-foreground"
+																						: "text-muted-foreground"
+																			}`}
+																			title={`Filter ${c}`}
+																		>
+																			<Filter className="w-3 h-3" />
+																		</button>
+																	</span>
 																</th>
 															),
 														)}
 													</tr>
+													{/* Filter row, shown once any column filter is opened or has a value.
+													    Values combine with AND. */}
+													{tableColumns.some(
+														(c) =>
+															openFilterColumns.has(
+																c,
+															) ||
+															(
+																columnFilters[
+																	c
+																] ?? ""
+															).trim() !== "",
+													) && (
+														<tr>
+															{tableColumns.map(
+																(c) => (
+																	<th
+																		key={c}
+																		className="px-2 py-1 font-normal"
+																	>
+																		{(openFilterColumns.has(
+																			c,
+																		) ||
+																			(
+																				columnFilters[
+																					c
+																				] ??
+																				""
+																			).trim() !==
+																				"") && (
+																			<input
+																				type="text"
+																				autoFocus={openFilterColumns.has(
+																					c,
+																				)}
+																				value={
+																					columnFilters[
+																						c
+																					] ??
+																					""
+																				}
+																				onChange={(
+																					e,
+																				) => {
+																					setColumnFilters(
+																						(
+																							f,
+																						) => ({
+																							...f,
+																							[c]: e
+																								.target
+																								.value,
+																						}),
+																					);
+																				}}
+																				placeholder="Filter..."
+																				className="w-full px-2 py-1 text-xs bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+																			/>
+																		)}
+																	</th>
+																),
+															)}
+														</tr>
+													)}
 												</thead>
 												<tbody>
-													{rows?.rows.map(
-														(row, i) => (
-															<tr
-																key={i}
-																className="border-t border-border hover:bg-muted/30"
-															>
-																{rows.columns.map(
-																	(c) => (
-																		<td
-																			key={
+													{allRows.map((row, i) => (
+														<tr
+															key={i}
+															className="border-t border-border hover:bg-muted/30"
+														>
+															{tableColumns.map(
+																(c) => (
+																	<td
+																		key={c}
+																		className="px-3 py-2 whitespace-nowrap max-w-xs truncate"
+																		title={cellText(
+																			row[
 																				c
-																			}
-																			className="px-3 py-2 whitespace-nowrap max-w-xs truncate"
-																			title={cellText(
-																				row[
-																					c
-																				],
-																			)}
-																		>
-																			{cellText(
-																				row[
-																					c
-																				],
-																			)}
-																		</td>
-																	),
-																)}
-															</tr>
-														),
-													)}
+																			],
+																		)}
+																	>
+																		{cellText(
+																			row[
+																				c
+																			],
+																		)}
+																	</td>
+																),
+															)}
+														</tr>
+													))}
 												</tbody>
 											</table>
+											<div
+												ref={setSentinel}
+												className="flex items-center justify-center py-3"
+											>
+												{isFetchingNextPage ? (
+													<Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+												) : !hasNextPage &&
+												  allRows.length > 0 ? (
+													<span className="text-xs text-muted-foreground">
+														All{" "}
+														{tableTotal.toLocaleString()}{" "}
+														rows loaded
+													</span>
+												) : null}
+											</div>
 										</div>
 									</div>
 								)}
@@ -590,13 +809,17 @@ export default function DatabaseBackupSection() {
 				{/* Backup & Restore tab */}
 				{tab === "backup" && (
 					<section className="bg-card text-card-foreground rounded-lg border border-border p-5">
-						<div className="flex items-center gap-2 mb-4">
+						<div className="flex items-center gap-2 mb-1">
 							<Download className="w-5 h-5 text-primary" />
 							<h2 className="text-lg font-semibold">
 								Backup & Restore
 							</h2>
 						</div>
-						<div className="flex flex-wrap gap-3">
+						<p className="text-xs text-muted-foreground mb-4">
+							Download a backup of this instance. Exports run
+							against the live database.
+						</p>
+						<div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 							<button
 								onClick={() =>
 									runExport(
@@ -605,14 +828,35 @@ export default function DatabaseBackupSection() {
 									)
 								}
 								disabled={!!downloading}
-								className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm"
+								className="flex flex-col items-start gap-3 p-4 rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 text-left transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
 							>
-								{downloading === "/admin/export/full" ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
-								) : (
-									<Download className="w-4 h-4" />
-								)}
-								Full Backup (.zip)
+								<span className="flex items-center gap-2 w-full">
+									<Boxes className="w-5 h-5 text-primary shrink-0" />
+									<span className="text-sm font-medium">
+										Full Backup
+									</span>
+									<span className="ml-auto px-2 py-0.5 bg-primary/20 text-primary rounded text-xs">
+										Recommended
+									</span>
+								</span>
+								<span className="text-xs text-muted-foreground">
+									Everything in one archive: the complete
+									database dump plus the portable settings
+									file and a manifest.
+								</span>
+								<span className="flex items-center gap-1.5 text-xs text-primary">
+									{downloading === "/admin/export/full" ? (
+										<>
+											<Loader2 className="w-3.5 h-3.5 animate-spin" />
+											Preparing...
+										</>
+									) : (
+										<>
+											<Download className="w-3.5 h-3.5" />
+											Download .zip
+										</>
+									)}
+								</span>
 							</button>
 							<button
 								onClick={() =>
@@ -622,14 +866,33 @@ export default function DatabaseBackupSection() {
 									)
 								}
 								disabled={!!downloading}
-								className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+								className="flex flex-col items-start gap-3 p-4 rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 text-left transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
 							>
-								{downloading === "/admin/export/database" ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
-								) : (
-									<Download className="w-4 h-4" />
-								)}
-								Database (.sql)
+								<span className="flex items-center gap-2">
+									<Database className="w-5 h-5 text-primary shrink-0" />
+									<span className="text-sm font-medium">
+										Database
+									</span>
+								</span>
+								<span className="text-xs text-muted-foreground">
+									Plain SQL dump of every table. Restorable
+									here or with psql against any PostgreSQL
+									server.
+								</span>
+								<span className="flex items-center gap-1.5 text-xs text-primary">
+									{downloading ===
+									"/admin/export/database" ? (
+										<>
+											<Loader2 className="w-3.5 h-3.5 animate-spin" />
+											Preparing...
+										</>
+									) : (
+										<>
+											<Download className="w-3.5 h-3.5" />
+											Download .sql
+										</>
+									)}
+								</span>
 							</button>
 							<button
 								onClick={() =>
@@ -639,79 +902,157 @@ export default function DatabaseBackupSection() {
 									)
 								}
 								disabled={!!downloading}
-								className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+								className="flex flex-col items-start gap-3 p-4 rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 text-left transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
 							>
-								{downloading === "/admin/export/settings" ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
-								) : (
-									<Download className="w-4 h-4" />
-								)}
-								Settings (.json)
+								<span className="flex items-center gap-2">
+									<FileJson className="w-5 h-5 text-primary shrink-0" />
+									<span className="text-sm font-medium">
+										Settings
+									</span>
+								</span>
+								<span className="text-xs text-muted-foreground">
+									Profiles, root folders, and app settings in
+									a portable file. Importable on any Kinora
+									instance.
+								</span>
+								<span className="flex items-center gap-1.5 text-xs text-primary">
+									{downloading ===
+									"/admin/export/settings" ? (
+										<>
+											<Loader2 className="w-3.5 h-3.5 animate-spin" />
+											Preparing...
+										</>
+									) : (
+										<>
+											<Download className="w-3.5 h-3.5" />
+											Download .json
+										</>
+									)}
+								</span>
 							</button>
 						</div>
 
 						<div className="mt-5 pt-5 border-t border-border">
-							<div className="flex items-center gap-2 mb-3">
+							<div className="flex items-center gap-2 mb-1">
 								<Upload className="w-4 h-4 text-muted-foreground" />
 								<h3 className="text-sm font-semibold">
 									Restore / Import
 								</h3>
 							</div>
-							<div className="flex flex-wrap items-center gap-3">
-								<select
-									value={importKind || ""}
-									onChange={(e) => {
-										setImportKind(
-											(e.target.value || null) as
-												| "database"
-												| "settings"
-												| null,
-										);
+							<p className="text-xs text-muted-foreground mb-4">
+								Restore from a backup created above. Restoring
+								overwrites current data, so it asks for
+								confirmation before running.
+							</p>
+
+							{/* Step 1: what to restore */}
+							<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+								<button
+									onClick={() => {
+										setImportKind("database");
 										setImportFile(null);
 										setImportConfirm(false);
 										setImportMessage(null);
 									}}
-									className="px-3 py-2 rounded-lg border border-border bg-background text-sm"
+									className={`flex items-start gap-3 p-4 rounded-lg border text-left transition cursor-pointer ${
+										importKind === "database"
+											? "border-primary bg-primary/10"
+											: "border-border hover:border-primary/50 hover:bg-muted/50"
+									}`}
 								>
-									<option value="">
-										Choose what to restore...
-									</option>
-									<option value="database">
-										Database (.sql dump)
-									</option>
-									<option value="settings">
-										Settings (.json)
-									</option>
-								</select>
-								{importKind && (
+									<Database className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+									<span>
+										<span className="block text-sm font-medium">
+											Database (.sql)
+										</span>
+										<span className="block text-xs text-muted-foreground mt-1">
+											Full restore of every table from a
+											database dump. Replaces all current
+											data.
+										</span>
+									</span>
+								</button>
+								<button
+									onClick={() => {
+										setImportKind("settings");
+										setImportFile(null);
+										setImportConfirm(false);
+										setImportMessage(null);
+									}}
+									className={`flex items-start gap-3 p-4 rounded-lg border text-left transition cursor-pointer ${
+										importKind === "settings"
+											? "border-primary bg-primary/10"
+											: "border-border hover:border-primary/50 hover:bg-muted/50"
+									}`}
+								>
+									<FileJson className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+									<span>
+										<span className="block text-sm font-medium">
+											Settings (.json)
+										</span>
+										<span className="block text-xs text-muted-foreground mt-1">
+											Profiles, root folders, and app
+											settings. Updates matching entries,
+											leaves everything else untouched.
+										</span>
+									</span>
+								</button>
+							</div>
+
+							{/* Step 2: pick the file */}
+							{importKind && (
+								<label className="mt-3 flex items-center justify-between gap-3 p-4 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-muted/30 transition cursor-pointer">
+									<span className="flex items-center gap-3 min-w-0">
+										<Upload className="w-5 h-5 text-muted-foreground shrink-0" />
+										<span className="min-w-0">
+											<span className="block text-sm font-medium truncate">
+												{importFile
+													? importFile.name
+													: importKind === "database"
+														? "Choose a .sql dump file"
+														: "Choose a settings .json file"}
+											</span>
+											<span className="block text-xs text-muted-foreground mt-0.5">
+												{importFile
+													? `${(importFile.size / (1024 * 1024)).toFixed(2)} MB`
+													: "Click to browse"}
+											</span>
+										</span>
+									</span>
+									{importFile && (
+										<Check className="w-4 h-4 text-green-500 shrink-0" />
+									)}
 									<input
 										type="file"
+										className="hidden"
 										accept={
 											importKind === "database"
 												? ".sql"
 												: ".json"
 										}
-										onChange={(e) =>
+										onChange={(e) => {
 											setImportFile(
 												e.target.files?.[0] || null,
-											)
-										}
-										className="text-sm"
+											);
+											setImportConfirm(false);
+											setImportMessage(null);
+										}}
 									/>
-								)}
-							</div>
+								</label>
+							)}
 
+							{/* Step 3: confirm and run */}
 							{importKind && importFile && (
-								<div className="mt-3 p-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10">
-									<div className="flex items-start gap-2">
-										<AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+								<div className="mt-3 p-4 rounded-lg border border-yellow-500/40 bg-yellow-500/10">
+									<div className="flex items-start gap-3">
+										<AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
 										<div className="flex-1">
 											<p className="text-sm text-yellow-600 dark:text-yellow-400 font-medium">
 												This overwrites current{" "}
 												{importKind === "database"
 													? "data"
-													: "settings"}
-												.
+													: "settings"}{" "}
+												and cannot be undone.
 											</p>
 											<label className="flex items-center gap-2 mt-2 text-sm cursor-pointer">
 												<input
@@ -726,20 +1067,35 @@ export default function DatabaseBackupSection() {
 												I understand, proceed with the
 												restore.
 											</label>
-											<button
-												onClick={runImport}
-												disabled={
-													!importConfirm || importBusy
-												}
-												className="mt-3 flex items-center gap-2 px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition text-sm disabled:opacity-50"
-											>
-												{importBusy ? (
-													<Loader2 className="w-4 h-4 animate-spin" />
-												) : (
-													<Upload className="w-4 h-4" />
-												)}
-												Restore now
-											</button>
+											<div className="flex items-center gap-2 mt-3">
+												<button
+													onClick={runImport}
+													disabled={
+														!importConfirm ||
+														importBusy
+													}
+													className="flex items-center gap-2 px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+												>
+													{importBusy ? (
+														<Loader2 className="w-4 h-4 animate-spin" />
+													) : (
+														<Upload className="w-4 h-4" />
+													)}
+													Restore now
+												</button>
+												<button
+													onClick={() => {
+														setImportKind(null);
+														setImportFile(null);
+														setImportConfirm(false);
+														setImportMessage(null);
+													}}
+													disabled={importBusy}
+													className="px-3 py-2 text-sm text-muted-foreground hover:bg-muted rounded-lg transition cursor-pointer disabled:opacity-50"
+												>
+													Cancel
+												</button>
+											</div>
 										</div>
 									</div>
 								</div>

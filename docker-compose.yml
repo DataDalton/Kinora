@@ -107,7 +107,8 @@ services:
       --df_snapshot_format=true
       --snapshot_cron "*/5 * * * *"
       --compression_mode=2
-      --proactor_threads=0
+      --proactor_threads=2
+      --maxmemory=1gb
       --tcp_nodelay=true
       --hz=100
       --cache_mode=false
@@ -307,10 +308,6 @@ services:
         NEXT_PUBLIC_API_URL: /api/v1
         NEXT_PUBLIC_WS_URL: ""
     container_name: kinora-frontend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     # No published port. Served through the Caddy proxy on the internal network.
     depends_on:
       - backend

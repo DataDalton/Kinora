@@ -42,6 +42,7 @@ from app.schemas.user import (
     PasswordChange,
 )
 from app.core.two_factor import verify_totp_code
+from app.core.auth_cache import getCachedAuthUser, setCachedAuthUser
 import secrets
 
 router = APIRouter()
@@ -68,7 +69,10 @@ async def get_current_user(
     conn: asyncpg.Connection = Depends(get_db),
 ) -> UserWithPermissions:
     """
-    Get current authenticated user from token with groups and permissions
+    Get current authenticated user from token with groups and permissions.
+    The resolved identity is cached for AUTH_CACHE_TTL and invalidated by version
+    bump on any user/group/permission mutation, so the per-request cost is one
+    cache read instead of three database queries.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -84,10 +88,34 @@ async def get_current_user(
     if username is None:
         raise credentials_exception
 
+    disabled_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Account is disabled",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    cached = await getCachedAuthUser(username)
+    if cached:
+        try:
+            user = UserWithPermissions.model_validate(cached)
+        except Exception:
+            # A stale or malformed payload falls through to the database path,
+            # which rewrites the cache entry.
+            user = None
+        if user is not None:
+            if not user.isActive:
+                raise disabled_exception
+            return user
+
     user_row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", username)
 
     if user_row is None:
         raise credentials_exception
+
+    # A deactivated account keeps a valid token until it expires, so the account
+    # state has to be enforced here on every request.
+    if not user_row["is_active"]:
+        raise disabled_exception
 
     user_data = dict(user_row)
     user_id = user_data["id"]
@@ -100,7 +128,9 @@ async def get_current_user(
     permissions = await getUserPermissions(conn, user_id)
     user_data["permissions"] = list(permissions)
 
-    return UserWithPermissions(**user_data)
+    user = UserWithPermissions(**user_data)
+    await setCachedAuthUser(username, user.model_dump(mode="json"))
+    return user
 
 
 def require_permission(permission: str):

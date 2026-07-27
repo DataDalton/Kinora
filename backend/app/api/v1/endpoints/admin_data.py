@@ -175,9 +175,15 @@ async def list_tables(
     current_user: UserWithPermissions = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """List all tables with their exact row count and on-disk size."""
+    """
+    List all tables with row count and on-disk size. Counts come from the
+    planner statistics in one catalog query rather than a COUNT(*) per table,
+    which scans large tables on every page load. Tables never analyzed yet
+    (reltuples = -1) fall back to an exact count.
+    """
     rows = await conn.fetch("""
         SELECT c.relname AS table_name,
+               c.reltuples::bigint AS estimated_rows,
                pg_total_relation_size(c.oid) AS size_bytes,
                pg_size_pretty(pg_total_relation_size(c.oid)) AS size_pretty
         FROM pg_class c
@@ -188,9 +194,11 @@ async def list_tables(
     tables = []
     for r in rows:
         name = r["table_name"]
-        # Table names come from the system catalog, quote them to build the count query.
-        quoted = '"' + name.replace('"', '""') + '"'
-        count = await conn.fetchval(f"SELECT COUNT(*) FROM {quoted}")
+        count = r["estimated_rows"]
+        if count < 0:
+            # Table names come from the system catalog, quote them for the count query.
+            quoted = '"' + name.replace('"', '""') + '"'
+            count = await conn.fetchval(f"SELECT COUNT(*) FROM {quoted}")
         tables.append(
             {
                 "name": name,
@@ -209,12 +217,23 @@ async def table_rows(
     offset: int = Query(0, ge=0),
     order_by: Optional[str] = None,
     order_dir: str = Query("asc", pattern="^(?i)(asc|desc)$"),
+    search: Optional[str] = Query(None, max_length=200),
+    filters: Optional[str] = Query(None, max_length=2000),
+    with_total: bool = Query(True),
     current_user: UserWithPermissions = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
-    Paginated rows of a single table (read-only). The table and order-by column are
-    validated against the live schema and quoted, so the name cannot inject SQL.
+    Paginated rows of a single table (read-only). The table, order-by, and filter
+    columns are validated against the live schema and quoted, so names cannot
+    inject SQL, and every value is a bind parameter.
+
+    search matches case-insensitively against every column (values are compared
+    as text, so numbers, dates, and JSON all match). filters is a JSON object of
+    column name to value, each matched the same way and combined with AND.
+    total reflects the filtered count so pagination follows the filtered set.
+    With with_total false the count query is skipped and total is null, used by
+    infinite scrolling to count once on the first page rather than per page.
     """
     valid_tables = await _list_table_names(conn)
     if table not in valid_tables:
@@ -223,15 +242,59 @@ async def table_rows(
     columns = await _column_names(conn, table)
     quoted_table = f'"{table}"'
 
-    order_clause = ""
+    # Without an ORDER BY, PostgreSQL gives no row-order guarantee, so pages could
+    # repeat or skip rows as the table changes. Default to the first column (the
+    # primary key in this schema) for stable pagination.
     if order_by:
         if order_by not in columns:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown order column")
         direction = "DESC" if order_dir.lower() == "desc" else "ASC"
         order_clause = f' ORDER BY "{order_by}" {direction}'
+    else:
+        order_clause = f' ORDER BY "{columns[0]}"' if columns else ""
 
-    total = await conn.fetchval(f"SELECT count(*) FROM {quoted_table}")
-    rows = await conn.fetch(f"SELECT * FROM {quoted_table}{order_clause} LIMIT $1 OFFSET $2", limit, offset)
+    where_parts: List[str] = []
+    params: List[Any] = []
+
+    if search and search.strip():
+        params.append(f"%{search.strip()}%")
+        placeholder = f"${len(params)}"
+        any_column = " OR ".join(f'CAST("{c}" AS TEXT) ILIKE {placeholder}' for c in columns)
+        where_parts.append(f"({any_column})")
+
+    if filters:
+        try:
+            parsed_filters = json.loads(filters)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="filters must be JSON")
+        if not isinstance(parsed_filters, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="filters must be a JSON object of column to value",
+            )
+        for column, value in parsed_filters.items():
+            if column not in columns:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown filter column: {column}")
+            if value is None or str(value).strip() == "":
+                continue
+            params.append(f"%{str(value).strip()}%")
+            where_parts.append(f'CAST("{column}" AS TEXT) ILIKE ${len(params)}')
+
+    where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+    total = None
+    if with_total:
+        total = await conn.fetchval(f"SELECT count(*) FROM {quoted_table}{where_clause}", *params)
+
+    params.append(limit)
+    limit_placeholder = f"${len(params)}"
+    params.append(offset)
+    offset_placeholder = f"${len(params)}"
+    rows = await conn.fetch(
+        f"SELECT * FROM {quoted_table}{where_clause}{order_clause} "
+        f"LIMIT {limit_placeholder} OFFSET {offset_placeholder}",
+        *params,
+    )
 
     return {
         "table": table,

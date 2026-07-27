@@ -110,14 +110,20 @@ export default function TranscodingPage() {
     },
   });
 
-  // Fetch transcoding jobs
+  // Fetch transcoding jobs. Polls fast only while a job is queued or processing,
+  // otherwise drops to a slow idle poll.
   const { data: jobs, isLoading: jobsLoading } = useQuery<TranscodingJob[]>({
     queryKey: ['transcoding-jobs'],
     queryFn: async () => {
       const response = await api.get('/transcoding/jobs');
       return response.data;
     },
-    refetchInterval: 2000,
+    refetchInterval: (query) => {
+      const currentJobs = query.state.data;
+      const hasActiveJobs = Array.isArray(currentJobs)
+        && currentJobs.some((job) => job.status === 'queued' || job.status === 'processing');
+      return hasActiveJobs ? 2000 : 30000;
+    },
   });
 
   // Fetch transcoding profiles

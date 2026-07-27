@@ -7,6 +7,7 @@ from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile
 from app.services import music_quality
 from app.services.metadata.deezer import deezer_service
+from app.services.search_backoff import eligibilityClause, recordSearchAttempt
 from app.core.cache import cacheSet
 
 
@@ -54,14 +55,15 @@ async def async_search_wanted_music():
         pool = await get_pool()
 
         async with pool.acquire() as conn:
-            # Get all wanted albums (monitored but not downloaded)
-            wanted_albums = await conn.fetch("""
+            # Wanted albums due for another search under the age-based backoff.
+            wanted_albums = await conn.fetch(f"""
                 SELECT a.*, ar.name as artist_name
                 FROM albums a
                 LEFT JOIN artists ar ON a.artist_id = ar.id
                 WHERE a.monitored = TRUE
                 AND a.status = 'wanted'
-                ORDER BY a.release_date DESC NULLS LAST
+                AND {eligibilityClause("a", "release_date")}
+                ORDER BY a.last_search_at ASC NULLS FIRST, a.release_date DESC NULLS LAST
                 LIMIT 50
                 """)
 
@@ -93,6 +95,7 @@ async def async_search_wanted_music():
 
                 # Search and download. The paired folder (hardlink target + organize path)
                 # is resolved from the album's assigned root folder inside the engine.
+                searchStats = {}
                 try:
                     torrent_hash = await search_engine.search_music_and_download(
                         query=query,
@@ -100,7 +103,10 @@ async def async_search_wanted_music():
                         tags=["kinora", "music", f"album-{album['id']}"],
                         history_conn=conn,
                         history_media_id=album["id"],
+                        search_stats=searchStats,
                     )
+
+                    await recordSearchAttempt(conn, "albums", album["id"], found=bool(torrent_hash))
 
                     if torrent_hash:
                         # The engine records download_history (with re-addable source).
@@ -115,14 +121,16 @@ async def async_search_wanted_music():
                         )
 
                         grabbed_count += 1
-                        print(f"Music: Grabbed {album_title} by {artist_name}")
+                        print(f"Music: Downloading {album_title} by {artist_name}")
 
                 except Exception as e:
                     print(f"Error searching for music {query}: {e}")
                     continue
 
-                # Small delay to avoid hammering indexers
-                await asyncio.sleep(2)
+                # Pause only when live indexer queries actually ran. Items answered
+                # from the local index or the short-lived search cache cost nothing.
+                if searchStats.get("live_queries"):
+                    await asyncio.sleep(2)
 
         return {
             "status": "success",
@@ -311,6 +319,7 @@ async def async_search_discography(artist_id: int):
                     if profile_row:
                         profile = MediaProfile.from_row(dict(profile_row))
 
+                searchStats = {}
                 try:
                     torrent_hash = await search_engine.search_music_and_download(
                         query=query,
@@ -318,6 +327,7 @@ async def async_search_discography(artist_id: int):
                         tags=["kinora", "music", "discography", f"album-{album['id']}"],
                         history_conn=conn,
                         history_media_id=album["id"],
+                        search_stats=searchStats,
                     )
 
                     if torrent_hash:
@@ -335,7 +345,8 @@ async def async_search_discography(artist_id: int):
                     print(f"Error searching for {query}: {e}")
                     continue
 
-                await asyncio.sleep(2)
+                if searchStats.get("live_queries"):
+                    await asyncio.sleep(2)
 
         return {
             "status": "success",

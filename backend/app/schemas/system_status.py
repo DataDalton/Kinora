@@ -20,6 +20,7 @@ class QueueStatus(BaseModel):
 class CeleryTaskStatus(BaseModel):
     taskName: str
     displayName: str
+    description: str = ""
     schedule: str
     lastRunTime: Optional[datetime] = None
     nextRunTime: Optional[datetime] = None

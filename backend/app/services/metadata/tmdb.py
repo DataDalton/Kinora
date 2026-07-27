@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.cache import cacheGet, cacheSet, CACHE_TTL_SHORT, CACHE_TTL_LONG
 from app.db import get_pool
 from app.core.http_client import http_get
+from app.services import metadata_cache
 
 
 def getEncryptionKey() -> bytes:
@@ -69,27 +70,61 @@ class TMDBService:
             "Official Docker images have this embedded."
         )
 
-    async def _request(self, endpoint: str, params: Dict[str, Any] = None, ttl: int = CACHE_TTL_LONG) -> Dict[str, Any]:
+    def _adaptive_ttl(self, endpoint: str, data: Dict[str, Any], default_ttl: int) -> int:
         """
-        Make a request to TMDB API with caching using shared HTTP client
+        TTL tiered by content age for detail payloads. A movie released years ago
+        never changes, so its details stay valid for days instead of an hour. An
+        in-production show keeps the short TTL so new episodes appear promptly.
+        """
+        if endpoint.startswith("movie/") and isinstance(data.get("release_date"), str):
+            return metadata_cache.tieredTtl(data.get("release_date"), default_ttl)
+        if endpoint.startswith("tv/"):
+            if data.get("in_production"):
+                return default_ttl
+            return metadata_cache.tieredTtl(data.get("last_air_date") or data.get("first_air_date"), default_ttl)
+        return default_ttl
+
+    async def _request(
+        self, endpoint: str, params: Dict[str, Any] = None, ttl: int = CACHE_TTL_LONG
+    ) -> Dict[str, Any]:
+        """
+        Make a request to TMDB API with two-tier caching: Dragonfly first, then the
+        persistent metadata_cache table (survives restarts), then the network.
+        A stale persistent row is served if TMDB itself is unreachable.
         ttl: Cache duration in seconds. Use CACHE_TTL_SHORT for detail pages, CACHE_TTL_LONG for lists/searches
         """
         if params is None:
             params = {}
 
-        api_key = await self._get_api_key()
-        params["api_key"] = api_key
+        # Cache key excludes the API key so persisted entries survive key rotation.
+        cache_key = f"tmdb:{endpoint}:{str(dict(sorted(params.items())))}"
 
-        cache_key = f"tmdb:{endpoint}:{str(params)}"
         cached = await cacheGet(cache_key)
         if cached:
             return cached
 
-        response = await http_get(f"{self.BASE_URL}/{endpoint}", params=params)
-        response.raise_for_status()
-        data = response.json()
+        persisted = await metadata_cache.getFresh(cache_key)
+        if persisted is not None:
+            await cacheSet(cache_key, persisted, expire=ttl)
+            return persisted
 
-        await cacheSet(cache_key, data, expire=ttl)
+        api_key = await self._get_api_key()
+        request_params = {**params, "api_key": api_key}
+
+        try:
+            response = await http_get(f"{self.BASE_URL}/{endpoint}", params=request_params)
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            # Provider unreachable: an expired persistent row is better than an error.
+            stale = await metadata_cache.getStale(cache_key)
+            if stale is not None:
+                return stale
+            raise
+
+        effective_ttl = self._adaptive_ttl(endpoint, data, ttl)
+        await cacheSet(cache_key, data, expire=effective_ttl)
+        await metadata_cache.setCached(cache_key, "tmdb", data, effective_ttl)
         return data
 
     async def search_movie(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -107,9 +142,9 @@ class TMDBService:
         """
         Get detailed movie information
         """
-        return await self._request(f"movie/{tmdb_id}", {
-            "append_to_response": "credits,recommendations"
-        }, ttl=CACHE_TTL_SHORT)
+        return await self._request(
+            f"movie/{tmdb_id}", {"append_to_response": "credits,recommendations"}, ttl=CACHE_TTL_SHORT
+        )
 
     async def search_tv(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -126,9 +161,9 @@ class TMDBService:
         """
         Get detailed TV show information
         """
-        return await self._request(f"tv/{tmdb_id}", {
-            "append_to_response": "credits,recommendations"
-        }, ttl=CACHE_TTL_SHORT)
+        return await self._request(
+            f"tv/{tmdb_id}", {"append_to_response": "credits,recommendations"}, ttl=CACHE_TTL_SHORT
+        )
 
     async def get_tv_season(self, tmdb_id: int, season_number: int) -> Dict[str, Any]:
         """
@@ -263,8 +298,16 @@ class TMDBService:
             "production_companies": tmdb_data.get("production_companies", []),
             "production_countries": tmdb_data.get("production_countries", []),
             "spoken_languages": tmdb_data.get("spoken_languages", []),
-            "collection_id": tmdb_data.get("belongs_to_collection", {}).get("id") if tmdb_data.get("belongs_to_collection") else None,
-            "collection_name": tmdb_data.get("belongs_to_collection", {}).get("name") if tmdb_data.get("belongs_to_collection") else None,
+            "collection_id": (
+                tmdb_data.get("belongs_to_collection", {}).get("id")
+                if tmdb_data.get("belongs_to_collection")
+                else None
+            ),
+            "collection_name": (
+                tmdb_data.get("belongs_to_collection", {}).get("name")
+                if tmdb_data.get("belongs_to_collection")
+                else None
+            ),
         }
 
     def parse_tv_data(self, tmdb_data: Dict[str, Any]) -> Dict[str, Any]:

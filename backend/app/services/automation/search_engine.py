@@ -17,6 +17,7 @@ from app.services.indexers.yts import yts_indexer
 from app.services.indexers.nyaa import NyaaIndexer
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services import music_quality
+from app.services import release_index
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.core.cache import cacheGet, cacheSet
 from app.services.torrent_validator import validate_and_resume_torrent
@@ -39,6 +40,25 @@ _ITEM_TABLE = {
     "music": "albums",
     "track": "albums",
 }
+
+# Query-side synonyms per resolution. Indexer search is a plain keyword match, so a
+# release titled "4K UHD" never matches a "2160p" query. Targeted sweeps expand each
+# resolution into every naming variant. Result parsing already normalizes these back
+# (parse_quality), so filtering and scoring are unaffected.
+RESOLUTION_QUERY_SYNONYMS = {
+    "4320p": ["4320p", "8K"],
+    "2160p": ["2160p", "4K", "UHD"],
+    "1080p": ["1080p"],
+    "720p": ["720p"],
+    "576p": ["576p"],
+    "480p": ["480p"],
+    "360p": ["360p"],
+    "240p": ["240p"],
+}
+
+# Local index rows older than this are not trusted for automated downloads, since
+# their recorded seed counts may no longer reflect the swarm.
+LOCAL_INDEX_MAX_AGE_DAYS = 7
 
 
 async def _resolve_grab_folder(conn, media_type, media_id):
@@ -197,11 +217,15 @@ class SearchEngine:
         timeout: int = 30,
         max_results: int = 100,
         max_retries: int = 0,
+        search_stats: Optional[dict] = None,
     ) -> List[TorrentRelease]:
         """
         Search all enabled indexers in parallel.
         Returns combined and deduplicated results.
         Uses selected_indexers if provided, otherwise falls back to type-based defaults.
+        search_stats, when given, gets live_queries incremented for every sweep
+        that actually reaches the indexers. Cache hits and local-index answers
+        never count, so callers can rate-limit only real indexer traffic.
         """
         tasks = []
 
@@ -224,6 +248,9 @@ class SearchEngine:
         cached = await cacheGet(cache_key)
         if cached is not None:
             return [TorrentRelease.from_dict(item) for item in cached][:max_results]
+
+        if search_stats is not None:
+            search_stats["live_queries"] = search_stats.get("live_queries", 0) + 1
 
         for indexer in indexers:
             task = asyncio.create_task(
@@ -264,6 +291,10 @@ class SearchEngine:
 
             unique_releases.append(release)
 
+        # Persist everything the live sweep saw into the local release index so
+        # future searches can answer locally.
+        await release_index.upsertReleases(unique_releases)
+
         # Limit total results
         result = unique_releases[:max_results]
 
@@ -303,8 +334,56 @@ class SearchEngine:
             return
         try:
             await indexer.ensure_download_source(release)
+            # Remember the resolved magnet so a future pick of the same release
+            # from the local index skips the detail-page fetch entirely.
+            if release.magnet or release.torrent_url:
+                await release_index.upsertReleases([release])
         except Exception as e:
             print(f"Failed to resolve download source for '{release.title}': {e}")
+
+    def _filter_and_select(
+        self,
+        releases: List[TorrentRelease],
+        profile: MediaProfile,
+        media_type: Optional[str],
+        preferred_uploaders: Optional[List[str]],
+        blocked_uploaders: Optional[List[str]],
+        blocklisted_titles: Optional[set],
+    ) -> Optional[TorrentRelease]:
+        """
+        Apply the full profile gate (blocklist, minimum requirements, blocked
+        uploaders, anime rules) to a batch and return the highest-scoring release.
+        score_release ranks by the profile's preference order across resolution,
+        source, codec, audio, and HDR, so this preserves the cascade priorities.
+        """
+        filtered_releases = []
+        for release in releases:
+            # Skip releases the user has blocklisted for this item.
+            if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
+                continue
+
+            if not media_profile_service._meets_minimum_requirements(release, profile, media_type):
+                continue
+
+            if blocked_uploaders and release.uploader in blocked_uploaders:
+                continue
+
+            # Anime-specific filtering
+            if media_type == "anime" and not self._meets_anime_requirements(release, profile):
+                continue
+
+            filtered_releases.append(release)
+
+        if not filtered_releases:
+            return None
+
+        return media_profile_service.select_best_release(
+            filtered_releases,
+            profile,
+            preferred_uploaders,
+            blocked_uploaders,
+            media_type,
+        )
 
     async def cascading_search(
         self,
@@ -315,29 +394,27 @@ class SearchEngine:
         blocked_uploaders: Optional[List[str]] = None,
         media_type: Optional[str] = None,
         blocklisted_titles: Optional[set] = None,
+        search_stats: Optional[dict] = None,
     ) -> Optional[TorrentRelease]:
         """
-        Multi-dimensional cascading search
+        Broad-first cascading search.
 
-        Priority order (highest to lowest):
-        1. Resolution (from per-type resolutions, first = highest priority)
-        2. Source (from per-type sources, first = highest priority)
-        3. Codec (from per-type codecs, first = highest priority)
-        4. HDR (from per-type hdr_formats, first = highest priority)
-        5. Uploader (from profile.uploaders, first = highest priority)
+        Stage 1: the local release index, filtered and scored against the full
+                 profile. Zero indexer round trips when the answer is already known.
+        Stage 2: one broad live sweep (title only) of the selected indexers, with
+                 the whole profile cascade applied locally to the results. Because
+                 scoring ranks by the profile's preference order, this selects the
+                 same release the old per-combination sweeps would have chosen.
+        Stage 3: targeted gap sweeps, only when the broad results had nothing
+                 acceptable: resolution by resolution in profile priority order,
+                 expanded through naming synonyms (2160p also searches 4K and UHD),
+                 then per preferred uploader, cascading down exactly like before.
 
-        If value is in list: allowed
-        If value NOT in list: rejected
-        Position in list: determines search order (index 0 = try first)
-
-        Example: ["2160p", "1080p"] + ["BluRay", "WEB-DL"] cascades:
-        2160p BluRay -> 2160p WEB-DL -> 1080p BluRay -> 1080p WEB-DL
+        Sources, codecs, HDR, and audio remain hard gates and ranking dimensions
+        via the profile filter and score, they are just no longer query keywords,
+        which previously dropped any release whose title used a different spelling.
         """
-        # Use per-media-type settings (no fallback)
         resolution_order = self._get_quality_cascade(profile, media_type)
-        source_order = profile.get_sources_for_type(media_type) if media_type else []
-        codec_order = profile.get_codecs_for_type(media_type) if media_type else []
-        hdr_order = profile.get_hdr_formats_for_type(media_type) if media_type else []
         uploader_order = profile.uploaders or [None]
 
         # Get per-media-type indexers
@@ -347,98 +424,109 @@ class SearchEngine:
         search_timeout = profile.search_timeout
         max_results = profile.max_results
 
-        # Ensure we have at least [None] for empty lists so iteration works
-        source_order = source_order or [None]
-        codec_order = codec_order or [None]
-        hdr_order = hdr_order or [None]
-
         print(f"Cascading search: {base_query}")
         print(f"Resolution order: {resolution_order}")
-        print(f"Source order: {source_order}")
-        print(f"Codec order: {codec_order}")
-        print(f"HDR order: {hdr_order}")
         print(f"Uploader order: {uploader_order}")
         if selected_indexers:
             print(f"Selected indexers: {selected_indexers}")
 
-        # Multi-dimensional cascade
+        # Stage 1: local index. Skipped for anime because subtitle/audio metadata
+        # (hardsub, dual audio) only exists on live Nyaa results and the profile
+        # rules cannot be verified against index rows.
+        if media_type != "anime":
+            local_releases = await release_index.searchLocal(
+                base_query,
+                media_type=media_type,
+                limit=200,
+                max_age_days=LOCAL_INDEX_MAX_AGE_DAYS,
+            )
+            best_release = self._filter_and_select(
+                local_releases,
+                profile,
+                media_type,
+                preferred_uploaders,
+                blocked_uploaders,
+                blocklisted_titles,
+            )
+            if best_release:
+                print(
+                    f"[OK] Selected from local index: {best_release.title} ({best_release.quality}, {best_release.seeders} seeders)"
+                )
+                return best_release
+
+        # Stage 2: broad live sweep, filtered locally.
+        print(f"\nBroad query: {base_query}")
+        releases = await self.search_all_indexers(
+            base_query,
+            category,
+            limit_per_indexer=50,
+            media_type=media_type,
+            selected_indexers=selected_indexers,
+            timeout=search_timeout,
+            max_results=max_results,
+            max_retries=profile.max_retries,
+            search_stats=search_stats,
+        )
+        best_release = self._filter_and_select(
+            releases,
+            profile,
+            media_type,
+            preferred_uploaders,
+            blocked_uploaders,
+            blocklisted_titles,
+        )
+        if best_release:
+            print(
+                f"[OK] Selected from broad sweep: {best_release.title} ({best_release.quality}, {best_release.seeders} seeders)"
+            )
+            return best_release
+
+        # Stage 3: targeted gap sweeps per resolution synonym and uploader.
         for resolution in resolution_order:
-            for source in source_order:
-                for codec in codec_order:
-                    for hdr in hdr_order:
-                        for uploader in uploader_order:
-                            # Build query with all specified attributes
-                            query = f"{base_query} {resolution}"
-                            if source:
-                                query += f" {source}"
-                            if codec:
-                                query += f" {codec}"
-                            if hdr:
-                                query += f" {hdr}"
-                            if uploader:
-                                query += f" {uploader}"
+            for variant in RESOLUTION_QUERY_SYNONYMS.get(resolution, [resolution]):
+                for uploader in uploader_order:
+                    query = f"{base_query} {variant}"
+                    if uploader:
+                        query += f" {uploader}"
 
-                            print(f"\nQuery: {query}")
+                    print(f"\nQuery: {query}")
 
-                            # Search indexers with per-type selection and timing
-                            releases = await self.search_all_indexers(
-                                query,
-                                category,
-                                limit_per_indexer=50,
-                                media_type=media_type,
-                                selected_indexers=selected_indexers,
-                                timeout=search_timeout,
-                                max_results=max_results,
-                                max_retries=profile.max_retries,
-                            )
+                    releases = await self.search_all_indexers(
+                        query,
+                        category,
+                        limit_per_indexer=50,
+                        media_type=media_type,
+                        selected_indexers=selected_indexers,
+                        timeout=search_timeout,
+                        max_results=max_results,
+                        max_retries=profile.max_retries,
+                        search_stats=search_stats,
+                    )
 
-                            if not releases:
-                                continue
+                    if not releases:
+                        continue
 
-                            # Filter by profile requirements
-                            filtered_releases = []
-                            for release in releases:
-                                # Skip releases the user has blocklisted for this item.
-                                if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
-                                    continue
+                    best_release = self._filter_and_select(
+                        releases,
+                        profile,
+                        media_type,
+                        preferred_uploaders,
+                        blocked_uploaders,
+                        blocklisted_titles,
+                    )
 
-                                if not media_profile_service._meets_minimum_requirements(release, profile, media_type):
-                                    continue
+                    if not best_release:
+                        continue
 
-                                if blocked_uploaders and release.uploader in blocked_uploaders:
-                                    continue
+                    print(f"\n[OK] Selected: {best_release.title}")
+                    print(f"  Resolution: {best_release.quality}")
+                    print(f"  Source: {best_release.source}")
+                    print(f"  Codec: {best_release.codec}")
+                    print(f"  HDR: {best_release.hdr}")
+                    print(f"  Uploader: {best_release.uploader}")
+                    print(f"  Seeders: {best_release.seeders}")
 
-                                # Anime-specific filtering
-                                if media_type == "anime" and not self._meets_anime_requirements(release, profile):
-                                    continue
-
-                                filtered_releases.append(release)
-
-                            if not filtered_releases:
-                                continue
-
-                            # Score and select best from this batch
-                            best_release = media_profile_service.select_best_release(
-                                filtered_releases,
-                                profile,
-                                preferred_uploaders,
-                                blocked_uploaders,
-                                media_type,
-                            )
-
-                            if not best_release:
-                                continue
-
-                            # Found acceptable release!
-                            print(f"\n[OK] Selected: {best_release.title}")
-                            print(f"  Resolution: {best_release.quality}")
-                            print(f"  Source: {best_release.source}")
-                            print(f"  Codec: {best_release.codec}")
-                            print(f"  HDR: {best_release.hdr}")
-                            print(f"  Uploader: {best_release.uploader}")
-                            print(f"  Seeders: {best_release.seeders}")
-
-                            return best_release
+                    return best_release
 
         print(f"\n[FAIL] No acceptable release found")
         return None
@@ -474,6 +562,7 @@ class SearchEngine:
         current_quality: Optional[str] = None,
         grab_mode: str = "auto",
         upgrade_allowed: Optional[bool] = None,
+        search_stats: Optional[dict] = None,
     ) -> Optional[str]:
         """
         Search with cascading quality, select best, and download.
@@ -493,6 +582,7 @@ class SearchEngine:
             blocked_uploaders,
             media_type,
             blocklisted_titles=blocklisted_titles,
+            search_stats=search_stats,
         )
 
         if not best_release:
@@ -578,29 +668,40 @@ class SearchEngine:
 
     async def get_rss_updates(self) -> List[TorrentRelease]:
         """
-        Get recent releases from all indexers (RSS monitoring)
+        Get recent releases from all indexers (RSS monitoring).
+        Pulls the newest-uploads stream per category so shows, anime, and music are
+        covered rather than only movies, deduplicates across feeds, and persists
+        everything into the local release index.
         """
-        tasks = []
+        # (indexer, category) per feed. 1337x new-upload listings are per category,
+        # YTS covers movies, Nyaa's RSS covers anime.
+        feeds = [
+            (leetx_indexer, "movies"),
+            (leetx_indexer, "tv"),
+            (leetx_indexer, "anime"),
+            (leetx_indexer, "music"),
+            (yts_indexer, None),
+            (self.nyaa_indexer, None),
+        ]
 
-        # Get RSS from both general and anime indexers
-        all_indexers = self.general_indexers + self.anime_indexers
-
-        for indexer in all_indexers:
-            if hasattr(indexer, "get_rss"):
-                task = indexer.get_rss()
-                tasks.append(task)
-
-        if not tasks:
-            return []
-
+        tasks = [indexer.get_rss(category) for indexer, category in feeds]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_releases = []
+        seen_keys = set()
         for result in results:
             if isinstance(result, Exception):
                 print(f"Indexer RSS error: {result}")
                 continue
-            all_releases.extend(result)
+            for release in result:
+                key = release_index.dedupeKey(release)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                all_releases.append(release)
+
+        # Every RSS cycle grows the local index for free.
+        await release_index.upsertReleases(all_releases)
 
         return all_releases
 
@@ -669,6 +770,7 @@ class SearchEngine:
         blocked_uploaders: Optional[List[str]] = None,
         blocklisted_titles: Optional[set] = None,
         min_tier: Optional[str] = None,
+        search_stats: Optional[dict] = None,
     ) -> Optional[TorrentRelease]:
         """
         Music cascading search over the profile's allowed quality tiers, highest
@@ -707,6 +809,41 @@ class SearchEngine:
         if selected_indexers:
             print(f"Selected indexers: {selected_indexers}")
 
+        def music_filter(candidates):
+            """Blocklist, uploader, and tier gate shared by the local and live passes."""
+            kept = []
+            for release in candidates:
+                if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
+                    continue
+                if blocked_uploaders and release.uploader in blocked_uploaders:
+                    continue
+                tier = self._release_tier(release)
+                # Accept a release whose tier is unknown so a mislabeled torrent is not
+                # dropped, unless an allowed set or min_tier would exclude it.
+                if tier is not None:
+                    if tier not in allowed_set:
+                        continue
+                    if min_tier is not None and music_quality.rank(tier) <= music_quality.rank(min_tier):
+                        continue
+                elif min_tier is not None:
+                    continue
+                kept.append(release)
+            return kept
+
+        # Local index pass first: zero indexer round trips when the album is known.
+        local_candidates = music_filter(
+            await release_index.searchLocal(
+                query, media_type="music", limit=200, max_age_days=LOCAL_INDEX_MAX_AGE_DAYS
+            )
+        )
+        if local_candidates:
+            best_release = self._select_best_music_release(local_candidates, profile, preferred_uploaders)
+            if best_release:
+                print(
+                    f"[OK] Selected from local index: {best_release.title} (tier {self._release_tier(best_release)})"
+                )
+                return best_release
+
         for search_term in search_plan:
             search_query = f"{query} {search_term}".strip()
 
@@ -721,31 +858,13 @@ class SearchEngine:
                 timeout=search_timeout,
                 max_results=max_results,
                 max_retries=profile.max_retries,
+                search_stats=search_stats,
             )
 
             if not releases:
                 continue
 
-            filtered_releases = []
-            for release in releases:
-                # Skip releases the user has blocklisted for this album.
-                if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
-                    continue
-                if blocked_uploaders and release.uploader in blocked_uploaders:
-                    continue
-
-                tier = self._release_tier(release)
-                # Accept a release whose tier is unknown so a mislabeled torrent is not
-                # dropped, unless an allowed set or min_tier would exclude it.
-                if tier is not None:
-                    if tier not in allowed_set:
-                        continue
-                    if min_tier is not None and music_quality.rank(tier) <= music_quality.rank(min_tier):
-                        continue
-                elif min_tier is not None:
-                    continue
-
-                filtered_releases.append(release)
+            filtered_releases = music_filter(releases)
 
             if not filtered_releases:
                 continue
@@ -811,6 +930,7 @@ class SearchEngine:
         current_quality: Optional[str] = None,
         grab_mode: str = "auto",
         upgrade_allowed: Optional[bool] = None,
+        search_stats: Optional[dict] = None,
     ) -> Optional[str]:
         """
         Search for music across the profile's quality tiers, select the best release,
@@ -830,6 +950,7 @@ class SearchEngine:
             blocked_uploaders,
             blocklisted_titles=blocklisted_titles,
             min_tier=current_quality if upgrade else None,
+            search_stats=search_stats,
         )
 
         if not best_release:

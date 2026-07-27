@@ -97,6 +97,20 @@ async def cacheDelete(key: str) -> bool:
         return False
 
 
+async def cacheIncr(key: str) -> Optional[int]:
+    """
+    Atomically increment an integer key and return the new value
+    Returns None if Dragonfly is unavailable
+    """
+    try:
+        client = await getCacheClient()
+        if not client:
+            return None
+        return await client.incr(key)
+    except Exception:
+        return None
+
+
 async def cacheExists(key: str) -> bool:
     """
     Check if key exists in cache

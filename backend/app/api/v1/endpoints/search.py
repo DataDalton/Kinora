@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+import asyncio
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException, status
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 import asyncpg
@@ -36,6 +38,10 @@ class InteractiveSearchRequest(BaseModel):
     episode_id: Optional[int] = None
     indexers: Optional[List[str]] = None  # Which indexers to search (None = all available)
     quality: Optional[str] = None  # Quality to append to search query (e.g., "1080p")
+    # When True, answer purely from the local release index without touching any
+    # indexer. The modal fires this first for instant results while the live sweep
+    # runs as a second request.
+    local_only: bool = False
 
 
 class DownloadReleaseRequest(BaseModel):
@@ -97,155 +103,215 @@ async def _apply_manual_grab_state(conn, data, profile):
     return meets, monitoring
 
 
+async def _searchMovies(query: str) -> List[Dict[str, Any]]:
+    """Search TMDB movies and format for the combined search response."""
+    movie_results = await tmdb_service.search_movie(query)
+    return [
+        {
+            "id": movie.get("id"),
+            "title": movie.get("title"),
+            "name": movie.get("title"),
+            "original_title": movie.get("original_title"),
+            "overview": movie.get("overview"),
+            "poster_path": movie.get("poster_path"),
+            "backdrop_path": movie.get("backdrop_path"),
+            "release_date": movie.get("release_date"),
+            "vote_average": movie.get("vote_average", 0),
+            "popularity": movie.get("popularity"),
+            "media_type": "movie",
+        }
+        for movie in movie_results
+    ]
+
+
+async def _searchShows(query: str) -> List[Dict[str, Any]]:
+    """Search TMDB TV shows and format for the combined search response."""
+    show_results = await tmdb_service.search_tv(query)
+    return [
+        {
+            "id": show.get("id"),
+            "title": show.get("name"),
+            "name": show.get("name"),
+            "original_title": show.get("original_name"),
+            "overview": show.get("overview"),
+            "poster_path": show.get("poster_path"),
+            "backdrop_path": show.get("backdrop_path"),
+            "first_air_date": show.get("first_air_date"),
+            "vote_average": show.get("vote_average", 0),
+            "popularity": show.get("popularity"),
+            "media_type": "show",
+        }
+        for show in show_results
+    ]
+
+
+async def _searchAnime(query: str) -> List[Dict[str, Any]]:
+    """Search Anilist and format for the combined search response."""
+    anime_results = await anilist_service.search_anime(query)
+    results = []
+    for anime in anime_results:
+        title = anime.get("title", {})
+        anime_title = title.get("english") or title.get("romaji")
+
+        start_date = anilist_service._parse_anilist_date(anime.get("startDate"))
+        release_date_str = start_date.strftime("%Y-%m-%d") if start_date else None
+
+        results.append(
+            {
+                "id": anime.get("id"),
+                "title": anime_title,
+                "name": anime_title,
+                "original_title": title.get("native"),
+                "overview": anime.get("description"),
+                "poster_path": anime.get("coverImage", {}).get("large"),
+                "backdrop_path": anime.get("bannerImage"),
+                "release_date": release_date_str,
+                "vote_average": anime.get("averageScore") / 10 if anime.get("averageScore") else 0,
+                "popularity": anime.get("popularity"),
+                "media_type": "anime",
+                "anilist_id": anime.get("id"),
+                "mal_id": anime.get("idMal"),
+            }
+        )
+    return results
+
+
+async def _searchDeezerAlbums(query: str) -> List[Dict[str, Any]]:
+    """Search Deezer albums and format for the combined search response."""
+    album_results = await deezer_service.search_album(query, limit=10)
+    results = []
+    for album in album_results:
+        artist = album.get("artist", {})
+        results.append(
+            {
+                "id": album.get("id"),
+                "title": album.get("title"),
+                "name": album.get("title"),
+                "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
+                "backdrop_path": album.get("cover_xl"),
+                "release_date": album.get("release_date"),
+                "vote_average": 0,
+                "popularity": 0,
+                "media_type": "album",
+                "deezer_id": album.get("id"),
+                "artist_name": artist.get("name"),
+                "artist_id": artist.get("id"),
+                "nb_tracks": album.get("nb_tracks"),
+            }
+        )
+    return results
+
+
+async def _searchDeezerTracks(query: str) -> List[Dict[str, Any]]:
+    """Search Deezer tracks and format for the combined search response."""
+    track_results = await deezer_service.search_track(query, limit=10)
+    results = []
+    for track in track_results:
+        artist = track.get("artist", {})
+        album = track.get("album", {})
+        results.append(
+            {
+                "id": track.get("id"),
+                "title": track.get("title"),
+                "name": track.get("title"),
+                "overview": f"by {artist.get('name', 'Unknown Artist')}",
+                "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
+                "backdrop_path": album.get("cover_xl"),
+                "vote_average": 0,
+                "popularity": 0,
+                "media_type": "track",
+                "deezer_id": track.get("id"),
+                "artist_name": artist.get("name"),
+                "artist_id": artist.get("id"),
+                "album_name": album.get("title"),
+                "album_id": album.get("id"),
+                "duration": track.get("duration"),
+            }
+        )
+    return results
+
+
+async def _searchDeezerArtists(query: str) -> List[Dict[str, Any]]:
+    """Search Deezer artists and format for the combined search response."""
+    artist_results = await deezer_service.search_artist(query, limit=5)
+    return [
+        {
+            "id": artist.get("id"),
+            "title": artist.get("name"),
+            "name": artist.get("name"),
+            "overview": f"{artist.get('nb_album', 0)} albums",
+            "poster_path": artist.get("picture_xl") or artist.get("picture_big") or artist.get("picture_medium"),
+            "backdrop_path": artist.get("picture_xl"),
+            "vote_average": 0,
+            "popularity": 0,
+            "media_type": "artist",
+            "deezer_id": artist.get("id"),
+            "nb_album": artist.get("nb_album"),
+        }
+        for artist in artist_results
+    ]
+
+
+async def _prefetch_top_details(results: List[Dict[str, Any]]) -> None:
+    """
+    Warm the detail caches for the top visible search results so opening one of
+    them answers locally. Runs after the response is sent; every fetch goes
+    through the normal cached service methods, so already-warm items cost nothing.
+    """
+    try:
+        movie_ids = [r["id"] for r in results if r.get("media_type") == "movie" and r.get("id")][:5]
+        show_ids = [r["id"] for r in results if r.get("media_type") == "show" and r.get("id")][:5]
+        anime_ids = [r["id"] for r in results if r.get("media_type") == "anime" and r.get("id")][:3]
+
+        fetchers = (
+            [tmdb_service.get_movie(mid) for mid in movie_ids]
+            + [tmdb_service.get_tv(sid) for sid in show_ids]
+            + [anilist_service.get_anime(aid) for aid in anime_ids]
+        )
+        if fetchers:
+            await asyncio.gather(*fetchers, return_exceptions=True)
+    except Exception as e:
+        print(f"Detail prefetch error: {e}")
+
+
 @router.get("/")
 async def search_media(
+    background_tasks: BackgroundTasks,
     query: str = Query(..., min_length=1),
     media_type: str = Query("all", pattern="^(all|movie|show|anime|music)$"),
     current_user: User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """
-    Search for media across TMDB and Anilist based on media type
+    Search for media across TMDB, Anilist, and Deezer based on media type.
+    All provider calls run concurrently, and a failing provider is skipped
+    instead of blanking the whole response.
     """
-    results = []
+    fetchers = []
+    if media_type in ["all", "movie"]:
+        fetchers.append(_searchMovies(query))
+    if media_type in ["all", "show"]:
+        fetchers.append(_searchShows(query))
+    if media_type in ["all", "anime"]:
+        fetchers.append(_searchAnime(query))
+    if media_type in ["all", "music"]:
+        fetchers.append(_searchDeezerAlbums(query))
+        fetchers.append(_searchDeezerTracks(query))
+        fetchers.append(_searchDeezerArtists(query))
 
-    try:
-        if media_type in ["all", "movie"]:
-            movie_results = await tmdb_service.search_movie(query)
-            for movie in movie_results:
-                results.append(
-                    {
-                        "id": movie.get("id"),
-                        "title": movie.get("title"),
-                        "name": movie.get("title"),
-                        "original_title": movie.get("original_title"),
-                        "overview": movie.get("overview"),
-                        "poster_path": movie.get("poster_path"),
-                        "backdrop_path": movie.get("backdrop_path"),
-                        "release_date": movie.get("release_date"),
-                        "vote_average": movie.get("vote_average", 0),
-                        "popularity": movie.get("popularity"),
-                        "media_type": "movie",
-                    }
-                )
+    provider_results = await asyncio.gather(*fetchers, return_exceptions=True)
 
-        if media_type in ["all", "show"]:
-            show_results = await tmdb_service.search_tv(query)
-            for show in show_results:
-                results.append(
-                    {
-                        "id": show.get("id"),
-                        "title": show.get("name"),
-                        "name": show.get("name"),
-                        "original_title": show.get("original_name"),
-                        "overview": show.get("overview"),
-                        "poster_path": show.get("poster_path"),
-                        "backdrop_path": show.get("backdrop_path"),
-                        "first_air_date": show.get("first_air_date"),
-                        "vote_average": show.get("vote_average", 0),
-                        "popularity": show.get("popularity"),
-                        "media_type": "show",
-                    }
-                )
+    results: List[Dict[str, Any]] = []
+    for provider_result in provider_results:
+        if isinstance(provider_result, Exception):
+            print(f"Search provider error: {provider_result}")
+            continue
+        results.extend(provider_result)
 
-        if media_type in ["all", "anime"]:
-            anime_results = await anilist_service.search_anime(query)
-            for anime in anime_results:
-                title = anime.get("title", {})
-                anime_title = title.get("english") or title.get("romaji")
+    results.sort(key=lambda x: x.get("popularity", 0) or 0, reverse=True)
 
-                start_date = anilist_service._parse_anilist_date(anime.get("startDate"))
-                release_date_str = start_date.strftime("%Y-%m-%d") if start_date else None
-
-                results.append(
-                    {
-                        "id": anime.get("id"),
-                        "title": anime_title,
-                        "name": anime_title,
-                        "original_title": title.get("native"),
-                        "overview": anime.get("description"),
-                        "poster_path": anime.get("coverImage", {}).get("large"),
-                        "backdrop_path": anime.get("bannerImage"),
-                        "release_date": release_date_str,
-                        "vote_average": anime.get("averageScore") / 10 if anime.get("averageScore") else 0,
-                        "popularity": anime.get("popularity"),
-                        "media_type": "anime",
-                        "anilist_id": anime.get("id"),
-                        "mal_id": anime.get("idMal"),
-                    }
-                )
-
-        if media_type in ["all", "music"]:
-            album_results = await deezer_service.search_album(query, limit=10)
-            for album in album_results:
-                artist = album.get("artist", {})
-                results.append(
-                    {
-                        "id": album.get("id"),
-                        "title": album.get("title"),
-                        "name": album.get("title"),
-                        "overview": f"by {artist.get('name', 'Unknown Artist')}",
-                        "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
-                        "backdrop_path": album.get("cover_xl"),
-                        "release_date": album.get("release_date"),
-                        "vote_average": 0,
-                        "popularity": 0,
-                        "media_type": "album",
-                        "deezer_id": album.get("id"),
-                        "artist_name": artist.get("name"),
-                        "artist_id": artist.get("id"),
-                        "nb_tracks": album.get("nb_tracks"),
-                    }
-                )
-
-            track_results = await deezer_service.search_track(query, limit=10)
-            for track in track_results:
-                artist = track.get("artist", {})
-                album = track.get("album", {})
-                results.append(
-                    {
-                        "id": track.get("id"),
-                        "title": track.get("title"),
-                        "name": track.get("title"),
-                        "overview": f"by {artist.get('name', 'Unknown Artist')}",
-                        "poster_path": album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium"),
-                        "backdrop_path": album.get("cover_xl"),
-                        "vote_average": 0,
-                        "popularity": 0,
-                        "media_type": "track",
-                        "deezer_id": track.get("id"),
-                        "artist_name": artist.get("name"),
-                        "artist_id": artist.get("id"),
-                        "album_name": album.get("title"),
-                        "album_id": album.get("id"),
-                        "duration": track.get("duration"),
-                    }
-                )
-
-            artist_results = await deezer_service.search_artist(query, limit=5)
-            for artist in artist_results:
-                results.append(
-                    {
-                        "id": artist.get("id"),
-                        "title": artist.get("name"),
-                        "name": artist.get("name"),
-                        "overview": f"{artist.get('nb_album', 0)} albums",
-                        "poster_path": artist.get("picture_xl")
-                        or artist.get("picture_big")
-                        or artist.get("picture_medium"),
-                        "backdrop_path": artist.get("picture_xl"),
-                        "vote_average": 0,
-                        "popularity": 0,
-                        "media_type": "artist",
-                        "deezer_id": artist.get("id"),
-                        "nb_album": artist.get("nb_album"),
-                    }
-                )
-
-        results.sort(key=lambda x: x.get("popularity", 0), reverse=True)
-
-    except Exception as e:
-        print(f"Search error: {e}")
-        return []
+    # One hop ahead: warm detail caches for the results the user is looking at.
+    background_tasks.add_task(_prefetch_top_details, results)
 
     return results
 
@@ -337,9 +403,11 @@ async def get_media_details(
             }
 
         elif media_type == "artist":
-            details = await deezer_service.get_artist(media_id)
-            top_tracks = await deezer_service.get_artist_top_tracks(media_id, limit=10)
-            albums = await deezer_service.get_artist_albums(media_id, limit=12)
+            details, top_tracks, albums = await asyncio.gather(
+                deezer_service.get_artist(media_id),
+                deezer_service.get_artist_top_tracks(media_id, limit=10),
+                deezer_service.get_artist_albums(media_id, limit=12),
+            )
 
             return {
                 "id": media_id,
@@ -613,22 +681,75 @@ async def get_search_options(
     }
 
 
+def _format_interactive_release(release, from_cache: bool = False) -> Dict[str, Any]:
+    """Convert a TorrentRelease into the interactive search response shape."""
+    upload_date_str = ""
+    if release.upload_date:
+        upload_date_str = release.upload_date.isoformat()
+
+    last_seen_at = ""
+    if isinstance(release.raw_data, dict):
+        last_seen_at = release.raw_data.get("last_seen_at") or ""
+
+    return {
+        "title": release.title,
+        "size": release.size or 0,
+        "seeders": release.seeders,
+        "leechers": release.leechers,
+        "quality": release.quality or "Unknown",
+        "source": release.source or "",
+        "indexer": release.indexer,
+        "indexer_page_url": release.detail_url or "",
+        "torrent_url": release.torrent_url or "",
+        "magnet_link": release.magnet or "",
+        "info_hash": release.info_hash or "",
+        "upload_date": upload_date_str,
+        "uploader": release.uploader or "",
+        "from_cache": from_cache,
+        "last_seen_at": last_seen_at,
+    }
+
+
 @router.post("/interactive")
 async def interactive_search(
     data: InteractiveSearchRequest,
     current_user: User = Depends(get_current_user),
 ):
     """
-    Search indexers for releases matching the query.
-    Respects indexer selection and quality filters.
+    Search for releases matching the query. With local_only, answers instantly from
+    the local release index. Otherwise runs a live sweep of the selected indexers in
+    parallel, persists everything seen into the index, and merges in any additional
+    index-only rows so the response is a superset of both.
     """
+    from app.services import release_index
+
     indexer_status = []
     all_releases = []
 
-    # Build search query with optional quality filter
-    search_query = data.query
-    if data.quality and data.quality.lower() != "all":
-        search_query = f"{data.query} {data.quality}"
+    # The quality filter is a text token for the live keyword sweep, but a
+    # structured column filter for the local index, where ingest parsing already
+    # normalized "4K"/"UHD" titles to 2160p. The local pass therefore returns
+    # releases the literal keyword search cannot.
+    quality_filter = data.quality if data.quality and data.quality.lower() != "all" else None
+    search_query = f"{data.query} {quality_filter}" if quality_filter else data.query
+
+    # Instant local pass. No indexer round trips, no FlareSolverr. Honors an
+    # explicit indexer selection so a filtered search never shows rows from
+    # deselected indexers.
+    if data.local_only:
+        local_releases = await release_index.searchLocal(
+            data.query, media_type=data.media_type, limit=100, quality=quality_filter
+        )
+        if data.indexers:
+            allowed_indexers = set(data.indexers)
+            local_releases = [r for r in local_releases if r.indexer in allowed_indexers]
+        local_results = [_format_interactive_release(r, from_cache=True) for r in local_releases]
+        local_results.sort(key=lambda x: x["seeders"], reverse=True)
+        return {
+            "results": local_results,
+            "indexers": [{"name": "Local index", "status": "success", "count": len(local_results)}],
+            "source": "local",
+        }
 
     # Build indexer map from search engine's actual indexers
     indexer_map = {}
@@ -657,24 +778,17 @@ async def interactive_search(
     # Filter to only valid indexers
     valid_indexers = [i for i in selected_indexers if i in indexer_map]
 
-    # Search each selected indexer
-    for indexer_name in valid_indexers:
-        indexer, category = indexer_map.get(indexer_name, (None, None))
-        if not indexer:
-            continue
+    # Search all selected indexers concurrently. Results stay live (no cache), the
+    # total wait is the slowest indexer instead of the sum of all of them.
+    search_tasks = [
+        indexer_map[indexer_name][0].search(search_query, indexer_map[indexer_name][1], limit=50)
+        for indexer_name in valid_indexers
+    ]
+    search_outcomes = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-        try:
-            releases = await indexer.search(search_query, category, limit=50)
-            all_releases.extend(releases)
-            indexer_status.append(
-                {
-                    "name": indexer_name,
-                    "status": "success",
-                    "count": len(releases),
-                }
-            )
-        except Exception as e:
-            error_msg = str(e)
+    for indexer_name, outcome in zip(valid_indexers, search_outcomes):
+        if isinstance(outcome, Exception):
+            error_msg = str(outcome)
             # Provide user-friendly error messages
             if "FlareSolverr" in error_msg or "flaresolverr" in error_msg.lower():
                 error_msg = "FlareSolverr not configured or unavailable"
@@ -691,7 +805,17 @@ async def interactive_search(
                     "count": 0,
                 }
             )
-            print(f"Indexer {indexer_name} error: {e}")
+            print(f"Indexer {indexer_name} error: {outcome}")
+            continue
+
+        all_releases.extend(outcome)
+        indexer_status.append(
+            {
+                "name": indexer_name,
+                "status": "success",
+                "count": len(outcome),
+            }
+        )
 
     # Deduplicate by info_hash
     seen_hashes = set()
@@ -703,30 +827,23 @@ async def interactive_search(
             seen_hashes.add(release.info_hash)
         unique_releases.append(release)
 
-    # Convert TorrentRelease objects to frontend format
-    results = []
-    for release in unique_releases:
-        upload_date_str = ""
-        if release.upload_date:
-            upload_date_str = release.upload_date.isoformat()
+    # Persist the live sweep into the local index.
+    await release_index.upsertReleases(unique_releases)
 
-        results.append(
-            {
-                "title": release.title,
-                "size": release.size or 0,
-                "seeders": release.seeders,
-                "leechers": release.leechers,
-                "quality": release.quality or "Unknown",
-                "source": release.source or "",
-                "indexer": release.indexer,
-                "indexer_page_url": release.detail_url or "",
-                "torrent_url": release.torrent_url or "",
-                "magnet_link": release.magnet or "",
-                "info_hash": release.info_hash or "",
-                "upload_date": upload_date_str,
-                "uploader": release.uploader or "",
-            }
-        )
+    # Merge in index rows the live sweep did not return (from a failed indexer, an
+    # earlier RSS pull, or a prior search), so the response never loses a known
+    # release. Live rows win on identity collisions.
+    live_keys = {release_index.dedupeKey(r) for r in unique_releases}
+    local_releases = await release_index.searchLocal(
+        data.query, media_type=data.media_type, limit=100, quality=quality_filter
+    )
+    if data.indexers:
+        allowed_indexers = set(data.indexers)
+        local_releases = [r for r in local_releases if r.indexer in allowed_indexers]
+    index_extras = [r for r in local_releases if release_index.dedupeKey(r) not in live_keys]
+
+    results = [_format_interactive_release(r, from_cache=False) for r in unique_releases]
+    results.extend(_format_interactive_release(r, from_cache=True) for r in index_extras)
 
     # Sort by seeders descending
     results.sort(key=lambda x: x["seeders"], reverse=True)
@@ -734,6 +851,7 @@ async def interactive_search(
     return {
         "results": results,
         "indexers": indexer_status,
+        "source": "live",
     }
 
 

@@ -5,6 +5,7 @@ from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
 from app.services.automation.search_engine import search_engine
 from app.services.media_profile import MediaProfile
+from app.services.search_backoff import eligibilityClause, recordSearchAttempt
 from app.core.cache import cacheSet
 
 
@@ -32,14 +33,17 @@ async def async_search_wanted_media():
         pool = await get_pool()
 
         async with pool.acquire() as conn:
-            # Get all wanted movies with their media profiles using JOIN
-            wantedMoviesWithProfiles = await conn.fetch("""
+            # Wanted movies that are due for another search under the age-based
+            # backoff. Never-searched items come first, then the least recently
+            # searched, so every item cycles through fairly.
+            wantedMoviesWithProfiles = await conn.fetch(f"""
                 SELECT m.id, m.title, m.release_date, m.media_profile_id
                 FROM movies m
                 INNER JOIN media_profiles mp ON m.media_profile_id = mp.id
                 WHERE m.monitored = TRUE AND m.has_file = FALSE
                   AND m.status NOT IN ('downloading', 'processing')
-                ORDER BY m.popularity DESC NULLS LAST
+                  AND {eligibilityClause("m", "release_date")}
+                ORDER BY m.last_search_at ASC NULLS FIRST, m.popularity DESC NULLS LAST
                 LIMIT 50
                 """)
 
@@ -62,6 +66,7 @@ async def async_search_wanted_media():
                     continue
 
                 # Search and download
+                searchStats = {}
                 try:
                     torrent_hash = await search_engine.search_and_download(
                         query=query,
@@ -71,7 +76,10 @@ async def async_search_wanted_media():
                         media_type="movie",
                         history_conn=conn,
                         history_media_id=movie["id"],
+                        search_stats=searchStats,
                     )
+
+                    await recordSearchAttempt(conn, "movies", movie["id"], found=bool(torrent_hash))
 
                     if torrent_hash:
                         # The engine records download_history (with re-addable source).
@@ -91,8 +99,10 @@ async def async_search_wanted_media():
                     print(f"Error searching for {query}: {e}")
                     continue
 
-                # Small delay to avoid hammering indexers
-                await asyncio.sleep(2)
+                # Pause only when live indexer queries actually ran. Items answered
+                # from the local index or the short-lived search cache cost nothing.
+                if searchStats.get("live_queries"):
+                    await asyncio.sleep(2)
 
         return {
             "status": "success",

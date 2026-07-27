@@ -3,6 +3,14 @@ from datetime import datetime
 
 from app.core.cache import cacheGet, cacheSet, CACHE_TTL_LONG
 from app.core.http_client import http_get
+from app.services import metadata_cache
+
+# Detail records (artist/album/track) are effectively immutable, so their
+# persistent rows stay valid for a week. Searches and charts keep the normal TTL.
+DETAIL_PERSIST_TTL = 7 * 86400
+
+# Endpoint prefixes whose payloads change over time and keep the short TTL.
+_VOLATILE_PREFIXES = ("search/", "chart", "editorial/", "genre", "radio")
 
 
 class DeezerService:
@@ -15,25 +23,41 @@ class DeezerService:
 
     async def _request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Make a request to Deezer API with caching using shared HTTP client
-        Music metadata is static so all requests use 6-hour cache TTL
+        Make a request to Deezer API with two-tier caching: Dragonfly first, then
+        the persistent metadata_cache table, then the network. A stale persistent
+        row is served if Deezer is unreachable.
         """
         if params is None:
             params = {}
 
-        cache_key = f"deezer:{endpoint}:{str(params)}"
+        cache_key = f"deezer:{endpoint}:{str(dict(sorted(params.items())))}"
         cached = await cacheGet(cache_key)
         if cached:
             return cached
 
-        response = await http_get(f"{self.BASE_URL}/{endpoint}", params=params)
-        response.raise_for_status()
-        data = response.json()
+        persisted = await metadata_cache.getFresh(cache_key)
+        if persisted is not None:
+            await cacheSet(cache_key, persisted, expire=CACHE_TTL_LONG)
+            return persisted
+
+        try:
+            response = await http_get(f"{self.BASE_URL}/{endpoint}", params=params)
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            stale = await metadata_cache.getStale(cache_key)
+            if stale is not None:
+                return stale
+            raise
 
         if "error" in data:
             raise ValueError(f"Deezer API error: {data['error'].get('message', 'Unknown error')}")
 
+        is_volatile = endpoint.startswith(_VOLATILE_PREFIXES)
+        persist_ttl = CACHE_TTL_LONG if is_volatile else DETAIL_PERSIST_TTL
+
         await cacheSet(cache_key, data, expire=CACHE_TTL_LONG)
+        await metadata_cache.setCached(cache_key, "deezer", data, persist_ttl)
         return data
 
     async def search_artist(self, query: str, limit: int = 25) -> List[Dict[str, Any]]:

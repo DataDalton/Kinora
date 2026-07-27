@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 import asyncpg
 
 from app.db import get_db
+from app.core.cache import cacheGet, cacheSet, cacheDelete
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.download_clients.base import TorrentInfo, TorrentState
 from app.api.v1.endpoints.auth import get_current_user, require_permission
@@ -22,6 +23,19 @@ from app.schemas.user import User, UserWithPermissions
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Snapshot cache so N open clients polling every few seconds share one qBittorrent
+# conversation instead of each proxying their own. The TTL matches the frontend poll
+# cadence, and any control action drops the snapshots so the next poll is live.
+SNAPSHOT_TTL = 3
+SNAPSHOT_TORRENTS_KEY = "qbt:snapshot:torrents"
+SNAPSHOT_STATS_KEY = "qbt:snapshot:stats"
+
+
+async def _invalidateSnapshots() -> None:
+    """Drop the torrent-list and stats snapshots after a state-changing action."""
+    await cacheDelete(SNAPSHOT_TORRENTS_KEY)
+    await cacheDelete(SNAPSHOT_STATS_KEY)
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +131,10 @@ async def list_torrents(
     List all torrents in the download client, merged with Kinora download history
     so each entry carries media context and validation state.
     """
+    snapshot = await cacheGet(SNAPSHOT_TORRENTS_KEY)
+    if snapshot is not None:
+        return snapshot
+
     client = await get_qbittorrent_client()
     if not client:
         return {"configured": False, "torrents": []}
@@ -163,7 +181,9 @@ async def list_torrents(
             entry["validation_report"] = None
         result.append(entry)
 
-    return {"configured": True, "torrents": result}
+    response = {"configured": True, "torrents": result}
+    await cacheSet(SNAPSHOT_TORRENTS_KEY, response, expire=SNAPSHOT_TTL)
+    return response
 
 
 @router.get("/stats")
@@ -171,6 +191,10 @@ async def get_download_stats(
     current_user: User = Depends(get_current_user),
 ):
     """Aggregate live stats for the download client (speeds, totals, group counts)."""
+    snapshot = await cacheGet(SNAPSHOT_STATS_KEY)
+    if snapshot is not None:
+        return snapshot
+
     client = await get_qbittorrent_client()
     if not client:
         return {"configured": False}
@@ -186,7 +210,7 @@ async def get_download_stats(
     for torrent in torrents:
         counts[_group_for_state(torrent.state.value)] += 1
 
-    return {
+    response = {
         "configured": True,
         "download_speed": transfer.get("dl_info_speed", 0),
         "upload_speed": transfer.get("up_info_speed", 0),
@@ -199,6 +223,8 @@ async def get_download_stats(
         "dht_nodes": transfer.get("dht_nodes", 0),
         "counts": counts,
     }
+    await cacheSet(SNAPSHOT_STATS_KEY, response, expire=SNAPSHOT_TTL)
+    return response
 
 
 @router.get("/history-stats")
@@ -326,6 +352,7 @@ async def pause_torrent(
 ):
     client = await _get_client_or_503()
     await client.pause_torrent(torrent_hash)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -336,6 +363,7 @@ async def resume_torrent(
 ):
     client = await _get_client_or_503()
     await client.resume_torrent(torrent_hash)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -346,6 +374,7 @@ async def recheck_torrent(
 ):
     client = await _get_client_or_503()
     await client.recheck_torrent(torrent_hash)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -356,6 +385,7 @@ async def reannounce_torrent(
 ):
     client = await _get_client_or_503()
     await client.reannounce_torrent(torrent_hash)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -367,6 +397,7 @@ async def force_start_torrent(
 ):
     client = await _get_client_or_503()
     await client.set_force_start(torrent_hash, body.enabled)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -378,6 +409,7 @@ async def super_seeding_torrent(
 ):
     client = await _get_client_or_503()
     await client.set_super_seeding(torrent_hash, body.enabled)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -389,6 +421,7 @@ async def sequential_torrent(
 ):
     client = await _get_client_or_503()
     await client.set_sequential_download(torrent_hash, body.enabled)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -400,6 +433,7 @@ async def queue_torrent(
 ):
     client = await _get_client_or_503()
     await client.set_queue_priority(torrent_hash, body.action)
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -416,6 +450,7 @@ async def set_torrent_share_limits(
         seeding_time_limit=body.seeding_time_limit,
         inactive_seeding_time_limit=body.inactive_seeding_time_limit,
     )
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -429,6 +464,7 @@ async def set_torrent_speed_limits(
     await client.set_torrent_speed_limits(
         torrent_hash, download_limit=body.download_limit, upload_limit=body.upload_limit
     )
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -441,6 +477,7 @@ async def set_global_speed_limits(
     await client.set_global_speed_limits(
         download_limit=body.download_limit, upload_limit=body.upload_limit
     )
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -451,6 +488,7 @@ async def toggle_alt_speed(
     client = await _get_client_or_503()
     await client.toggle_alternative_speed_limits()
     transfer = await client.get_transfer_info()
+    await _invalidateSnapshots()
     return {"success": True, "alt_speed_enabled": bool(transfer.get("use_alt_speed_limits", False))}
 
 
@@ -467,6 +505,7 @@ async def delete_torrent(
         "UPDATE download_history SET status = 'removed', updated_at = NOW() WHERE torrent_hash = $1",
         torrent_hash,
     )
+    await _invalidateSnapshots()
     return {"success": True}
 
 
@@ -528,6 +567,7 @@ async def add_torrent(
             torrent_hash,
         )
 
+    await _invalidateSnapshots()
     return {"success": True, "hash": torrent_hash}
 
 
@@ -941,6 +981,7 @@ async def re_add_source(
         "UPDATE download_history SET status = 'downloading', torrent_hash = $1, progress = 0.0, updated_at = NOW() WHERE id = $2",
         torrent_hash, history_id,
     )
+    await _invalidateSnapshots()
     return {"success": True, "hash": torrent_hash}
 
 

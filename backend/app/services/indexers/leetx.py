@@ -326,35 +326,78 @@ class LeetxIndexer(BaseIndexer):
 
         return None
 
+    # Pages fetched when the index has never seen this indexer (first run): a
+    # bounded seed window instead of crawling the whole site.
+    SEED_FEED_PAGES = 5
+    # Runaway valve, not a coverage limit. Paging normally stops at the first page
+    # that overlaps the index; this bound (50 pages = 1000 uploads per category per
+    # cycle) only prevents a full-site crawl if overlap can never occur, for
+    # example after the releases table is emptied mid-cycle.
+    RUNAWAY_PAGE_LIMIT = 50
+
     async def get_rss(self, category: Optional[str] = None) -> List[TorrentRelease]:
         """
-        Get recent uploads from 1337x (RSS not directly supported, use trending instead)
+        Get the newest uploads for a category. 1337x has no RSS feed, so this reads
+        the category listing sorted by upload time descending, which is the actual
+        new-uploads stream rather than the trending page.
+
+        The listing serves 20 rows per page, so a fixed page count would miss
+        uploads during bursts. Instead this pages until a page overlaps releases
+        already present in the local index, meaning the gap since the previous
+        cycle is fully covered, however deep it is. A first run seeds a bounded
+        window, and an unreachable index stops paging conservatively.
         """
+        from app.services import release_index
+
         releases = []
 
         try:
-            category_path = self.categories.get(category, "movies") if category else "movies"
-            trending_url = f"{self.current_url}/trending/d/{category_path}/"
+            category_path = self.categories.get(category, "Movies") if category else "Movies"
 
-            html = await self._fetch_html(trending_url)
-            soup = BeautifulSoup(html, "lxml")
+            seeded = await release_index.hasReleasesFromIndexer(self.name)
+            if seeded is False:
+                # First run: nothing to overlap with, seed a bounded window.
+                max_pages = self.SEED_FEED_PAGES
+            elif seeded is None:
+                # Index unreachable: overlap cannot be detected, stay conservative.
+                max_pages = 2
+            else:
+                max_pages = self.RUNAWAY_PAGE_LIMIT
 
-            table = soup.find("table", class_="table-list")
-            if not table:
-                return releases
+            for page in range(1, max_pages + 1):
+                latest_url = f"{self.current_url}/cat/{category_path}/time/desc/{page}/"
 
-            rows = table.find_all("tr")[1:]
+                html = await self._fetch_html(latest_url)
+                soup = BeautifulSoup(html, "lxml")
 
-            for row in rows[:50]:  # Limit to 50 recent items
-                try:
-                    release = await self._parse_search_result(row)
-                    if release:
-                        releases.append(release)
-                except Exception:
-                    continue
+                table = soup.find("table", class_="table-list")
+                if not table:
+                    break
+
+                rows = table.find_all("tr")[1:]
+                if not rows:
+                    break
+
+                page_releases = []
+                for row in rows:
+                    try:
+                        release = await self._parse_search_result(row, category)
+                        if release:
+                            page_releases.append(release)
+                    except Exception:
+                        continue
+
+                releases.extend(page_releases)
+
+                # Any overlap with the index means this page reaches back into
+                # already-seen territory, so the gap since the last cycle is closed.
+                # None means the check itself failed, stop rather than run away.
+                known = await release_index.knownKeys(page_releases)
+                if known or known is None:
+                    break
 
         except Exception as e:
-            print(f"Error fetching RSS from 1337x: {e}")
+            print(f"Error fetching new uploads from 1337x: {e}")
 
         return releases
 
