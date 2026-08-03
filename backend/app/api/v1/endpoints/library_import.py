@@ -186,6 +186,21 @@ async def import_files(
             except Exception as e:
                 failed_items.append({"file": matched_file.get("scanned_file", {}).get("file_path"), "error": str(e)})
 
+        # Evaluate on_import transcoding rules against each adopted file. Rules are split
+        # by trigger so a library import can be transcoded on different terms than a fresh
+        # download, or left alone entirely.
+        if imported_items:
+            try:
+                from app.tasks.transcoding import check_and_apply_transcoding_rules
+
+                for item in imported_items:
+                    if item.get("id") and item.get("file_path"):
+                        check_and_apply_transcoding_rules.delay(
+                            item["id"], import_request.media_type, item["file_path"], "on_import"
+                        )
+            except Exception as e:
+                print(f"Could not queue transcoding rule check: {e}")
+
         return ImportResponse(
             success_count=len(imported_items),
             failed_count=len(failed_items),

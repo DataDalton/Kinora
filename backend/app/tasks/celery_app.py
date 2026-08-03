@@ -3,6 +3,10 @@ import asyncio
 
 from app.core.config import settings
 
+# Queue carrying media encodes, consumed by a dedicated worker so long encodes cannot
+# occupy the pool that the periodic monitors and the scheduler run on.
+TRANSCODE_QUEUE = "transcode"
+
 # Persistent event loop for Celery tasks - avoids creating/destroying loops
 _celeryLoop: asyncio.AbstractEventLoop | None = None
 
@@ -50,10 +54,22 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=30 * 60,  # 30 minutes default
     task_soft_time_limit=25 * 60,  # 25 minutes default
-    worker_prefetch_multiplier=4,
+    # One reserved task per child. The worker pool autoscales, and the autoscaler grows
+    # the pool from how saturated it looks, so messages held in reserve against a busy
+    # child would understate the backlog. At one, a child takes work only when it is free.
+    worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
+    # Encoding runs for minutes to hours while every other task on the default queue is a
+    # monitor that has to keep its cadence, so the encode gets a queue and a worker of its
+    # own. Only the encode is routed. Rule evaluation is short and stays on the default
+    # queue, where it is not stuck behind an encode that is already running.
     task_routes={
-        "app.tasks.transcoding.*": {
+        "app.tasks.transcoding.transcode_media_task": {"queue": TRANSCODE_QUEUE},
+    },
+    # Time limits belong here rather than in task_routes. Route entries are sent as message
+    # options, where time_limit collides with the publisher's own parameter of that name.
+    task_annotations={
+        "app.tasks.transcoding.transcode_media_task": {
             "time_limit": 12 * 60 * 60,  # 12 hours for transcoding tasks
             "soft_time_limit": 11 * 60 * 60,  # 11 hours soft limit
         }

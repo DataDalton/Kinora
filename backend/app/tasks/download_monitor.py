@@ -441,6 +441,7 @@ async def handle_completed_download(conn, download_record, torrent):
         media_update = None  # (sql, params) for the media-row update, or None
         media_file_rows = []  # list of (file_path, attrs) to persist into media_files
         subtitle_dispatch = []  # list of (media_type, path) to queue subtitle searches for
+        transcode_dispatch = []  # list of (media_type, path) to evaluate transcoding rules against
         replace_new_path = None  # organized path for the upgrade replace policy
 
         # ---- Organize phase (no transaction) ----
@@ -517,6 +518,7 @@ async def handle_completed_download(conn, download_record, torrent):
                 )
                 media_file_rows.append((final_path, media_files.attrs_from_metadata(final_path, file_metadata, False)))
                 subtitle_dispatch.append(("movie", final_path))
+                transcode_dispatch.append(("movie", final_path))
                 replace_new_path = final_path
 
         elif media_type == "show":
@@ -623,6 +625,7 @@ async def handle_completed_download(conn, download_record, torrent):
                         (final_path, media_files.attrs_from_metadata(final_path, first_meta, False))
                     )
                 subtitle_dispatch = [("show", path) for path in organized_paths]
+                transcode_dispatch = [("show", path) for path in organized_paths]
                 if organized_paths:
                     replace_new_path = final_path
 
@@ -730,6 +733,7 @@ async def handle_completed_download(conn, download_record, torrent):
                     media_file_rows.append(
                         (final_path, media_files.attrs_from_metadata(final_path, first_meta, False))
                     )
+                transcode_dispatch = [("anime", path) for path in organized_paths]
                 if organized_paths:
                     replace_new_path = final_path
 
@@ -962,6 +966,19 @@ async def handle_completed_download(conn, download_record, torrent):
                     search_subtitles.delay(media_id, sub_media_type, sub_path)
             except Exception as e:
                 print(f"Could not queue subtitle search: {e}")
+
+        # Evaluate on_download transcoding rules against each video file that landed. Every
+        # episode of a season pack is checked, not just the first, since a rule matching on
+        # codec or resolution applies per file. Each check reads the file with ffprobe, so
+        # it runs as its own task rather than holding up the rest of this import.
+        if transcode_dispatch and media_id:
+            try:
+                from app.tasks.transcoding import check_and_apply_transcoding_rules
+
+                for tr_media_type, tr_path in transcode_dispatch:
+                    check_and_apply_transcoding_rules.delay(media_id, tr_media_type, tr_path)
+            except Exception as e:
+                print(f"Could not queue transcoding rule check: {e}")
 
         for user_id in webtransport_manager.get_active_users():
             await webtransport_manager.send_download_complete(user_id, media_id, media_type, title)

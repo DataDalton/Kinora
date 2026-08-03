@@ -4,6 +4,48 @@
 # host path, e.g. /mnt/media or D:\KinoraLibrary. Jellyfin mounts <that path>/media.
 x-kinora-storage: &kinora_storage ${DATA:-./kinora}:/kinora
 
+# Shared by every Celery service so the worker, the encoder, and the scheduler cannot drift
+# apart on database, broker, or secret settings. Services merge it with <<: *celery_env and
+# add only what is specific to them.
+x-celery-env: &celery_env
+  APP_NAME: Kinora
+  # Leave empty to auto-generate and persist in the kinora-secrets volume.
+  SECRET_KEY: ${SECRET_KEY:-}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+  KINORA_SECRETS_DIR: /secrets
+  # PgBouncer connection (for application queries)
+  PGBOUNCER_ENABLED: "true"
+  PGBOUNCER_HOST: pgbouncer
+  PGBOUNCER_PORT: 5432
+  POSTGRES_USER: ${POSTGRES_USER:-kinora}
+  # Left empty on purpose. The real password comes from the bootstrap-generated secrets
+  # file, which the backend reads and prefers over this value, so a literal here would
+  # only ever be a misleading fallback.
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+  POSTGRES_DB: ${POSTGRES_DB:-kinora}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  # Only the host is set. The backend builds DRAGONFLY_URL from host, port, and db, then
+  # points the Celery broker and result backend at it, so the connection string exists in
+  # one place instead of being repeated per service.
+  DRAGONFLY_HOST: dragonfly
+  MEDIA_ROOT: /kinora/media
+  DOWNLOADS_ROOT: /kinora/torrents
+  TORRENTS_ROOT: /kinora/torrents
+  TMDB_API_KEY: ${TMDB_API_KEY:-}
+
+x-celery-build: &celery_build
+  context: ./backend
+  dockerfile: ../docker/backend.Dockerfile
+
+x-celery-depends: &celery_depends
+  bootstrap:
+    condition: service_completed_successfully
+  pgbouncer:
+    condition: service_healthy
+  dragonfly:
+    condition: service_healthy
+
 services:
   # Init container that generates persistent secrets on first run and never overwrites
   # them: the gluetun control-server key and auth config, and the PostgreSQL password
@@ -48,6 +90,7 @@ services:
       retries: 5
     networks:
       - kinora-network
+    restart: unless-stopped
 
   pgbouncer:
     image: edoburu/pgbouncer:latest
@@ -151,14 +194,13 @@ services:
       PGBOUNCER_PORT: 5432
       # Direct PostgreSQL connection (for migrations)
       POSTGRES_USER: ${POSTGRES_USER:-kinora}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kinora_password}
+      # Supplied by the bootstrap-generated secrets file, see the celery env block above.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-kinora}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
+      # Port and db are the defaults, and the connection string is derived from these.
       DRAGONFLY_HOST: dragonfly
-      DRAGONFLY_PORT: 6379
-      DRAGONFLY_DB: 0
-      DRAGONFLY_URL: redis://dragonfly:6379/0
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: 8000
       BACKEND_WORKERS: 4
@@ -181,8 +223,6 @@ services:
       GLUETUN_URL: http://gluetun:8000
       # Auto-create the library and download root folders under /kinora on first boot.
       AUTO_ROOT_FOLDERS: "true"
-      CELERY_BROKER_URL: redis://dragonfly:6379/0
-      CELERY_RESULT_BACKEND: redis://dragonfly:6379/0
       MEDIA_ROOT: /kinora/media
       DOWNLOADS_ROOT: /kinora/torrents
       TORRENTS_ROOT: /kinora/torrents
@@ -213,86 +253,58 @@ services:
     restart: unless-stopped
 
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: ../docker/backend.Dockerfile
+    build: *celery_build
     container_name: kinora-celery-worker
-    command: uv run celery -A app.tasks.celery_app worker --loglevel=info
+    # Pool sizes itself between the bounds below rather than Celery's default of one
+    # process per core. -Q celery leaves the transcode queue to its own service.
+    command: >
+      uv run celery -A app.tasks.celery_app worker --loglevel=info
+      -Q celery
+      --autoscale=${CELERY_MAX_CONCURRENCY:-8},${CELERY_MIN_CONCURRENCY:-2}
     environment:
-      APP_NAME: Kinora
-      # Leave empty to auto-generate and persist in the kinora-secrets volume.
-      SECRET_KEY: ${SECRET_KEY:-}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
-      KINORA_SECRETS_DIR: /secrets
-      # PgBouncer connection (for application queries)
-      PGBOUNCER_ENABLED: "true"
-      PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-kinora}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kinora_password}
-      POSTGRES_DB: ${POSTGRES_DB:-kinora}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      DRAGONFLY_URL: redis://dragonfly:6379/0
-      CELERY_BROKER_URL: redis://dragonfly:6379/0
-      CELERY_RESULT_BACKEND: redis://dragonfly:6379/0
-      MEDIA_ROOT: /kinora/media
-      DOWNLOADS_ROOT: /kinora/torrents
-      TORRENTS_ROOT: /kinora/torrents
-      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      <<: *celery_env
       FLARESOLVERR_URL: http://flaresolverr:8191
     volumes:
       - ./backend:/app
       - /app/.venv
       - *kinora_storage
       - kinora-secrets:/secrets
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-      pgbouncer:
-        condition: service_healthy
-      dragonfly:
-        condition: service_healthy
+    depends_on: *celery_depends
+    networks:
+      - kinora-network
+    restart: unless-stopped
+
+  # Consumes only the transcode queue, keeping hours-long encodes off the pool the periodic
+  # monitors share. One process, since ffmpeg already uses every core for a single encode.
+  # Raise CELERY_TRANSCODE_CONCURRENCY only for hardware accelerated encoding.
+  celery-transcode:
+    build: *celery_build
+    container_name: kinora-celery-transcode
+    command: >
+      uv run celery -A app.tasks.celery_app worker --loglevel=info
+      -Q transcode
+      --concurrency=${CELERY_TRANSCODE_CONCURRENCY:-1}
+    environment: *celery_env
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+      - *kinora_storage
+      - kinora-secrets:/secrets
+    depends_on: *celery_depends
     networks:
       - kinora-network
     restart: unless-stopped
 
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: ../docker/backend.Dockerfile
+    build: *celery_build
     container_name: kinora-celery-beat
     command: uv run celery -A app.tasks.celery_app beat --loglevel=info
-    environment:
-      APP_NAME: Kinora
-      # Leave empty to auto-generate and persist in the kinora-secrets volume.
-      SECRET_KEY: ${SECRET_KEY:-}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
-      KINORA_SECRETS_DIR: /secrets
-      # PgBouncer connection (for application queries)
-      PGBOUNCER_ENABLED: "true"
-      PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-kinora}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kinora_password}
-      POSTGRES_DB: ${POSTGRES_DB:-kinora}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      DRAGONFLY_URL: redis://dragonfly:6379/0
-      CELERY_BROKER_URL: redis://dragonfly:6379/0
-      CELERY_RESULT_BACKEND: redis://dragonfly:6379/0
-      TMDB_API_KEY: ${TMDB_API_KEY:-}
+    environment: *celery_env
     volumes:
       - ./backend:/app
       - /app/.venv
       - kinora-secrets:/secrets
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-      pgbouncer:
-        condition: service_healthy
-      dragonfly:
-        condition: service_healthy
+    depends_on: *celery_depends
     networks:
       - kinora-network
     restart: unless-stopped

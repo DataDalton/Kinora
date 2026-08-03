@@ -1,19 +1,32 @@
-import asyncio
 import json
+import time
 from pathlib import Path
 import shutil
 from datetime import datetime
 
-from app.tasks.celery_app import celery_app
+from app.tasks.celery_app import celery_app, runAsync
+from app.core.cache import cacheSet
 from app.db import get_pool
 from app.core.webtransport import webtransport_manager
 from app.services.transcoding import ffmpeg_service
 
 
 async def get_db_connection():
-    """Get database connection"""
+    """Take a connection from the shared pool."""
     pool = await get_pool()
     return await pool.acquire()
+
+
+async def release_db_connection(conn):
+    """
+    Hand a connection back to the pool.
+
+    Calling close() on it instead drops the underlying connection and makes the pool
+    open a replacement on the next acquire, so a season pack would rebuild one
+    connection per episode.
+    """
+    pool = await get_pool()
+    await pool.release(conn)
 
 
 @celery_app.task(bind=True, max_retries=2)
@@ -27,9 +40,7 @@ def transcode_media_task(self, job_id: int):
 
         try:
             # Get job details
-            job = await conn.fetchrow(
-                "SELECT * FROM transcoding_jobs WHERE id = $1", job_id
-            )
+            job = await conn.fetchrow("SELECT * FROM transcoding_jobs WHERE id = $1", job_id)
 
             if not job:
                 raise ValueError(f"Job {job_id} not found")
@@ -38,7 +49,11 @@ def transcode_media_task(self, job_id: int):
             input_path = job["input_path"]
             output_path = job["output_path"]
             output_action = job["output_action"]
-            profile_snapshot = json.loads(job["profile_snapshot"]) if isinstance(job["profile_snapshot"], str) else job["profile_snapshot"]
+            profile_snapshot = (
+                json.loads(job["profile_snapshot"])
+                if isinstance(job["profile_snapshot"], str)
+                else job["profile_snapshot"]
+            )
             hardware_accel_type = job["hardware_accel_type"]
             hardware_accel_device = job["hardware_accel_device"]
 
@@ -236,37 +251,40 @@ def transcode_media_task(self, job_id: int):
             raise
 
         finally:
-            await conn.close()
+            await release_db_connection(conn)
 
-    # Run async function in Celery
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(run_transcoding())
-    finally:
-        loop.close()
+    # Runs on the loop shared by every Celery task. The connection pool is bound to that
+    # loop, so a task that opened its own loop could not use a pooled connection.
+    return runAsync(run_transcoding())
 
 
 @celery_app.task
-def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path: str):
+def check_and_apply_transcoding_rules(
+    media_id: int, media_type: str, file_path: str, trigger_type: str = "on_download"
+):
     """
-    Check transcoding rules and automatically create jobs for new downloads
+    Evaluate the transcoding rules for one file and queue an encode for the first match.
+
+    trigger_type selects which rules apply: on_download for a file that arrived from the
+    download client, on_import for one adopted from disk by a library import, and
+    scheduled for the periodic sweep over files already in the library.
     """
 
     async def check_rules():
         conn = await get_db_connection()
 
         try:
-            # Get active rules for this media type
+            # Get active rules for this media type and the event that fired the check
             rules = await conn.fetch(
                 """
                 SELECT * FROM transcoding_rules
                 WHERE enabled = true
-                  AND trigger_type = 'on_download'
+                  AND trigger_type = $2
                   AND $1 = ANY(media_types)
                 ORDER BY priority DESC
                 """,
                 media_type,
+                trigger_type,
             )
 
             if not rules:
@@ -288,7 +306,9 @@ def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path:
 
             # Check each rule
             for rule in rules:
-                conditions = json.loads(rule["conditions"]) if isinstance(rule["conditions"], str) else rule["conditions"]
+                conditions = (
+                    json.loads(rule["conditions"]) if isinstance(rule["conditions"], str) else rule["conditions"]
+                )
 
                 # Evaluate conditions
                 matches = True
@@ -320,7 +340,15 @@ def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path:
                     if not profile_row:
                         continue
 
-                    profile_snapshot = dict(profile_row)
+                    # Freeze the encoding settings onto the job so editing the profile
+                    # later does not change an encode that is already queued. Row
+                    # timestamps are not settings and do not survive JSON, so they are
+                    # dropped rather than carried along.
+                    profile_snapshot = {
+                        key: value
+                        for key, value in dict(profile_row).items()
+                        if key not in ("created_at", "updated_at")
+                    }
 
                     # Get media title
                     table_map = {"movie": "movies", "show": "shows", "anime": "anime"}
@@ -328,9 +356,7 @@ def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path:
                     media_title = None
 
                     if table:
-                        media_row = await conn.fetchrow(
-                            f"SELECT title FROM {table} WHERE id = $1", media_id
-                        )
+                        media_row = await conn.fetchrow(f"SELECT title FROM {table} WHERE id = $1", media_id)
                         if media_row:
                             media_title = media_row["title"]
 
@@ -342,7 +368,30 @@ def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path:
                         output_filename = f"{media_title or Path(file_path).stem}_transcoded{Path(file_path).suffix}"
                         output_path = str(output_dir / output_filename)
                     else:
-                        output_path = str(Path(file_path).parent / f"{Path(file_path).stem}_transcoded{Path(file_path).suffix}")
+                        output_path = str(
+                            Path(file_path).parent / f"{Path(file_path).stem}_transcoded{Path(file_path).suffix}"
+                        )
+
+                    # Skip a file that already has a job queued, running, or finished. The
+                    # same file reaches this task more than once: an import that a restart
+                    # left mid-flight is recovered and reprocessed, and scheduled rules
+                    # rescan the library on every cycle. Without this a second encode would
+                    # start on a file the first one is still writing, and under the replace
+                    # action both would target the same path.
+                    existing_job = await conn.fetchval(
+                        """
+                        SELECT id FROM transcoding_jobs
+                        WHERE input_path = $1
+                          AND status IN ('pending', 'queued', 'processing', 'completed')
+                        LIMIT 1
+                        """,
+                        file_path,
+                    )
+                    if existing_job:
+                        print(
+                            f"Transcoding job {existing_job} already covers {file_path}, skipping rule '{rule['name']}'"
+                        )
+                        break
 
                     # Create transcoding job
                     job_row = await conn.fetchrow(
@@ -363,7 +412,9 @@ def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path:
                         rule["output_action"],
                         rule["use_media_profile_naming"],
                         rule["profile_id"],
-                        json.dumps(profile_snapshot),
+                        # default=str keeps a column type JSON cannot represent from
+                        # failing the whole rule check.
+                        json.dumps(profile_snapshot, default=str),
                         profile_row["hardware_accel_type"],
                         profile_row["hardware_accel_device"],
                         file_size,
@@ -379,7 +430,9 @@ def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path:
                         job_row["id"],
                     )
 
-                    print(f"Created automatic transcoding job {job_row['id']} for {file_path} using rule '{rule['name']}'")
+                    print(
+                        f"Created automatic transcoding job {job_row['id']} for {file_path} using rule '{rule['name']}'"
+                    )
 
                     # Only apply first matching rule
                     break
@@ -388,11 +441,84 @@ def check_and_apply_transcoding_rules(media_id: int, media_type: str, file_path:
             print(f"Error checking transcoding rules: {e}")
 
         finally:
-            await conn.close()
+            await release_db_connection(conn)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    return runAsync(check_rules())
+
+
+# Files examined per scheduled sweep. A large library is worked through across successive
+# runs rather than queueing an encode for every file at once.
+SCAN_BATCH_LIMIT = 200
+
+
+@celery_app.task(name="app.tasks.transcoding.scan_library_for_transcoding")
+def scan_library_for_transcoding():
+    """
+    Apply rules whose trigger is 'scheduled' to files already in the library.
+
+    on_download and on_import only ever see files as they arrive, so this is what
+    reaches a back catalogue that predates the rule.
+    """
+    return runAsync(async_scan_library_for_transcoding())
+
+
+async def async_scan_library_for_transcoding():
+    taskName = "transcoding_scan"
+    startTime = time.time()
+    status = "success"
+    queued = 0
+
     try:
-        loop.run_until_complete(check_rules())
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            typeRows = await conn.fetch("""
+                SELECT DISTINCT unnest(media_types) AS media_type
+                FROM transcoding_rules
+                WHERE enabled = true AND trigger_type = 'scheduled'
+                """)
+            mediaTypes = [row["media_type"] for row in typeRows]
+            if not mediaTypes:
+                return {"status": "skipped", "reason": "No scheduled transcoding rules", "queued": 0}
+
+            # Files already carrying a job are excluded here rather than left for the rule
+            # check to reject, so each sweep advances through the library instead of
+            # re-dispatching the same files every cycle.
+            rows = await conn.fetch(
+                """
+                SELECT mf.media_type, mf.media_id, mf.file_path
+                FROM media_files mf
+                LEFT JOIN transcoding_jobs tj
+                       ON tj.input_path = mf.file_path
+                      AND tj.status IN ('pending', 'queued', 'processing', 'completed')
+                WHERE mf.media_type = ANY($1)
+                  AND tj.id IS NULL
+                ORDER BY mf.id
+                LIMIT $2
+                """,
+                mediaTypes,
+                SCAN_BATCH_LIMIT,
+            )
+
+        for row in rows:
+            check_and_apply_transcoding_rules.delay(row["media_id"], row["media_type"], row["file_path"], "scheduled")
+            queued += 1
+
+        print(f"Transcoding sweep queued {queued} rule checks")
+        return {"status": "success", "queued": queued}
+
+    except Exception as e:
+        status = "failed"
+        print(f"Transcoding sweep error: {e}")
+        return {"status": "error", "message": str(e), "queued": queued}
+
     finally:
-        loop.close()
+        elapsedMs = int((time.time() - startTime) * 1000)
+        await cacheSet(
+            f"task:last_run:{taskName}",
+            {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "status": status,
+                "durationMs": elapsedMs,
+            },
+            expire=86400,
+        )

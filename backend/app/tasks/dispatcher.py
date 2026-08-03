@@ -67,6 +67,12 @@ SCHEDULED_TASKS = {
         "task": "app.tasks.metadata_refresh.refresh_all_metadata",
         "daily_at_hour": 3,
     },
+    # Applies scheduled transcoding rules to files already in the library. Returns
+    # immediately when no such rule exists, which is the usual case.
+    "transcoding_scan": {
+        "task": "app.tasks.transcoding.scan_library_for_transcoding",
+        "default_minutes": 360,
+    },
 }
 
 # In-process fallback for last-dispatch times, used when Dragonfly is unavailable
