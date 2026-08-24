@@ -1,46 +1,55 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import {
+	createContext,
+	useCallback,
+	useContext,
+	useMemo,
+	useSyncExternalStore,
+	ReactNode,
+} from "react";
+import { createLocalStorageStore } from "@/lib/localStorageStore";
 
 interface SidebarContextType {
-  collapsed: boolean;
-  toggleCollapsed: () => void;
+	collapsed: boolean;
+	toggleCollapsed: () => void;
 }
 
 const SidebarContext = createContext<SidebarContextType>({
-  collapsed: false,
-  toggleCollapsed: () => {},
+	collapsed: false,
+	toggleCollapsed: () => {},
+});
+
+const sidebarStore = createLocalStorageStore<boolean>({
+	key: "sidebarCollapsed",
+	serverValue: false,
+	parse: (raw) => raw === "true",
+	serialize: (collapsed) => collapsed.toString(),
 });
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [mounted, setMounted] = useState(false);
+	const collapsed = useSyncExternalStore(
+		sidebarStore.subscribe,
+		sidebarStore.getSnapshot,
+		sidebarStore.getServerSnapshot,
+	);
 
-  useEffect(() => {
-    setMounted(true);
-    const savedState = localStorage.getItem('sidebarCollapsed');
-    if (savedState !== null) {
-      setCollapsed(savedState === 'true');
-    }
-  }, []);
+	const toggleCollapsed = useCallback(() => {
+		sidebarStore.set(!sidebarStore.getSnapshot());
+	}, []);
 
-  useEffect(() => {
-    if (mounted) {
-      localStorage.setItem('sidebarCollapsed', collapsed.toString());
-    }
-  }, [collapsed, mounted]);
+	const value = useMemo(
+		() => ({ collapsed, toggleCollapsed }),
+		[collapsed, toggleCollapsed],
+	);
 
-  const toggleCollapsed = () => {
-    setCollapsed(prev => !prev);
-  };
-
-  return (
-    <SidebarContext.Provider value={{ collapsed, toggleCollapsed }}>
-      {children}
-    </SidebarContext.Provider>
-  );
+	return (
+		<SidebarContext.Provider value={value}>
+			{children}
+		</SidebarContext.Provider>
+	);
 }
 
 export function useSidebar() {
-  return useContext(SidebarContext);
+	return useContext(SidebarContext);
 }

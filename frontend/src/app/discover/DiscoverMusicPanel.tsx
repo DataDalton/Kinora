@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -124,7 +125,7 @@ export default function DiscoverMusicPanel() {
 							className="bg-card text-card-foreground rounded-lg shadow overflow-hidden hover:shadow-lg transition group"
 						>
 							<div className="relative aspect-square">
-								<img
+								<Image
 									src={
 										artist.picture_xl ||
 										artist.picture_big ||
@@ -134,6 +135,8 @@ export default function DiscoverMusicPanel() {
 									}
 									alt={artist.name}
 									className="w-full h-full object-cover rounded-t-lg"
+									width={500}
+									height={500}
 								/>
 								<div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition" />
 							</div>
@@ -186,7 +189,7 @@ export default function DiscoverMusicPanel() {
 							className="bg-card text-card-foreground rounded-lg shadow overflow-hidden hover:shadow-lg transition group"
 						>
 							<div className="relative aspect-square">
-								<img
+								<Image
 									src={
 										album.cover_xl ||
 										album.cover_medium ||
@@ -195,6 +198,8 @@ export default function DiscoverMusicPanel() {
 									}
 									alt={album.title}
 									className="w-full h-full object-cover"
+									width={500}
+									height={500}
 								/>
 								<div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition" />
 							</div>
@@ -257,7 +262,7 @@ export default function DiscoverMusicPanel() {
 								<span className="w-8 text-center text-muted-foreground font-medium">
 									{index + 1}
 								</span>
-								<img
+								<Image
 									src={
 										track.album?.cover_medium ||
 										track.album?.cover_xl ||
@@ -265,6 +270,8 @@ export default function DiscoverMusicPanel() {
 									}
 									alt={track.album?.title}
 									className="w-12 h-12 rounded object-cover"
+									width={48}
+									height={48}
 								/>
 								<div className="flex-1 min-w-0">
 									<h3 className="font-medium text-sm truncate">
@@ -315,7 +322,7 @@ export default function DiscoverMusicPanel() {
 										: "hover:scale-105"
 								}`}
 							>
-								<img
+								<Image
 									src={
 										genre.picture_big ||
 										genre.picture_medium ||
@@ -324,6 +331,8 @@ export default function DiscoverMusicPanel() {
 									}
 									alt={genre.name}
 									className="w-full h-full object-cover"
+									width={500}
+									height={500}
 								/>
 								<div className="absolute inset-0 bg-linear-to-t from-black/80 via-black/40 to-transparent" />
 								<div className="absolute bottom-0 left-0 right-0 p-2">
@@ -373,7 +382,7 @@ export default function DiscoverMusicPanel() {
 										className="bg-card text-card-foreground rounded-lg shadow overflow-hidden hover:shadow-lg transition group"
 									>
 										<div className="relative aspect-square">
-											<img
+											<Image
 												src={
 													artist.picture_xl ||
 													artist.picture_big ||
@@ -383,6 +392,8 @@ export default function DiscoverMusicPanel() {
 												}
 												alt={artist.name}
 												className="w-full h-full object-cover rounded-t-lg"
+												width={500}
+												height={500}
 											/>
 										</div>
 										<div className="p-3">

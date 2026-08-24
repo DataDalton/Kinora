@@ -23,7 +23,7 @@
 		"clean": "npm run docker:down && rm -rf frontend/node_modules frontend/.next backend/venv backend/__pycache__"
 	},
 	"devDependencies": {
-		"concurrently": "^9.2.1"
+		"concurrently": "^10.0.5"
 	},
 	"engines": {
 		"node": ">=20.0.0",

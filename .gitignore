@@ -4,21 +4,25 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Python build artifacts. backend is the only Python root, so these are
+# anchored there. Unanchored they also match frontend source directories
+# such as frontend/src/lib and frontend/src/app/downloads.
+/backend/build/
+/backend/develop-eggs/
+/backend/dist/
+/backend/downloads/
+/backend/eggs/
+/backend/.eggs/
+/backend/lib/
+/backend/lib64/
+/backend/parts/
+/backend/sdist/
+/backend/var/
+/backend/wheels/
 
 # Virtual environments
 venv/
@@ -79,10 +83,14 @@ coverage/
 # Alembic
 alembic/versions/*.pyc
 
-# Media files (for development)
-downloads/
-media/
-torrents/
+# Media files (for development). Anchored so they do not match source
+# directories with the same names.
+/downloads/
+/media/
+/torrents/
+/kinora/downloads/
+/kinora/media/
+/kinora/torrents/
 
 # Backup files
 *.bak

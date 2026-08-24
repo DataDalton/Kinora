@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Loader2, Shield, Plus, X, Info } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export default function ForwardAuthSettings() {
-	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [trustedProxies, setTrustedProxies] = useState<string[]>([]);
 	const [newProxy, setNewProxy] = useState("");
@@ -20,38 +20,38 @@ export default function ForwardAuthSettings() {
 		"192.168.0.0/16",
 	];
 
-	useEffect(() => {
-		fetchSettings();
-	}, []);
-
-	const fetchSettings = async () => {
-		try {
-			setLoading(true);
-			const response = await api.get(
-				"/settings/forward_auth_trusted_proxies",
-			);
-			const value = response.data?.value;
-
-			if (value) {
+	const { data: loadedProxies, isPending: loading } = useQuery<string[]>({
+		queryKey: ["settings", "forward_auth_trusted_proxies"],
+		queryFn: async () => {
+			try {
+				const response = await api.get(
+					"/settings/forward_auth_trusted_proxies",
+				);
+				const value = response.data?.value;
+				if (!value) return [];
 				try {
 					const parsed = JSON.parse(value);
-					setTrustedProxies(Array.isArray(parsed) ? parsed : []);
+					return Array.isArray(parsed) ? parsed : [];
 				} catch {
-					setTrustedProxies([]);
+					return [];
 				}
-			} else {
-				setTrustedProxies([]);
+			} catch (err: any) {
+				// A missing setting just means nothing has been configured yet.
+				if (err.response?.status === 404) return [];
+				throw new Error("Failed to load forward auth settings");
 			}
-		} catch (err: any) {
-			if (err.response?.status === 404) {
-				setTrustedProxies([]);
-			} else {
-				setError("Failed to load forward auth settings");
-			}
-		} finally {
-			setLoading(false);
+		},
+		retry: false,
+	});
+
+	// The list is edited before saving, so the loaded value seeds local state.
+	const [seenLoadedProxies, setSeenLoadedProxies] = useState(loadedProxies);
+	if (seenLoadedProxies !== loadedProxies) {
+		setSeenLoadedProxies(loadedProxies);
+		if (loadedProxies) {
+			setTrustedProxies(loadedProxies);
 		}
-	};
+	}
 
 	const handleSave = async () => {
 		try {

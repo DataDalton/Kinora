@@ -452,7 +452,6 @@ function LoadingSkeleton() {
 export default function SystemStatusPage() {
 	const queryClient = useQueryClient();
 	const [autoRefresh, setAutoRefresh] = useState(true);
-	const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 	const [isRefreshing, setIsRefreshing] = useState(false);
 
 	// Fetch system status
@@ -460,18 +459,15 @@ export default function SystemStatusPage() {
 		data: systemStatus,
 		isLoading,
 		error,
+		dataUpdatedAt,
 	} = useQuery({
 		queryKey: ["system-status"],
 		queryFn: getSystemStatus,
 		refetchInterval: autoRefresh ? 30000 : false,
 	});
 
-	// Update last refresh time when data changes
-	useEffect(() => {
-		if (systemStatus) {
-			setLastRefresh(new Date());
-		}
-	}, [systemStatus]);
+	// react-query records when the data last arrived, so no effect is needed.
+	const lastRefresh = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
 	// Manual refresh handler
 	const handleManualRefresh = async () => {
@@ -481,7 +477,6 @@ export default function SystemStatusPage() {
 			await queryClient.invalidateQueries({
 				queryKey: ["system-status"],
 			});
-			setLastRefresh(new Date());
 		} catch (err) {
 			console.error("Failed to refresh system status:", err);
 		} finally {
@@ -529,7 +524,10 @@ export default function SystemStatusPage() {
 							</label>
 						</div>
 						<div className="text-sm text-muted-foreground">
-							Last updated: {lastRefresh.toLocaleTimeString()}
+							Last updated:{" "}
+							{lastRefresh
+								? lastRefresh.toLocaleTimeString()
+								: "never"}
 							{systemStatus?.version && (
 								<span className="ml-4">
 									Version: {systemStatus.version}

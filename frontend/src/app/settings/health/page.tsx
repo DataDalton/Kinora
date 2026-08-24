@@ -89,14 +89,21 @@ const mediaTypeLabels: Record<string, string> = {
 export default function HealthDashboardPage() {
   const queryClient = useQueryClient();
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
   // Queries
-  const { data: healthSummary, isLoading: summaryLoading } = useQuery({
+  const {
+    data: healthSummary,
+    isLoading: summaryLoading,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ['health-summary'],
     queryFn: getHealthSummary,
     refetchInterval: autoRefresh ? 60000 : false,
   });
+
+  // react-query records when the data last arrived, so no clock read is needed
+  // during render. Reading new Date() here would be baked into the prerender.
+  const lastRefresh = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
   const { data: driveStats = [], isLoading: drivesLoading } = useQuery({
     queryKey: ['drive-stats'],
@@ -117,7 +124,6 @@ export default function HealthDashboardPage() {
         queryClient.invalidateQueries({ queryKey: ['health-summary'] });
         queryClient.invalidateQueries({ queryKey: ['drive-stats'] });
         queryClient.invalidateQueries({ queryKey: ['root-folders-all'] });
-        setLastRefresh(new Date());
       }, 60000);
       return () => clearInterval(interval);
     }
@@ -127,7 +133,6 @@ export default function HealthDashboardPage() {
     queryClient.invalidateQueries({ queryKey: ['health-summary'] });
     queryClient.invalidateQueries({ queryKey: ['drive-stats'] });
     queryClient.invalidateQueries({ queryKey: ['root-folders-all'] });
-    setLastRefresh(new Date());
   };
 
   const isLoading = summaryLoading || drivesLoading || foldersLoading;
@@ -166,7 +171,8 @@ export default function HealthDashboardPage() {
               </label>
             </div>
             <div className="text-sm text-muted-foreground">
-              Last updated: {lastRefresh.toLocaleTimeString()}
+              Last updated:{" "}
+              {lastRefresh ? lastRefresh.toLocaleTimeString() : "never"}
             </div>
           </div>
 

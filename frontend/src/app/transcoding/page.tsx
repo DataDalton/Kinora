@@ -196,10 +196,13 @@ export default function TranscodingPage() {
     },
   });
 
+  // mutate keeps a stable identity, so the effect still runs only on mount.
+  const { mutate: detectHardware } = detectHardwareMutation;
+
   // Auto-detect hardware on page load
   useEffect(() => {
-    detectHardwareMutation.mutate();
-  }, []);
+    detectHardware();
+  }, [detectHardware]);
 
   const toggleJobExpansion = (jobId: number) => {
     setExpandedJobs((prev) => {

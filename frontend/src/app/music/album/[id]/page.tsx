@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -430,10 +431,12 @@ export default function AlbumDetailPage() {
 					<div className="lg:col-span-1 space-y-6">
 						<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden sticky top-8">
 							<div className="relative aspect-square">
-								<img
+								<Image
 									src={getCoverUrl(album)}
 									alt={album.title}
 									className="w-full h-full object-cover"
+									width={500}
+									height={500}
 								/>
 								{album.monitored && (
 									<div className="absolute top-4 right-4 bg-primary text-primary-foreground p-2 rounded-lg shadow-lg">
@@ -625,6 +628,9 @@ export default function AlbumDetailPage() {
 											rel="noopener noreferrer"
 											className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
 										>
+											{/* eslint-disable-next-line @next/next/no-img-element --
+											     Third party brand icon at a fixed 16px from a host that is not in
+											     images.remotePatterns. Optimizing it would add a request for no gain. */}
 											<img
 												src="https://www.deezer.com/favicon.ico"
 												alt="Deezer"

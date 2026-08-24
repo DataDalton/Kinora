@@ -191,7 +191,11 @@ export default function ManualImportModal({
 	const canImport =
 		isValidPath && (!needsEpisodeSelection || selectedEpisodeId !== null);
 
-	useEffect(() => {
+	// The modal stays mounted while closed, so opening it clears the previous
+	// entry. Adjusting during render avoids a second pass through the effect.
+	const [wasOpen, setWasOpen] = useState(isOpen);
+	if (isOpen !== wasOpen) {
+		setWasOpen(isOpen);
 		if (isOpen) {
 			setFilePath("");
 			setSelectedSeasonId(null);
@@ -199,7 +203,7 @@ export default function ManualImportModal({
 			setPreviewInfo(null);
 			setError(null);
 		}
-	}, [isOpen]);
+	}
 
 	if (!isOpen) return null;
 

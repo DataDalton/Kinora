@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -405,10 +406,12 @@ export default function AnimeDetailPage() {
       {/* Backdrop */}
       {anime.backdrop_path && (
         <div className="fixed inset-0 z-0">
-          <img
+          <Image
             src={getPosterUrl(anime.backdrop_path)}
             alt=""
             className="w-full h-full object-cover opacity-10"
+            width={1280}
+            height={720}
           />
           <div className="absolute inset-0 bg-gradient-to-b from-background/50 via-background to-background" />
         </div>
@@ -437,10 +440,12 @@ export default function AnimeDetailPage() {
             <div className="lg:col-span-1 space-y-6">
               <div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden sticky top-8">
                 <div className="relative aspect-[2/3]">
-                  <img
+                  <Image
                     src={getPosterUrl(anime.poster_path)}
                     alt={anime.title}
                     className="w-full h-full object-cover"
+                    width={500}
+                    height={750}
                   />
                   {anime.monitored && (
                     <div className="absolute top-4 right-4 bg-primary text-primary-foreground p-2 rounded-lg shadow-lg">
@@ -616,6 +621,9 @@ export default function AnimeDetailPage() {
                           rel="noopener noreferrer"
                           className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
                         >
+                          {/* eslint-disable-next-line @next/next/no-img-element --
+                               Third party brand icon at a fixed 16px from a host that is not in
+                               images.remotePatterns. Optimizing it would add a request for no gain. */}
                           <img src="https://anilist.co/img/icons/icon.svg" alt="AniList" className="w-4 h-4" />
                           View on AniList
                           <ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
@@ -628,6 +636,9 @@ export default function AnimeDetailPage() {
                           rel="noopener noreferrer"
                           className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
                         >
+                          {/* eslint-disable-next-line @next/next/no-img-element --
+                               Third party brand icon at a fixed 16px from a host that is not in
+                               images.remotePatterns. Optimizing it would add a request for no gain. */}
                           <img src="https://myanimelist.net/img/common/pwa/launcher-icon-0-75x.png" alt="MAL" className="w-4 h-4" />
                           View on MyAnimeList
                           <ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
@@ -672,10 +683,12 @@ export default function AnimeDetailPage() {
                       >
                         <div className="aspect-[2/3] relative">
                           {season.poster_path ? (
-                            <img
+                            <Image
                               src={season.poster_path.startsWith('http') ? season.poster_path : `https://image.tmdb.org/t/p/w300${season.poster_path}`}
                               alt={season.title}
                               className="w-full h-full object-cover"
+                              width={300}
+                              height={450}
                             />
                           ) : (
                             <div className="w-full h-full bg-muted flex items-center justify-center">

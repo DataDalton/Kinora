@@ -1,53 +1,73 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import {
+	createContext,
+	useCallback,
+	useContext,
+	useEffect,
+	useMemo,
+	useSyncExternalStore,
+	ReactNode,
+} from "react";
+import { createLocalStorageStore } from "@/lib/localStorageStore";
 
-type Theme = 'light' | 'dark';
+type Theme = "light" | "dark";
 
 interface ThemeContextType {
-  theme: Theme;
-  toggleTheme: () => void;
-  setTheme: (theme: Theme) => void;
+	theme: Theme;
+	toggleTheme: () => void;
+	setTheme: (theme: Theme) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: 'light',
-  toggleTheme: () => {},
-  setTheme: () => {},
+	theme: "light",
+	toggleTheme: () => {},
+	setTheme: () => {},
+});
+
+// Falls back to the operating system preference when nothing is stored.
+const themeStore = createLocalStorageStore<Theme>({
+	key: "theme",
+	serverValue: "light",
+	parse: (raw) => {
+		if (raw === "light" || raw === "dark") return raw;
+		return window.matchMedia("(prefers-color-scheme: dark)").matches
+			? "dark"
+			: "light";
+	},
+	serialize: (theme) => theme,
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('light');
-  const [mounted, setMounted] = useState(false);
+	const theme = useSyncExternalStore(
+		themeStore.subscribe,
+		themeStore.getSnapshot,
+		themeStore.getServerSnapshot,
+	);
 
-  useEffect(() => {
-    setMounted(true);
-    const savedTheme = localStorage.getItem('theme') as Theme | null;
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+	// Keeps the document class in step with the active theme.
+	useEffect(() => {
+		document.documentElement.classList.toggle("dark", theme === "dark");
+	}, [theme]);
 
-    const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
-    setTheme(initialTheme);
-    document.documentElement.classList.toggle('dark', initialTheme === 'dark');
-  }, []);
+	const setTheme = useCallback((next: Theme) => {
+		themeStore.set(next);
+	}, []);
 
-  useEffect(() => {
-    if (mounted) {
-      localStorage.setItem('theme', theme);
-      document.documentElement.classList.toggle('dark', theme === 'dark');
-    }
-  }, [theme, mounted]);
+	const toggleTheme = useCallback(() => {
+		themeStore.set(themeStore.getSnapshot() === "light" ? "dark" : "light");
+	}, []);
 
-  const toggleTheme = () => {
-    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
-  };
+	const value = useMemo(
+		() => ({ theme, toggleTheme, setTheme }),
+		[theme, toggleTheme, setTheme],
+	);
 
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+	return (
+		<ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+	);
 }
 
 export function useTheme() {
-  return useContext(ThemeContext);
+	return useContext(ThemeContext);
 }

@@ -136,12 +136,17 @@ export default function MediaDetailModal({
 			.filter(Boolean);
 	};
 
-	useEffect(() => {
+	// Opening the modal, or being handed a different item, restarts navigation.
+	const [seenIsOpen, setSeenIsOpen] = useState(isOpen);
+	const [seenMedia, setSeenMedia] = useState(media);
+	if (seenIsOpen !== isOpen || seenMedia !== media) {
+		setSeenIsOpen(isOpen);
+		setSeenMedia(media);
 		if (isOpen && media) {
 			setCurrentMedia(media);
 			setNavigationStack([]);
 		}
-	}, [isOpen, media]);
+	}
 
 	const { data: profiles } = useQuery({
 		queryKey: ["media-profiles"],
@@ -188,41 +193,53 @@ export default function MediaDetailModal({
 		enabled: showAddModal,
 	});
 
-	useEffect(() => {
-		const savedProfileId = localStorage.getItem(`lastProfile_${mediaType}`);
-		if (savedProfileId && profiles) {
-			const profileExists = profiles.find(
-				(p: any) => p.id === parseInt(savedProfileId),
+	// Restore the last profile used for this media type once the list loads.
+	// profiles is checked first so localStorage is never read during SSR.
+	const [seenProfileType, setSeenProfileType] = useState(mediaType);
+	const [seenProfiles, setSeenProfiles] = useState(profiles);
+	if (seenProfileType !== mediaType || seenProfiles !== profiles) {
+		setSeenProfileType(mediaType);
+		setSeenProfiles(profiles);
+		if (profiles) {
+			const savedProfileId = localStorage.getItem(
+				`lastProfile_${mediaType}`,
 			);
-			if (profileExists) {
-				setSelectedProfileId(parseInt(savedProfileId));
+			if (savedProfileId) {
+				const profileExists = profiles.find(
+					(p: any) => p.id === parseInt(savedProfileId),
+				);
+				if (profileExists) {
+					setSelectedProfileId(parseInt(savedProfileId));
+				} else if (profiles.length > 0) {
+					setSelectedProfileId(profiles[0].id);
+				}
 			} else if (profiles.length > 0) {
 				setSelectedProfileId(profiles[0].id);
 			}
-		} else if (profiles && profiles.length > 0) {
-			setSelectedProfileId(profiles[0].id);
 		}
-	}, [mediaType, profiles]);
+	}
 
-	// Set folder selection when modal opens - default to automatic (null) unless user previously overrode
-	useEffect(() => {
+	// Restore the last folder override once the list loads, otherwise fall back
+	// to automatic and let the selection mode decide.
+	const [seenRootFolders, setSeenRootFolders] = useState(rootFolders);
+	if (seenRootFolders !== rootFolders) {
+		setSeenRootFolders(rootFolders);
 		if (rootFolders && rootFolders.length > 0) {
 			const savedFolderId = localStorage.getItem(
 				`lastFolder_${getFolderMediaType()}`,
 			);
-			if (savedFolderId && savedFolderId !== "automatic") {
-				const folderExists = rootFolders.find(
-					(f) => f.id === parseInt(savedFolderId) && f.isActive,
-				);
-				if (folderExists) {
-					setSelectedFolderId(parseInt(savedFolderId));
-					return;
-				}
-			}
-			// Default to automatic (null) - let selection mode decide
-			setSelectedFolderId(null);
+			const savedFolder =
+				savedFolderId && savedFolderId !== "automatic"
+					? rootFolders.find(
+							(f) =>
+								f.id === parseInt(savedFolderId) && f.isActive,
+						)
+					: undefined;
+			setSelectedFolderId(
+				savedFolder ? parseInt(savedFolderId as string) : null,
+			);
 		}
-	}, [rootFolders]);
+	}
 
 	useEffect(() => {
 		const handleEscape = (e: KeyboardEvent) => {

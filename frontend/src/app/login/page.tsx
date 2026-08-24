@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { LogIn, Loader2, Film, Globe } from "lucide-react";
 import { api } from "@/lib/api";
@@ -17,11 +17,24 @@ interface OIDCProvider {
 
 export default function LoginPage() {
 	const router = useRouter();
+	const searchParams = useSearchParams();
+	// Read at render rather than in an effect. Seeding state from window inside
+	// an effect caused a cascading render, and reading window during render
+	// would not match the prerendered HTML.
+	const registrationDisabled =
+		searchParams.get("error") === "registration_disabled";
+
 	const [username, setUsername] = useState("");
 	const [password, setPassword] = useState("");
-	const [error, setError] = useState("");
+	const [error, setError] = useState(
+		registrationDisabled
+			? "New user registration is currently disabled. Please contact an administrator."
+			: "",
+	);
 	const [loading, setLoading] = useState(false);
-	const [errorTrigger, setErrorTrigger] = useState(0);
+	const [errorTrigger, setErrorTrigger] = useState(
+		registrationDisabled ? 1 : 0,
+	);
 	const [registrationEnabled, setRegistrationEnabled] = useState(true);
 	const [oidcProviders, setOidcProviders] = useState<OIDCProvider[]>([]);
 	const [checkingForwardAuth, setCheckingForwardAuth] = useState(true);
@@ -79,15 +92,6 @@ export default function LoginPage() {
 		};
 
 		initialize();
-
-		const params = new URLSearchParams(window.location.search);
-		const errorParam = params.get("error");
-		if (errorParam === "registration_disabled") {
-			setError(
-				"New user registration is currently disabled. Please contact an administrator.",
-			);
-			setErrorTrigger((prev) => prev + 1);
-		}
 	}, [router]);
 
 	const handleSubmit = async (e: React.FormEvent) => {
@@ -248,7 +252,9 @@ export default function LoginPage() {
 			);
 			const { authorization_url, state } = response.data;
 
-			window.location.href = `${authorization_url}&provider_id=${providerId}`;
+			window.location.assign(
+				`${authorization_url}&provider_id=${providerId}`,
+			);
 		} catch (err: any) {
 			setError(
 				err.response?.data?.detail || "Failed to initiate OIDC login",

@@ -328,6 +328,8 @@ export default function TwoFactorSettings() {
 								Scan this QR code with your authenticator app:
 							</p>
 							<div className="flex justify-center mb-4">
+								{/* eslint-disable-next-line @next/next/no-img-element --
+								     The API returns this as a data URI, which next/image cannot optimize. */}
 								<img
 									src={totpSetupData.qr_code_url}
 									alt="TOTP QR Code"

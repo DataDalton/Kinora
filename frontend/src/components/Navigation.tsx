@@ -1,8 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
+import { useIsHydrated } from "@/lib/useIsHydrated";
 import {
 	LogOut,
 	ChevronLeft,
@@ -42,7 +44,7 @@ export default function Navigation() {
 		user,
 	} = usePermissions();
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-	const [mounted, setMounted] = useState(false);
+	const mounted = useIsHydrated();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [searchResults, setSearchResults] = useState<any[]>([]);
 	const [showDropdown, setShowDropdown] = useState(false);
@@ -86,10 +88,6 @@ export default function Navigation() {
 		refetchInterval: 30000,
 		enabled: !permissionsLoading && hasAnyApprovePermission,
 	});
-
-	useEffect(() => {
-		setMounted(true);
-	}, []);
 
 	useEffect(() => {
 		const handleClickOutside = (event: MouseEvent) => {
@@ -403,13 +401,15 @@ export default function Navigation() {
 														className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition"
 													>
 														{imageUrl && (
-															<img
+															<Image
 																src={imageUrl}
 																alt={
 																	item.title ||
 																	item.name
 																}
 																className={`object-cover rounded ${item.media_type === "artist" ? "w-10 h-10" : "w-10 h-14"}`}
+																width={40}
+																height={56}
 															/>
 														)}
 														<div className="flex-1 min-w-0">

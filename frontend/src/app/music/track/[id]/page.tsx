@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -345,10 +346,12 @@ export default function TrackDetailPage() {
 						<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden sticky top-8">
 							<div className="relative aspect-square">
 								{getCoverUrl() ? (
-									<img
+									<Image
 										src={getCoverUrl()!}
 										alt={track.title}
 										className="w-full h-full object-cover"
+										width={500}
+										height={500}
 									/>
 								) : (
 									<div className="w-full h-full bg-accent/50 flex items-center justify-center">
@@ -605,6 +608,9 @@ export default function TrackDetailPage() {
 											rel="noopener noreferrer"
 											className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
 										>
+											{/* eslint-disable-next-line @next/next/no-img-element --
+											     Third party brand icon at a fixed 16px from a host that is not in
+											     images.remotePatterns. Optimizing it would add a request for no gain. */}
 											<img
 												src="https://www.deezer.com/favicon.ico"
 												alt="Deezer"

@@ -5,79 +5,79 @@ description = "Kinora media automation backend"
 requires-python = ">=3.14"
 dependencies = [
     # Web Framework
-    "fastapi>=0.136.1",
-    "granian[reload]>=2.7.4",
+    "fastapi>=0.141.1",
+    "granian[reload]>=2.8.2",
 
     # Database
     "asyncpg>=0.31.0",
     "psycopg2-binary>=2.9.12",
-    "sqlalchemy>=2.0.49",
-    "alembic>=1.18.4",
+    "sqlalchemy>=2.0.52",
+    "alembic>=1.19.1",
 
     # Dragonfly (redis-compatible client)
-    "redis>=7.4.0",
-    "hiredis>=3.3.1",
+    "redis>=8.1.0",
+    "hiredis>=3.4.1",
 
     # Celery
     "celery>=5.6.3",
-    "flower>=2.0.1",
+    "flower>=2.1.0",
 
     # Authentication & Security
     "python-jose[cryptography]>=3.5.0",
     "passlib[argon2]>=1.7.4",
     "argon2-cffi>=25.1.0",
-    "python-multipart>=0.0.29",
+    "python-multipart>=0.0.32",
     "bcrypt>=5.0.0",
-    "pyotp>=2.9.0",
-    "webauthn>=2.7.1",
+    "pyotp>=2.10.0",
+    "webauthn>=3.0.0",
     "qrcode[pil]>=8.2",
 
     # Validation
     "pydantic>=2.13.4",
-    "pydantic-settings>=2.14.1",
+    "pydantic-settings>=2.15.0",
     "email-validator>=2.3.0",
 
     # HTTP Client (HTTP/3 + DNS-over-HTTPS support)
-    "curl_cffi>=0.14.0",
+    "curl_cffi>=0.16.1",
 
     # JSON Serialization
-    "orjson>=3.11.9",
+    "orjson>=3.12.0",
 
     # HTML Parsing
-    "beautifulsoup4>=4.14.3",
-    "lxml>=6.1.1",
+    "beautifulsoup4>=4.15.0",
+    "lxml>=6.1.2",
 
     # Subtitles
-    "subliminal>=2.6.0",
+    "subliminal>=2.7.1",
     "babelfish>=0.6.1",
 
     # Audio tagging (embed artwork/lyrics into music files)
-    "mutagen>=1.47.0",
+    "mutagen>=1.48.1",
 
     # Language Codes
-    "python-iso639>=2026.4.20",
+    "python-iso639>=2026.7.23",
 
     # Torrent Client
-    "qbittorrent-api>=2026.5.1",
+    "qbittorrent-api>=2026.8.1",
 
     # External APIs
     "tmdbv3api>=1.9.0",
 
     # Utilities
-    "python-dotenv>=1.2.2",
+    "python-dotenv>=1.2.3",
     "python-dateutil>=2.9.0.post0",
-    "pytz>=2026.2",
+    "pytz>=2026.3.post1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.3.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "black>=26.5.1",
     "isort>=8.0.1",
     "flake8>=7.3.0",
-    "mypy>=2.1.0",
+    "mypy>=2.3.1",
 ]
 
 [tool.black]

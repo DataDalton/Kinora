@@ -165,10 +165,19 @@ export default function RootFoldersPage() {
     }
   }, []);
 
+  // Clearing the previous result belongs with the modal state, not the debounce.
+  const pathTestActive = showAddModal || editingFolder !== null;
+  const [seenPathTestActive, setSeenPathTestActive] = useState(pathTestActive);
+  if (seenPathTestActive !== pathTestActive) {
+    setSeenPathTestActive(pathTestActive);
+    if (!pathTestActive) {
+      setPathTestStatus({ testing: false, result: null });
+    }
+  }
+
   // Debounced path testing
   useEffect(() => {
-    if (!showAddModal && !editingFolder) {
-      setPathTestStatus({ testing: false, result: null });
+    if (!pathTestActive) {
       return;
     }
 
@@ -185,7 +194,7 @@ export default function RootFoldersPage() {
         clearTimeout(testTimeoutRef.current);
       }
     };
-  }, [formData.rootPath, formData.downloadPath, showAddModal, editingFolder, testPaths]);
+  }, [formData.rootPath, formData.downloadPath, pathTestActive, showAddModal, editingFolder, testPaths]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info') => {
     setToast(null);

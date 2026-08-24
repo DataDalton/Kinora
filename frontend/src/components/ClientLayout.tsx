@@ -1,27 +1,17 @@
 "use client";
 
-import { ReactNode, useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { ReactNode, Suspense } from "react";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
 import { RealtimeProvider } from "@/contexts/RealtimeContext";
 import Navigation from "@/components/Navigation";
 
+// The login and register routes escape this margin with their own layout, so
+// no route check is needed here. Reading the pathname would pull the page
+// content out of the prerendered shell under Cache Components.
 function MainContent({ children }: { children: ReactNode }) {
 	const { collapsed } = useSidebar();
-	const pathname = usePathname();
-	const [mounted, setMounted] = useState(false);
-	const [isAuthPage, setIsAuthPage] = useState(false);
-
-	useEffect(() => {
-		setMounted(true);
-		setIsAuthPage(["/login", "/register"].includes(pathname));
-	}, [pathname]);
-
-	if (!mounted || isAuthPage) {
-		return <main className="flex-1">{children}</main>;
-	}
 
 	return (
 		<main
@@ -39,7 +29,9 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 				<RealtimeProvider>
 					<SidebarProvider>
 						<div className="flex min-h-screen">
-							<Navigation />
+							<Suspense fallback={null}>
+								<Navigation />
+							</Suspense>
 							<MainContent>{children}</MainContent>
 						</div>
 					</SidebarProvider>

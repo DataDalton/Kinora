@@ -291,12 +291,14 @@ export default function InteractiveSearchModal({
 		enabled: isOpen && showProfilePicker,
 	});
 
-	// Initialize selected indexers from profile or defaults
-	useEffect(() => {
+	// Seed the selected indexers from the profile, falling back to everything
+	// available. Runs when the options arrive rather than in an effect.
+	const [seededOptions, setSeededOptions] = useState(searchOptions);
+	if (searchOptions !== seededOptions) {
+		setSeededOptions(searchOptions);
 		if (searchOptions) {
 			const profileIndexers = searchOptions.profile?.indexers || [];
 			const availableIndexers = searchOptions.available_indexers || [];
-			// Use profile indexers if set, otherwise use all available
 			if (profileIndexers.length > 0) {
 				setSelectedIndexers(
 					profileIndexers.filter((i) =>
@@ -307,14 +309,19 @@ export default function InteractiveSearchModal({
 				setSelectedIndexers(availableIndexers);
 			}
 		}
-	}, [searchOptions]);
+	}
 
 	const showToast = (message: string, type: "success" | "error" | "info") => {
 		setToast(null);
 		setTimeout(() => setToast({ message, type }), 0);
 	};
 
-	useEffect(() => {
+	// The modal stays mounted while closed, so opening it clears the previous
+	// session. The key mirrors the inputs the effect used to watch.
+	const openKey = `${isOpen}|${mediaTitle}|${mediaId}`;
+	const [prevOpenKey, setPrevOpenKey] = useState(openKey);
+	if (openKey !== prevOpenKey) {
+		setPrevOpenKey(openKey);
 		if (isOpen) {
 			setSearchQuery(mediaTitle);
 			setGrabMonitoringMode(null);
@@ -322,17 +329,25 @@ export default function InteractiveSearchModal({
 			setManualRelease(null);
 			setPendingGrab(null);
 			setLocalResults(null);
-			// Invalidate any in-flight local pass from a previous open.
+		}
+	}
+
+	// Refs cannot be touched during render, so the in-flight local pass from a
+	// previous open is invalidated here instead.
+	useEffect(() => {
+		if (isOpen) {
 			localSearchSeq.current++;
 		}
-	}, [isOpen, mediaTitle, mediaId]);
+	}, [openKey, isOpen]);
 
 	// Keep the resolved id in sync if the parent supplies one after mount.
-	useEffect(() => {
+	const [prevMediaId, setPrevMediaId] = useState(mediaId);
+	if (mediaId !== prevMediaId) {
+		setPrevMediaId(mediaId);
 		if (mediaId != null) {
 			setEffectiveMediaId(mediaId);
 		}
-	}, [mediaId]);
+	}
 
 	useEffect(() => {
 		const handleEscape = (e: KeyboardEvent) => {
