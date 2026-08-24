@@ -10,7 +10,7 @@ from app.services import metadata_cache
 DETAIL_PERSIST_TTL = 7 * 86400
 
 # Endpoint prefixes whose payloads change over time and keep the short TTL.
-_VOLATILE_PREFIXES = ("search/", "chart", "editorial/", "genre", "radio")
+_VOLATILE_PREFIXES = ("search/", "chart", "genre", "radio")
 
 
 class DeezerService:
@@ -124,14 +124,6 @@ class DeezerService:
         """
         params = {"limit": limit}
         return await self._request("chart", params)
-
-    async def get_editorial_releases(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """
-        Get editorial new releases
-        """
-        params = {"limit": limit}
-        data = await self._request("editorial/0/releases", params)
-        return data.get("data", [])
 
     async def get_genres(self) -> List[Dict[str, Any]]:
         """

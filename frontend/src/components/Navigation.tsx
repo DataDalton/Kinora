@@ -16,7 +16,6 @@ import {
 	Sparkles,
 	Music2,
 	Compass,
-	Disc3,
 	PlusCircle,
 	Settings,
 	FileVideo,
@@ -224,12 +223,6 @@ export default function Navigation() {
 					href: "/discover",
 					label: "Discover",
 					icon: Compass,
-					visible: true,
-				},
-				{
-					href: "/discover-music",
-					label: "Discover Music",
-					icon: Disc3,
 					visible: true,
 				},
 				{

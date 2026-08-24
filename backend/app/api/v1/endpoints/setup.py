@@ -3,6 +3,7 @@ Setup endpoints for initial application configuration.
 First-time setup wizard for configuring download clients, API keys, and root folders.
 """
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Optional, List
 from pydantic import BaseModel, Field
@@ -148,26 +149,36 @@ async def ensure_bundled_download_client() -> None:
         print(f"[INIT] Bundled qBittorrent auto-config skipped: {e}")
 
 
-async def ensure_qbittorrent_interface_binding() -> None:
+# The tunnel takes time to come up after gluetun starts, and the interface does not
+# exist until it does, so the binding is retried rather than attempted once.
+BINDING_RETRY_SECONDS = 15
+BINDING_RETRY_LIMIT = 40
+
+
+async def ensure_qbittorrent_interface_binding() -> bool:
     """
     Bind the bundled qBittorrent to the VPN tunnel interface as a kill switch on top of
     gluetun's firewall. Runs only when QBITTORRENT_AUTOCONFIG is on and qBittorrent is not
     already bound. The VPN interface is auto-detected from qBittorrent's own interface list
     (tun* or wg*), so it works whether gluetun names it tun0 or wg0, and it binds only to an
     interface that actually exists. A manual binding is never overridden.
+
+    Returns True once the question is settled, meaning bound now, bound already, or
+    autoconfig turned off. Returns False while the answer depends on something that is
+    not ready yet, which tells the caller to try again.
     """
     if not settings.QBITTORRENT_AUTOCONFIG:
-        return
+        return True
     try:
         from app.services.download_clients.qbittorrent import get_qbittorrent_client
 
         client = await get_qbittorrent_client()
         if not client:
-            return
+            return False
 
         prefs = await client.get_preferences()
         if prefs.get("current_network_interface"):
-            return  # Already bound, respect the existing choice.
+            return True  # Already bound, respect the existing choice.
 
         interfaces = await client.get_network_interfaces()
         vpn_interface = None
@@ -178,13 +189,31 @@ async def ensure_qbittorrent_interface_binding() -> None:
                 break
 
         if not vpn_interface:
-            print("[INIT] No VPN interface found on qBittorrent, leaving it unbound")
-            return
+            return False
 
         await client.set_preferences({"current_network_interface": vpn_interface})
         print(f"[INIT] Bound qBittorrent to VPN interface {vpn_interface}")
+        return True
     except Exception as e:
-        print(f"[INIT] qBittorrent interface binding skipped: {e}")
+        print(f"[INIT] qBittorrent interface binding not ready yet: {e}")
+        return False
+
+
+async def bind_qbittorrent_when_tunnel_ready() -> None:
+    """
+    Keep attempting the interface binding until it succeeds or the window closes.
+
+    Meant to run in the background rather than during startup, so a tunnel that is slow
+    to come up delays the kill switch instead of the whole application. Attempting this
+    once at boot left qBittorrent unbound whenever the backend won the race with gluetun,
+    and nothing retried until the next restart.
+    """
+    for _ in range(BINDING_RETRY_LIMIT):
+        if await ensure_qbittorrent_interface_binding():
+            return
+        await asyncio.sleep(BINDING_RETRY_SECONDS)
+
+    print("[INIT] qBittorrent never reported a VPN interface, leaving it unbound")
 
 
 class SetupStatusResponse(BaseModel):

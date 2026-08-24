@@ -248,6 +248,12 @@ services:
         condition: service_healthy
       dragonfly:
         condition: service_healthy
+      # Started, not healthy. The backend reaches qBittorrent through this container's
+      # network namespace, so the name has to resolve before it tries. Waiting for health
+      # instead would keep the whole application down on any install where the VPN is not
+      # configured, since gluetun never reports healthy without credentials.
+      gluetun:
+        condition: service_started
     networks:
       - kinora-network
     restart: unless-stopped
@@ -337,6 +343,22 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: localhost # localhost = private HTTPS via internal CA. Set your public domain (e.g. media.example.com) for automatic Let's Encrypt.
+    # Clear the internal CA's issued certificates before starting, so Caddy always issues a
+    # fresh one instead of renewing. Its renewal path reuses the private key from storage,
+    # but the startup storage clean deletes an expired certificate along with that key, and
+    # renewal then retries against a key that is gone while the expired copy stays in memory
+    # and continues to be served. Issuing from a local CA is instant and offline, so
+    # discarding the old certificate each start costs nothing.
+    #
+    # Scoped to certificates/local, which holds only internal CA leaves. Let's Encrypt
+    # certificates live under a separate acme-v02 directory and are never touched, and the
+    # guard on DOMAIN keeps this off any install using a public domain, where discarding
+    # certificates would spend rate limits. The CA itself stays in pki/authorities/local,
+    # so the root already trusted by the system is unchanged.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ "$$DOMAIN" = localhost ] && rm -rf /data/caddy/certificates/local; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile'
     ports:
       - "80:80"
       - "443:443"

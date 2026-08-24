@@ -41,7 +41,6 @@ async def async_prefetch_warm_sets():
         ("tmdb_discover_tv", tmdb_service.discover_tv()),
         ("anilist_trending", anilist_service.get_trending(per_page=20)),
         ("deezer_chart", deezer_service.get_chart()),
-        ("deezer_new_releases", deezer_service.get_editorial_releases()),
     ]
 
     try:

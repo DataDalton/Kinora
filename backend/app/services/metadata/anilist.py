@@ -309,6 +309,47 @@ class AnilistService:
         data = await self._query(gql_query, {"page": page, "perPage": per_page})
         return data.get("Page", {}).get("media", [])
 
+    async def get_top_rated(self, page: int = 1, per_page: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get the highest scored anime. Sorted by score rather than popularity, so it
+        answers the same question the TMDB top rated lists do for film and television.
+        """
+        gql_query = """
+        query ($page: Int, $perPage: Int) {
+          Page(page: $page, perPage: $perPage) {
+            media(type: ANIME, sort: SCORE_DESC) {
+              id
+              idMal
+              title {
+                romaji
+                english
+                native
+              }
+              coverImage {
+                large
+                extraLarge
+              }
+              bannerImage
+              startDate {
+                year
+                month
+                day
+              }
+              description
+              averageScore
+              popularity
+              episodes
+              seasonYear
+              season
+              genres
+            }
+          }
+        }
+        """
+
+        data = await self._query(gql_query, {"page": page, "perPage": per_page})
+        return data.get("Page", {}).get("media", [])
+
     async def get_upcoming(self, page: int = 1, per_page: int = 20) -> List[Dict[str, Any]]:
         """
         Get upcoming anime for next season

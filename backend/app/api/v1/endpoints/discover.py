@@ -42,6 +42,36 @@ async def _prefetch_visible_details(results: List[Dict[str, Any]]) -> None:
         print(f"Discover detail prefetch error: {e}")
 
 
+# TMDB names the television endpoint "tv" while the rest of the app says "show".
+_TMDB_TRENDING_TYPES = {"all": "all", "movie": "movie", "show": "tv", "tv": "tv"}
+
+
+def _format_anilist_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Shape AniList media into the same card structure the TMDB rows return."""
+    formatted = []
+    for anime in items:
+        title = anime.get("title", {})
+        anime_title = title.get("english") or title.get("romaji")
+
+        start_date = anilist_service._parse_anilist_date(anime.get("startDate"))
+        release_date_str = start_date.strftime("%Y-%m-%d") if start_date else None
+
+        formatted.append(
+            {
+                "id": anime.get("id"),
+                "title": anime_title,
+                "name": anime_title,
+                "poster_path": anime.get("coverImage", {}).get("large"),
+                "backdrop_path": anime.get("bannerImage"),
+                "vote_average": anime.get("averageScore") / 10 if anime.get("averageScore") else 0,
+                "release_date": release_date_str,
+                "media_type": "anime",
+                "anilist_id": anime.get("id"),
+            }
+        )
+    return formatted
+
+
 @router.get("/trending")
 async def get_trending(
     background_tasks: BackgroundTasks,
@@ -50,14 +80,26 @@ async def get_trending(
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
-    Get trending media from TMDB
+    Get trending media. Film and television come from TMDB, anime from AniList, which
+    is the only one of the two that carries it.
     """
     try:
-        results = await tmdb_service.get_trending(media_type, time_window)
+        if media_type == "anime":
+            anime_results = await anilist_service.get_trending(per_page=20)
+            formatted_anime = _format_anilist_items(anime_results)
+            background_tasks.add_task(_prefetch_visible_details, formatted_anime)
+            return {"results": formatted_anime}
+
+        # An unmapped value would reach TMDB as a URL segment it rejects.
+        tmdb_type = _TMDB_TRENDING_TYPES.get(media_type, "all")
+        results = await tmdb_service.get_trending(tmdb_type, time_window)
 
         formatted_results = []
         for item in results:
+            # TMDB labels television "tv", the rest of the app says "show".
             item_type = item.get("media_type", media_type)
+            if item_type == "tv":
+                item_type = "show"
             formatted_results.append(
                 {
                     "id": item.get("id"),
@@ -125,27 +167,10 @@ async def get_popular(
                 )
 
         if media_type in ["all", "anime"]:
-            anime_results = await anilist_service.get_trending(per_page=20)
-            for anime in anime_results:
-                title = anime.get("title", {})
-                anime_title = title.get("english") or title.get("romaji")
-
-                start_date = anilist_service._parse_anilist_date(anime.get("startDate"))
-                release_date_str = start_date.strftime("%Y-%m-%d") if start_date else None
-
-                all_results.append(
-                    {
-                        "id": anime.get("id"),
-                        "title": anime_title,
-                        "name": anime_title,
-                        "poster_path": anime.get("coverImage", {}).get("large"),
-                        "backdrop_path": anime.get("bannerImage"),
-                        "vote_average": anime.get("averageScore") / 10 if anime.get("averageScore") else 0,
-                        "release_date": release_date_str,
-                        "media_type": "anime",
-                        "anilist_id": anime.get("id"),
-                    }
-                )
+            # Sorted by popularity to match what the TMDB popular lists return. This
+            # previously read the trending list, which answers a different question.
+            anime_results = await anilist_service.get_popular(per_page=20)
+            all_results.extend(_format_anilist_items(anime_results))
 
         all_results.sort(key=lambda x: x.get("vote_average", 0), reverse=True)
 
@@ -159,12 +184,17 @@ async def get_popular(
 
 @router.get("/upcoming")
 async def get_upcoming(
+    media_type: str = "movie",
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
-    Get upcoming movie releases from TMDB
+    Get upcoming releases. Movies come from TMDB, anime from AniList's next season.
     """
     try:
+        if media_type == "anime":
+            anime_results = await anilist_service.get_upcoming(per_page=20)
+            return {"results": _format_anilist_items(anime_results)}
+
         results = await tmdb_service.get_upcoming()
 
         formatted_results = []
@@ -230,6 +260,10 @@ async def get_top_rated(
                         "media_type": "show",
                     }
                 )
+
+        if media_type in ["all", "anime"]:
+            anime_results = await anilist_service.get_top_rated(per_page=20)
+            all_results.extend(_format_anilist_items(anime_results))
 
         return {"results": all_results}
     except Exception as e:
@@ -365,41 +399,6 @@ async def get_music_charts(
     except Exception as e:
         print(f"Error fetching music charts: {e}")
         return {"tracks": [], "albums": [], "artists": []}
-
-
-@router.get("/music/new-releases")
-async def get_music_new_releases(
-    limit: int = 50,
-    current_user: User = Depends(get_current_user),
-) -> Dict[str, Any]:
-    """
-    Get new music releases from Deezer editorial
-    """
-    try:
-        releases = await deezer_service.get_editorial_releases(limit)
-
-        formatted_results = []
-        for album in releases:
-            artist = album.get("artist", {})
-            formatted_results.append(
-                {
-                    "id": album.get("id"),
-                    "title": album.get("title"),
-                    "cover": album.get("cover_medium"),
-                    "cover_xl": album.get("cover_xl"),
-                    "artist_name": artist.get("name") if artist else None,
-                    "artist_id": artist.get("id") if artist else None,
-                    "release_date": album.get("release_date"),
-                    "nb_tracks": album.get("nb_tracks"),
-                    "record_type": album.get("record_type"),
-                    "media_type": "music",
-                }
-            )
-
-        return {"results": formatted_results}
-    except Exception as e:
-        print(f"Error fetching new releases: {e}")
-        return {"results": []}
 
 
 @router.get("/music/genres")

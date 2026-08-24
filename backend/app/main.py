@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,12 +46,14 @@ async def lifespan(app: FastAPI):
     from app.api.v1.endpoints.setup import (
         ensure_bundled_download_client,
         ensure_bundled_root_folders,
-        ensure_qbittorrent_interface_binding,
+        bind_qbittorrent_when_tunnel_ready,
     )
 
     await ensure_bundled_download_client()
     await ensure_bundled_root_folders()
-    await ensure_qbittorrent_interface_binding()
+    # Runs alongside the application rather than before it, because the VPN tunnel can
+    # take longer to come up than the rest of the stack and the binding needs it.
+    bindingTask = asyncio.create_task(bind_qbittorrent_when_tunnel_ready())
     # Reclaim FlareSolverr browsers held by sessions whose owning process has exited.
     try:
         from app.services.cloudflare.flaresolverr import flaresolverr
@@ -59,7 +62,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"FlareSolverr session cleanup skipped: {e}")
     yield
-    # Shutdown: Close database connection pool and HTTP client
+    # Shutdown: stop the pending binding retry, then close the pool and HTTP client
+    bindingTask.cancel()
     await close_pool()
     await close_http_client()
 
