@@ -9,6 +9,7 @@ import ConfirmModal from "@/components/ConfirmModal";
 import AuthProvidersSection from "@/components/AuthProvidersSection";
 import OIDCProvidersManagement from "@/components/OIDCProvidersManagement";
 import ForwardAuthSettings from "@/components/ForwardAuthSettings";
+import RegistrationSettings from "@/components/RegistrationSettings";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import RootFoldersSection from "@/components/settings/RootFoldersSection";
 import FolderHealthSection from "@/components/settings/FolderHealthSection";
@@ -231,6 +232,7 @@ function getImpliedPermissions(permissionName: string): string[] {
 type SettingsSection =
 	| "users"
 	| "permission-groups"
+	| "registration"
 	| "authentication"
 	| "oidc-providers"
 	| "forward-auth"
@@ -859,6 +861,15 @@ export default function SettingsPage() {
 					name: "Permission Groups",
 					count: permissionGroups?.length || 0,
 				},
+				...(hasPermission("system.admin")
+					? [
+							{
+								id: "registration" as SettingsSection,
+								name: "Registration",
+								count: 0,
+							},
+						]
+					: []),
 				{
 					id: "authentication" as SettingsSection,
 					name: "Linked Providers",
@@ -1291,6 +1302,24 @@ export default function SettingsPage() {
 					)}
 
 					{/* Authentication Section */}
+					{/* Registration Section */}
+					{selectedSection === "registration" && (
+						<div>
+							<PageHeader
+								title="Registration"
+								description="Control whether visitors can create their own accounts (Admin Only)"
+								gradientFrom="amber-600/10"
+								gradientVia="orange-600/10"
+								gradientTo="red-600/10"
+							/>
+							<div className="p-8">
+								<div className="max-w-6xl mx-auto">
+									<RegistrationSettings />
+								</div>
+							</div>
+						</div>
+					)}
+
 					{selectedSection === "authentication" && (
 						<div>
 							<PageHeader
