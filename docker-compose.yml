@@ -34,9 +34,9 @@ x-celery-env: &celery_env
   TORRENTS_ROOT: /kinora/torrents
   TMDB_API_KEY: ${TMDB_API_KEY:-}
 
-x-celery-build: &celery_build
-  context: ./backend
-  dockerfile: ../docker/backend.Dockerfile
+# Published backend image, shared by the API and every Celery service. Replace latest with a
+# release such as 1.2.0 to pin a version. docker-compose.dev.yml swaps this for a local build.
+x-backend-image: &backend_image ghcr.io/datadalton/kinora/backend:${KINORA_VERSION:-latest}
 
 x-celery-depends: &celery_depends
   bootstrap:
@@ -61,8 +61,11 @@ services:
       - postgres-data:/var/lib/postgresql:ro
       - qbittorrent-config:/qbittorrent-config
       - *kinora_storage
-      - ./docker/bootstrap:/bootstrap:ro
-    command: ["sh", "-c", "tr -d '\\r' < /bootstrap/generate-secrets.sh | sh"]
+    # The script is defined in the configs section at the end of this file.
+    configs:
+      - source: bootstrap-script
+        target: /bootstrap/generate-secrets.sh
+    command: ["sh", "/bootstrap/generate-secrets.sh"]
     restart: "no"
 
   postgres:
@@ -155,6 +158,7 @@ services:
       --tcp_nodelay=true
       --hz=100
       --cache_mode=false
+      --version_check=false
     volumes:
       - dragonfly-data:/data
     # Bound to localhost only. The cache is reached internally by service name, and this
@@ -171,9 +175,7 @@ services:
     restart: unless-stopped
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: ../docker/backend.Dockerfile
+    image: *backend_image
     container_name: kinora-backend
     environment:
       APP_NAME: Kinora
@@ -233,8 +235,6 @@ services:
       MIN_SEEDERS: 5
       SUBTITLE_LANGUAGES: en
     volumes:
-      - ./backend:/app
-      - /app/.venv
       - *kinora_storage
       - kinora-secrets:/secrets
     # No published port. The backend is reached through the Caddy proxy on the internal
@@ -259,7 +259,7 @@ services:
     restart: unless-stopped
 
   celery-worker:
-    build: *celery_build
+    image: *backend_image
     container_name: kinora-celery-worker
     # Pool sizes itself between the bounds below rather than Celery's default of one
     # process per core. -Q celery leaves the transcode queue to its own service.
@@ -271,8 +271,6 @@ services:
       <<: *celery_env
       FLARESOLVERR_URL: http://flaresolverr:8191
     volumes:
-      - ./backend:/app
-      - /app/.venv
       - *kinora_storage
       - kinora-secrets:/secrets
     depends_on: *celery_depends
@@ -284,7 +282,7 @@ services:
   # monitors share. One process, since ffmpeg already uses every core for a single encode.
   # Raise CELERY_TRANSCODE_CONCURRENCY only for hardware accelerated encoding.
   celery-transcode:
-    build: *celery_build
+    image: *backend_image
     container_name: kinora-celery-transcode
     command: >
       uv run celery -A app.tasks.celery_app worker --loglevel=info
@@ -292,8 +290,6 @@ services:
       --concurrency=${CELERY_TRANSCODE_CONCURRENCY:-1}
     environment: *celery_env
     volumes:
-      - ./backend:/app
-      - /app/.venv
       - *kinora_storage
       - kinora-secrets:/secrets
     depends_on: *celery_depends
@@ -302,13 +298,11 @@ services:
     restart: unless-stopped
 
   celery-beat:
-    build: *celery_build
+    image: *backend_image
     container_name: kinora-celery-beat
     command: uv run celery -A app.tasks.celery_app beat --loglevel=info
     environment: *celery_env
     volumes:
-      - ./backend:/app
-      - /app/.venv
       - kinora-secrets:/secrets
     depends_on: *celery_depends
     networks:
@@ -316,15 +310,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: ../docker/frontend.Dockerfile
-      args:
-        # Same-origin through Caddy, resolved from the browser location at runtime, so
-        # changing DOMAIN needs no frontend rebuild. API is a relative path. The
-        # WebSocket URL is derived from the page origin when left empty.
-        NEXT_PUBLIC_API_URL: /api/v1
-        NEXT_PUBLIC_WS_URL: ""
+    image: ghcr.io/datadalton/kinora/frontend:${KINORA_VERSION:-latest}
     container_name: kinora-frontend
     # No published port. Served through the Caddy proxy on the internal network.
     depends_on:
@@ -363,8 +349,11 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp" # HTTP/3 (QUIC)
+    # The Caddyfile is defined in the configs section at the end of this file.
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
     volumes:
-      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data # issued certificates (internal CA and Let's Encrypt) persist here
       - caddy-config:/config
     depends_on:
@@ -500,3 +489,137 @@ volumes:
   gluetun-auth:
   caddy-data:
   caddy-config:
+
+# Files mounted into containers, kept here so this one file is the whole install. A dollar
+# sign is written as $$ because Compose substitutes ${...} in this file, and $$ passes a
+# literal $ through to the container.
+configs:
+  # Run once by the bootstrap service before anything else starts.
+  bootstrap-script:
+    content: |
+      #!/bin/sh
+      # Generate persistent secrets on first run only (never overwrites existing ones).
+      # SECRET_KEY and JWT_SECRET_KEY are generated by the backend itself into the same
+      # secrets volume; this script only handles the gluetun control-server API key and
+      # its auth config, which gluetun needs at boot and cannot generate on its own.
+      set -e
+
+      SECRETS_DIR=/secrets
+      AUTH_DIR=/gluetun-auth
+      mkdir -p "$$SECRETS_DIR" "$$AUTH_DIR"
+
+      gen() {
+        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$$1"
+      }
+
+      # gluetun control-server API key (generate once)
+      if [ ! -f "$$SECRETS_DIR/gluetun_api_key" ]; then
+        gen 40 > "$$SECRETS_DIR/gluetun_api_key"
+        echo "bootstrap: generated gluetun control-server API key"
+      fi
+
+      # PostgreSQL password (generate once). A fresh database (empty data volume) gets a strong
+      # random password. An already-initialized database keeps the historical default password,
+      # so upgrading an existing install never causes a password mismatch. Postgres, PgBouncer,
+      # and the backend all read this same file.
+      if [ ! -f "$$SECRETS_DIR/postgres_password" ]; then
+        if [ -z "$$(ls -A /var/lib/postgresql 2>/dev/null)" ]; then
+          gen 40 > "$$SECRETS_DIR/postgres_password"
+          echo "bootstrap: generated postgres password (fresh database)"
+        else
+          printf 'kinora_password' > "$$SECRETS_DIR/postgres_password"
+          echo "bootstrap: preserved existing postgres password"
+        fi
+      fi
+
+      # gluetun control-server auth config using the generated key (generate once)
+      if [ ! -f "$$AUTH_DIR/config.toml" ]; then
+        KEY=$$(cat "$$SECRETS_DIR/gluetun_api_key")
+        cat > "$$AUTH_DIR/config.toml" <<EOF
+      [[roles]]
+      name = "kinora"
+      routes = [
+        "GET /v1/publicip/ip",
+        "GET /v1/vpn/status",
+        "PUT /v1/vpn/status",
+        "GET /v1/vpn/settings",
+        "PUT /v1/vpn/settings",
+        "GET /v1/openvpn/status",
+        "PUT /v1/openvpn/status",
+        "GET /v1/openvpn/portforwarded",
+        "GET /v1/dns/status",
+        "GET /v1/version",
+      ]
+      auth = "apikey"
+      apikey = "$$KEY"
+      EOF
+        echo "bootstrap: generated gluetun auth config"
+      fi
+
+      # qBittorrent config (seed once, never overwrite an existing one). Sets a known WebUI
+      # login (admin / adminadmin) so qBittorrent does not generate a random temporary
+      # password and reset the WebUI section on first run, accepts the legal notice so the
+      # WebUI starts unattended, binds the WebUI on 8080, and whitelists the internal Docker
+      # subnets. The backend connects with these credentials. The WebUI is localhost-bound, so
+      # change this password from the qBittorrent UI if you want. A quoted heredoc keeps the
+      # backslashes in the setting keys and the password hash literal.
+      QBT_DIR=/qbittorrent-config/qBittorrent
+      if [ -d /qbittorrent-config ] && [ ! -f "$$QBT_DIR/qBittorrent.conf" ]; then
+        mkdir -p "$$QBT_DIR"
+        cat > "$$QBT_DIR/qBittorrent.conf" <<'QBTCONF'
+      [LegalNotice]
+      Accepted=true
+
+      [Preferences]
+      WebUI\Address=*
+      WebUI\Port=8080
+      WebUI\Username=admin
+      WebUI\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVBHS5iD5rllja3anrbYVjt8YnfUnP07XFR7B79MPClEuI0AbfzhoUf1Ja7ijzS/YR4Tz2KJw==)"
+      WebUI\AuthSubnetWhitelistEnabled=true
+      WebUI\AuthSubnetWhitelist=10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+      WebUI\HostHeaderValidation=false
+      WebUI\CSRFProtection=false
+      WebUI\LocalHostAuth=false
+
+      [BitTorrent]
+      Session\DefaultSavePath=/kinora/torrents
+      Session\TempPath=/kinora/torrents/.incomplete
+      QBTCONF
+        # qBittorrent runs as PUID/PGID (default 1000), so match ownership.
+        chown -R "$${PUID:-1000}:$${PGID:-1000}" /qbittorrent-config/qBittorrent 2>/dev/null || true
+        echo "bootstrap: seeded qBittorrent config (known WebUI login for auto-connect)"
+      fi
+
+      # Create the media and torrents folders inside the data location so they exist for the
+      # setup folder browser and qBittorrent, and are owned by the app user (PUID/PGID).
+      if [ -d /kinora ]; then
+        mkdir -p /kinora/media /kinora/torrents
+        chown -R "$${PUID:-1000}:$${PGID:-1000}" /kinora 2>/dev/null || true
+        echo "bootstrap: prepared /kinora/media and /kinora/torrents"
+      fi
+
+      echo "bootstrap: complete"
+
+  # Mounted into the caddy service.
+  caddyfile:
+    content: |
+      # DOMAIN defaults to localhost. Caddy serves localhost and other internal names with
+      # its own local CA (private HTTPS, no public exposure, no Let's Encrypt). Set DOMAIN to
+      # a real public domain and Caddy provisions and renews a Let's Encrypt certificate
+      # automatically. HTTP/3, HTTP/2, and HTTP/1.1 with automatic HTTP-to-HTTPS redirect are
+      # all handled here at the edge, and the proxied backend and frontend speak plain HTTP/1.1.
+      {$$DOMAIN:localhost} {
+          encode zstd gzip
+
+          # API requests and the realtime WebSocket go to the backend. reverse_proxy upgrades
+          # the WebSocket connection on /ws automatically.
+          @backend path /api/* /ws/*
+          handle @backend {
+              reverse_proxy backend:8000
+          }
+
+          # Everything else is served by the Next.js frontend.
+          handle {
+              reverse_proxy frontend:3000
+          }
+      }

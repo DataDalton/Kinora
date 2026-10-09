@@ -181,15 +181,6 @@ class Settings(BaseSettings):
         secrets_dir = os.getenv("KINORA_SECRETS_DIR", ".")
         key_file = Path(secrets_dir) / f".{key_name}"
 
-        # Migrate a legacy key from the working directory if present.
-        legacy = Path(f".{key_name}")
-        if not key_file.exists() and legacy.exists():
-            try:
-                key_file.parent.mkdir(parents=True, exist_ok=True)
-                key_file.write_text(legacy.read_text().strip())
-            except OSError:
-                return legacy.read_text().strip()
-
         if key_file.exists():
             return key_file.read_text().strip()
 

@@ -1,0 +1,56 @@
+# Development layer merged on top of docker-compose.yml. It builds the Kinora images from
+# this checkout instead of pulling them from GHCR, and mounts the backend source into the
+# containers. Everything else comes from docker-compose.yml.
+#
+# Enable it by adding this line to the .env next to the compose files:
+#   COMPOSE_FILE=docker-compose.yml;docker-compose.dev.yml
+# Use : instead of ; as the separator on Linux and macOS.
+
+x-backend-build: &backend_build
+  context: ./backend
+  dockerfile: ../docker/backend.Dockerfile
+
+# Backend source mounted over the image's copy, with the image's virtualenv kept in place.
+x-backend-source: &backend_source
+  - ./backend:/app
+  - /app/.venv
+
+services:
+  # pull_policy never stops Compose from pulling the published image. It still builds an
+  # image that is missing locally, and docker compose up --build rebuilds after changes.
+  backend:
+    image: kinora-backend
+    build: *backend_build
+    pull_policy: never
+    volumes: *backend_source
+
+  celery-worker:
+    image: kinora-celery-worker
+    build: *backend_build
+    pull_policy: never
+    volumes: *backend_source
+
+  celery-transcode:
+    image: kinora-celery-transcode
+    build: *backend_build
+    pull_policy: never
+    volumes: *backend_source
+
+  celery-beat:
+    image: kinora-celery-beat
+    build: *backend_build
+    pull_policy: never
+    volumes: *backend_source
+
+  frontend:
+    image: kinora-frontend
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+      args:
+        # Same-origin through Caddy, resolved from the browser location at runtime, so
+        # changing DOMAIN needs no frontend rebuild. API is a relative path. The
+        # WebSocket URL is derived from the page origin when left empty.
+        NEXT_PUBLIC_API_URL: /api/v1
+        NEXT_PUBLIC_WS_URL: ""
+    pull_policy: never

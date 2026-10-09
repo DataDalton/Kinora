@@ -1,0 +1,14 @@
+# Secret keys belong in the kinora-secrets volume, never in an image layer
+.secret_key
+.jwt_secret_key
+.env
+.env.*
+
+# Local environments and runtime state
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+celerybeat-schedule
+.gitignore
