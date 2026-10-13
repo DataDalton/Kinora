@@ -18,7 +18,8 @@ import {
 	User,
 	ShieldCheck,
 } from "lucide-react";
-import Toast from "./Toast";
+import { useToast } from "@/components/toast/ToastProvider";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { getValidationPreview } from "@/lib/api/downloads";
 
 interface TorrentResult {
@@ -79,6 +80,8 @@ interface InteractiveSearchModalProps {
 	// it on the first grab and returns its id.
 	mediaId: number | null;
 	mediaTitle: string;
+	// TMDB poster path or cover URL shown on toasts about this item.
+	mediaPoster?: string | null;
 	searchQuery?: string;
 	episodeId?: number;
 	episodeInfo?: string;
@@ -180,6 +183,7 @@ export default function InteractiveSearchModal({
 	mediaType,
 	mediaId,
 	mediaTitle,
+	mediaPoster,
 	searchQuery: initialSearchQuery,
 	episodeId,
 	episodeInfo,
@@ -188,6 +192,8 @@ export default function InteractiveSearchModal({
 	onProfileChange,
 }: InteractiveSearchModalProps) {
 	const queryClient = useQueryClient();
+	const toast = useToast();
+	const toastMedia = { poster: mediaPoster, name: mediaTitle };
 	// Resolved library-item id. Starts from the prop and is filled in by ensureMediaId on
 	// the first grab when the item is added lazily.
 	const [effectiveMediaId, setEffectiveMediaId] = useState<number | null>(
@@ -201,10 +207,6 @@ export default function InteractiveSearchModal({
 	const [qualityFilter, setQualityFilter] = useState<string>("all");
 	const [indexerFilter, setIndexerFilter] = useState<string>("all");
 	const [showFilters, setShowFilters] = useState(false);
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error" | "info";
-	} | null>(null);
 	const [indexerStatus, setIndexerStatus] = useState<IndexerStatus[]>([]);
 	const [selectedIndexers, setSelectedIndexers] = useState<string[]>([]);
 	const [selectedQuality, setSelectedQuality] = useState<string>("all");
@@ -311,11 +313,6 @@ export default function InteractiveSearchModal({
 		}
 	}
 
-	const showToast = (message: string, type: "success" | "error" | "info") => {
-		setToast(null);
-		setTimeout(() => setToast({ message, type }), 0);
-	};
-
 	// The modal stays mounted while closed, so opening it clears the previous
 	// session. The key mirrors the inputs the effect used to watch.
 	const openKey = `${isOpen}|${mediaTitle}|${mediaId}`;
@@ -349,15 +346,7 @@ export default function InteractiveSearchModal({
 		}
 	}
 
-	useEffect(() => {
-		const handleEscape = (e: KeyboardEvent) => {
-			if (e.key === "Escape" && isOpen) {
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", handleEscape);
-		return () => document.removeEventListener("keydown", handleEscape);
-	}, [isOpen, onClose]);
+	const backdropProps = useModalDismiss({ onClose, isOpen });
 
 	const {
 		data: searchResults,
@@ -428,26 +417,54 @@ export default function InteractiveSearchModal({
 			return response.data;
 		},
 		onSuccess: (data) => {
-			let message = "Download started successfully";
 			if (data?.monitoring_mode === "satisfied") {
-				message = "Grabbed and marked satisfied (will not upgrade)";
 				setGrabMonitoringMode("satisfied");
+				toast.success("Download started", {
+					media: toastMedia,
+					description: "Marked satisfied. Upgrade search is off",
+					actions: [
+						{
+							label: "Keep monitoring",
+							onClick: () => {
+								overrideMonitoringMutation.mutate("monitoring");
+							},
+						},
+					],
+				});
 			} else if (data?.monitoring_mode === "monitoring") {
-				message = "Grabbed, keeping monitored for upgrades";
 				setGrabMonitoringMode("monitoring");
+				toast.success("Download started", {
+					media: toastMedia,
+					description: "Keeping it monitored for upgrades",
+					actions: [
+						{
+							label: "Mark satisfied",
+							onClick: () => {
+								overrideMonitoringMutation.mutate("satisfied");
+							},
+						},
+					],
+				});
+			} else {
+				toast.success("Download started", { media: toastMedia });
 			}
-			showToast(message, "success");
 			queryClient.invalidateQueries({ queryKey: ["history"] });
 		},
-		onError: (error: any) => {
-			// Axios errors carry response.data.detail; guard failures (permission/approval) throw
-			// a plain Error whose message explains why the item could not be added.
-			showToast(
-				error.response?.data?.detail ||
-					error.message ||
-					"Failed to start download",
-				"error",
-			);
+		onError: (error: any, variables) => {
+			// Axios errors carry response.data.detail. Guard failures (permission or approval)
+			// throw a plain Error whose message explains why the item could not be added.
+			toast.error("Couldn't start download", {
+				media: toastMedia,
+				description: error.response?.data?.detail || error.message,
+				actions: [
+					{
+						label: "Retry",
+						onClick: () => {
+							downloadMutation.mutate(variables);
+						},
+					},
+				],
+			});
 		},
 	});
 
@@ -477,18 +494,30 @@ export default function InteractiveSearchModal({
 			queryClient.invalidateQueries({
 				queryKey: [mediaType, effectiveMediaId],
 			});
-			showToast(
-				nextMode === "monitoring"
-					? "Now keeping monitored for upgrades"
-					: "Marked satisfied (will not upgrade)",
-				"success",
-			);
+			if (nextMode === "monitoring") {
+				toast.success("Keeping monitored for upgrades", {
+					media: toastMedia,
+				});
+			} else {
+				toast.success("Marked satisfied", {
+					media: toastMedia,
+					description: "Upgrade search is off",
+				});
+			}
 		},
-		onError: (error: any) => {
-			showToast(
-				error.response?.data?.detail || "Failed to update monitoring",
-				"error",
-			);
+		onError: (error: any, nextMode) => {
+			toast.error("Couldn't update monitoring", {
+				media: toastMedia,
+				description: error.response?.data?.detail,
+				actions: [
+					{
+						label: "Retry",
+						onClick: () => {
+							overrideMonitoringMutation.mutate(nextMode);
+						},
+					},
+				],
+			});
 		},
 	});
 
@@ -606,10 +635,20 @@ export default function InteractiveSearchModal({
 		);
 	};
 
+	const pendingGrabBackdropProps = useModalDismiss({
+		onClose: () => setPendingGrab(null),
+		isOpen: isOpen && pendingGrab !== null,
+		closeOnOutsideClick: true,
+		disabled: downloadMutation.isPending,
+	});
+
 	if (!isOpen) return null;
 
 	return (
-		<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-[60] flex items-center justify-center p-4">
+		<div
+			className="fixed inset-0 backdrop-blur-sm bg-background/50 z-[60] flex items-center justify-center p-4"
+			{...backdropProps}
+		>
 			<div className="bg-background rounded-lg w-full max-w-5xl max-h-[90vh] border border-border shadow-2xl flex flex-col">
 				<div className="flex items-center justify-between p-4 border-b border-border">
 					<div>
@@ -1150,7 +1189,7 @@ export default function InteractiveSearchModal({
 			{pendingGrab && (
 				<div
 					className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
-					onClick={() => setPendingGrab(null)}
+					{...pendingGrabBackdropProps}
 				>
 					<div
 						className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-xl"
@@ -1238,14 +1277,6 @@ export default function InteractiveSearchModal({
 						</div>
 					</div>
 				</div>
-			)}
-
-			{toast && (
-				<Toast
-					message={toast.message}
-					type={toast.type}
-					onClose={() => setToast(null)}
-				/>
 			)}
 		</div>
 	);

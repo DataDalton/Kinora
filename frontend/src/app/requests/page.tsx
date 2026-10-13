@@ -27,7 +27,8 @@ import {
 } from "@/lib/api/requests";
 import { MediaRequest, MediaRequestCount } from "@/types/request";
 import PageHeader from "@/components/PageHeader";
-import Toast from "@/components/Toast";
+import { useToast } from "@/components/toast/ToastProvider";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 
 type StatusFilter = "all" | "pending" | "approved" | "denied";
 
@@ -45,10 +46,7 @@ export default function RequestsPage() {
 	);
 	const [showDetailModal, setShowDetailModal] = useState(false);
 	const [reviewNotes, setReviewNotes] = useState("");
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error" | "info";
-	} | null>(null);
+	const toast = useToast();
 
 	// Fetch current user for ownership checks
 	const { data: currentUser } = useQuery<CurrentUser>({
@@ -74,66 +72,111 @@ export default function RequestsPage() {
 		refetchInterval: 30000,
 	});
 
-	const showToast = (message: string, type: "success" | "error" | "info") => {
-		setToast(null);
-		setTimeout(() => {
-			setToast({ message, type });
-		}, 0);
-	};
+	const requestMedia = (request: MediaRequest) => ({
+		poster: request.posterPath,
+		name: request.title,
+	});
 
 	// Approve mutation
 	const approveMutation = useMutation({
-		mutationFn: ({ id, notes }: { id: number; notes?: string }) =>
-			approveRequest(id, notes),
-		onSuccess: () => {
+		mutationFn: ({
+			request,
+			notes,
+		}: {
+			request: MediaRequest;
+			notes?: string;
+		}) => approveRequest(request.id, notes),
+		onSuccess: (_data, { request }) => {
 			queryClient.invalidateQueries({ queryKey: ["requests"] });
 			queryClient.invalidateQueries({ queryKey: ["request-counts"] });
 			setShowDetailModal(false);
 			setSelectedRequest(null);
 			setReviewNotes("");
-			showToast("Request approved successfully", "success");
+			toast.success("Request approved", { media: requestMedia(request) });
 		},
-		onError: (error: any) => {
-			const errorMsg =
-				error.response?.data?.detail || "Failed to approve request";
-			showToast(errorMsg, "error");
+		onError: (error: any, variables) => {
+			toast.error("Couldn't approve request", {
+				media: requestMedia(variables.request),
+				description: error.response?.data?.detail,
+				actions: [
+					{
+						label: "Retry",
+						onClick: () => {
+							approveMutation.mutate(variables);
+						},
+					},
+				],
+			});
 		},
 	});
 
 	// Deny mutation
 	const denyMutation = useMutation({
-		mutationFn: ({ id, notes }: { id: number; notes?: string }) =>
-			denyRequest(id, notes),
-		onSuccess: () => {
+		mutationFn: ({
+			request,
+			notes,
+		}: {
+			request: MediaRequest;
+			notes?: string;
+		}) => denyRequest(request.id, notes),
+		onSuccess: (_data, { request }) => {
 			queryClient.invalidateQueries({ queryKey: ["requests"] });
 			queryClient.invalidateQueries({ queryKey: ["request-counts"] });
 			setShowDetailModal(false);
 			setSelectedRequest(null);
 			setReviewNotes("");
-			showToast("Request denied", "info");
+			toast.info("Request denied", { media: requestMedia(request) });
 		},
-		onError: (error: any) => {
-			const errorMsg =
-				error.response?.data?.detail || "Failed to deny request";
-			showToast(errorMsg, "error");
+		onError: (error: any, variables) => {
+			toast.error("Couldn't deny request", {
+				media: requestMedia(variables.request),
+				description: error.response?.data?.detail,
+				actions: [
+					{
+						label: "Retry",
+						onClick: () => {
+							denyMutation.mutate(variables);
+						},
+					},
+				],
+			});
 		},
 	});
 
 	// Cancel mutation
 	const cancelMutation = useMutation({
-		mutationFn: (id: number) => cancelRequest(id),
-		onSuccess: () => {
+		mutationFn: (request: MediaRequest) => cancelRequest(request.id),
+		onSuccess: (_data, request) => {
 			queryClient.invalidateQueries({ queryKey: ["requests"] });
 			queryClient.invalidateQueries({ queryKey: ["request-counts"] });
 			setShowDetailModal(false);
 			setSelectedRequest(null);
-			showToast("Request cancelled", "info");
+			toast.info("Request cancelled", { media: requestMedia(request) });
 		},
-		onError: (error: any) => {
-			const errorMsg =
-				error.response?.data?.detail || "Failed to cancel request";
-			showToast(errorMsg, "error");
+		onError: (error: any, request) => {
+			toast.error("Couldn't cancel request", {
+				media: requestMedia(request),
+				description: error.response?.data?.detail,
+				actions: [
+					{
+						label: "Retry",
+						onClick: () => {
+							cancelMutation.mutate(request);
+						},
+					},
+				],
+			});
 		},
+	});
+
+	const detailBackdropProps = useModalDismiss({
+		onClose: () => setShowDetailModal(false),
+		isOpen: showDetailModal && selectedRequest !== null,
+		closeOnOutsideClick: false,
+		disabled:
+			approveMutation.isPending ||
+			denyMutation.isPending ||
+			cancelMutation.isPending,
 	});
 
 	const getPosterUrl = (path: string | null | undefined) => {
@@ -254,20 +297,20 @@ export default function RequestsPage() {
 
 	const handleApprove = (request: MediaRequest) => {
 		approveMutation.mutate({
-			id: request.id,
+			request,
 			notes: reviewNotes || undefined,
 		});
 	};
 
 	const handleDeny = (request: MediaRequest) => {
 		denyMutation.mutate({
-			id: request.id,
+			request,
 			notes: reviewNotes || undefined,
 		});
 	};
 
 	const handleCancel = (request: MediaRequest) => {
-		cancelMutation.mutate(request.id);
+		cancelMutation.mutate(request);
 	};
 
 	const filterTabs = [
@@ -412,7 +455,7 @@ export default function RequestsPage() {
 															e.stopPropagation();
 															approveMutation.mutate(
 																{
-																	id: request.id,
+																	request,
 																},
 															);
 														}}
@@ -429,7 +472,7 @@ export default function RequestsPage() {
 															e.stopPropagation();
 															denyMutation.mutate(
 																{
-																	id: request.id,
+																	request,
 																},
 															);
 														}}
@@ -449,7 +492,7 @@ export default function RequestsPage() {
 														onClick={(e) => {
 															e.stopPropagation();
 															cancelMutation.mutate(
-																request.id,
+																request,
 															);
 														}}
 														disabled={
@@ -472,7 +515,7 @@ export default function RequestsPage() {
 												onClick={(e) => {
 													e.stopPropagation();
 													cancelMutation.mutate(
-														request.id,
+														request,
 													);
 												}}
 												disabled={
@@ -512,7 +555,10 @@ export default function RequestsPage() {
 
 			{/* Request Detail Modal */}
 			{showDetailModal && selectedRequest && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...detailBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-2xl w-full border border-border shadow-2xl max-h-[90vh] overflow-y-auto">
 						{/* Modal Header */}
 						<div className="flex items-start gap-4 p-6 border-b border-border">
@@ -761,17 +807,6 @@ export default function RequestsPage() {
 							</button>
 						</div>
 					</div>
-				</div>
-			)}
-
-			{/* Toast Notification */}
-			{toast && (
-				<div className="fixed bottom-4 right-4 z-[70]">
-					<Toast
-						message={toast.message}
-						type={toast.type}
-						onClose={() => setToast(null)}
-					/>
 				</div>
 			)}
 		</div>

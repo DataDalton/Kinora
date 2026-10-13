@@ -41,11 +41,22 @@ import {
 } from "./format";
 import PieceMap from "./PieceMap";
 
+// A control action the page runs and tracks. reached describes the torrent state that
+// confirms qBittorrent applied it, and is omitted when there is no state to wait for.
+export interface TorrentAction {
+	id: string;
+	label: string;
+	request: () => Promise<void>;
+	reached?: (torrent: Torrent) => boolean;
+	successMessage: string;
+}
+
 interface TorrentCardProps {
 	torrent: Torrent;
 	canControl: boolean;
-	onChanged: () => void;
-	notify: (message: string, type?: "success" | "error") => void;
+	// Id of the action waiting on qBittorrent, which disables every control on the card.
+	pendingAction?: string;
+	onAction: (action: TorrentAction) => void;
 	onDelete: () => void;
 	onEditShareLimits: () => void;
 	onEditSpeedLimits: () => void;
@@ -75,6 +86,7 @@ function ControlButton({
 	active,
 	disabled,
 	danger,
+	loading,
 }: {
 	icon: React.ComponentType<{ className?: string }>;
 	label: string;
@@ -82,13 +94,16 @@ function ControlButton({
 	active?: boolean;
 	disabled?: boolean;
 	danger?: boolean;
+	loading?: boolean;
 }) {
+	const shownLabel = loading ? `${label} (waiting for qBittorrent)` : label;
 	return (
 		<button
 			onClick={onClick}
-			disabled={disabled}
-			title={label}
-			aria-label={label}
+			disabled={disabled || loading}
+			title={shownLabel}
+			aria-label={shownLabel}
+			aria-busy={loading}
 			className={`p-2 rounded-lg border transition text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
 				active
 					? "bg-primary text-primary-foreground border-primary"
@@ -97,7 +112,11 @@ function ControlButton({
 						: "border-border hover:bg-accent"
 			}`}
 		>
-			<Icon className="w-4 h-4" />
+			{loading ? (
+				<Loader2 className="w-4 h-4 animate-spin" />
+			) : (
+				<Icon className="w-4 h-4" />
+			)}
 		</button>
 	);
 }
@@ -221,14 +240,14 @@ function FileList({
 export default function TorrentCard({
 	torrent,
 	canControl,
-	onChanged,
-	notify,
+	pendingAction,
+	onAction,
 	onDelete,
 	onEditShareLimits,
 	onEditSpeedLimits,
 }: TorrentCardProps) {
 	const [expanded, setExpanded] = useState(false);
-	const [busy, setBusy] = useState(false);
+	const busy = pendingAction !== undefined;
 
 	const { data: detail } = useQuery({
 		queryKey: ["torrent-detail", torrent.hash],
@@ -241,22 +260,80 @@ export default function TorrentCard({
 	const isSeeding = torrent.state === "seeding";
 	const progressPct = Math.round((torrent.progress || 0) * 1000) / 10;
 
-	const run = async (fn: () => Promise<void>, message: string) => {
-		if (busy) return;
-		setBusy(true);
-		try {
-			await fn();
-			onChanged();
-			notify(message, "success");
-		} catch (err: unknown) {
-			notify(
-				err instanceof Error ? err.message : "Action failed",
-				"error",
-			);
-		} finally {
-			setBusy(false);
-		}
-	};
+	const hash = torrent.hash;
+	const forceStart = !torrent.force_start;
+	const superSeeding = !torrent.super_seeding;
+	const sequential = !torrent.sequential_download;
+	const actions = {
+		pause: {
+			id: "pause",
+			label: "Pause",
+			request: () => pauseTorrent(hash),
+			reached: (t) => t.state === "paused",
+			successMessage: "Paused",
+		},
+		resume: {
+			id: "resume",
+			label: "Resume",
+			request: () => resumeTorrent(hash),
+			reached: (t) => t.state !== "paused",
+			successMessage: "Resumed",
+		},
+		recheck: {
+			id: "recheck",
+			label: "Recheck",
+			request: () => recheckTorrent(hash),
+			successMessage: "Rechecking",
+		},
+		reannounce: {
+			id: "reannounce",
+			label: "Reannounce",
+			request: () => reannounceTorrent(hash),
+			successMessage: "Reannounced",
+		},
+		forceStart: {
+			id: "forceStart",
+			label: "Force start",
+			request: () => setForceStart(hash, forceStart),
+			reached: (t) => t.force_start === forceStart,
+			successMessage: forceStart ? "Force-start on" : "Force-start off",
+		},
+		superSeeding: {
+			id: "superSeeding",
+			label: "Super seeding",
+			request: () => setSuperSeeding(hash, superSeeding),
+			reached: (t) => t.super_seeding === superSeeding,
+			successMessage: superSeeding ? "Super-seed on" : "Super-seed off",
+		},
+		sequential: {
+			id: "sequential",
+			label: "Sequential download",
+			request: () => setSequentialDownload(hash, sequential),
+			reached: (t) => t.sequential_download === sequential,
+			successMessage: sequential ? "Sequential on" : "Sequential off",
+		},
+		queueUp: {
+			id: "queueUp",
+			label: "Queue up",
+			request: () => queueAction(hash, "up"),
+			successMessage: "Moved up",
+		},
+		queueDown: {
+			id: "queueDown",
+			label: "Queue down",
+			request: () => queueAction(hash, "down"),
+			successMessage: "Moved down",
+		},
+	} satisfies Record<string, TorrentAction>;
+
+	// Props shared by every action button. The button that started the pending action
+	// shows the spinner, and the rest stay disabled until it resolves.
+	const actionProps = (action: TorrentAction) => ({
+		label: action.label,
+		disabled: busy,
+		loading: pendingAction === action.id,
+		onClick: () => onAction(action),
+	});
 
 	return (
 		<div className="bg-card text-card-foreground rounded-lg shadow p-4">
@@ -357,98 +434,36 @@ export default function TorrentCard({
 					{isPaused ? (
 						<ControlButton
 							icon={Play}
-							label="Resume"
-							disabled={busy}
-							onClick={() =>
-								run(
-									() => resumeTorrent(torrent.hash),
-									"Resumed",
-								)
-							}
+							{...actionProps(actions.resume)}
 						/>
 					) : (
 						<ControlButton
 							icon={Pause}
-							label="Pause"
-							disabled={busy}
-							onClick={() =>
-								run(() => pauseTorrent(torrent.hash), "Paused")
-							}
+							{...actionProps(actions.pause)}
 						/>
 					)}
 					<ControlButton
 						icon={RefreshCw}
-						label="Recheck"
-						disabled={busy}
-						onClick={() =>
-							run(
-								() => recheckTorrent(torrent.hash),
-								"Rechecking",
-							)
-						}
+						{...actionProps(actions.recheck)}
 					/>
 					<ControlButton
 						icon={Radio}
-						label="Reannounce"
-						disabled={busy}
-						onClick={() =>
-							run(
-								() => reannounceTorrent(torrent.hash),
-								"Reannounced",
-							)
-						}
+						{...actionProps(actions.reannounce)}
 					/>
 					<ControlButton
 						icon={Zap}
-						label="Force start"
 						active={torrent.force_start}
-						disabled={busy}
-						onClick={() =>
-							run(
-								() =>
-									setForceStart(
-										torrent.hash,
-										!torrent.force_start,
-									),
-								torrent.force_start
-									? "Force-start off"
-									: "Force-start on",
-							)
-						}
+						{...actionProps(actions.forceStart)}
 					/>
 					<ControlButton
 						icon={UploadCloud}
-						label="Super seeding"
 						active={torrent.super_seeding}
-						disabled={busy}
-						onClick={() =>
-							run(
-								() =>
-									setSuperSeeding(
-										torrent.hash,
-										!torrent.super_seeding,
-									),
-								torrent.super_seeding
-									? "Super-seed off"
-									: "Super-seed on",
-							)
-						}
+						{...actionProps(actions.superSeeding)}
 					/>
 					<ControlButton
 						icon={ArrowDownUp}
-						label="Sequential download"
 						active={torrent.sequential_download}
-						disabled={busy}
-						onClick={() =>
-							run(
-								() =>
-									setSequentialDownload(
-										torrent.hash,
-										!torrent.sequential_download,
-									),
-								"Toggled sequential",
-							)
-						}
+						{...actionProps(actions.sequential)}
 					/>
 					<button
 						onClick={onEditShareLimits}
@@ -469,25 +484,11 @@ export default function TorrentCard({
 					<div className="flex gap-1">
 						<ControlButton
 							icon={ChevronUp}
-							label="Queue up"
-							disabled={busy}
-							onClick={() =>
-								run(
-									() => queueAction(torrent.hash, "up"),
-									"Moved up",
-								)
-							}
+							{...actionProps(actions.queueUp)}
 						/>
 						<ControlButton
 							icon={ChevronDown}
-							label="Queue down"
-							disabled={busy}
-							onClick={() =>
-								run(
-									() => queueAction(torrent.hash, "down"),
-									"Moved down",
-								)
-							}
+							{...actionProps(actions.queueDown)}
 						/>
 					</div>
 					<ControlButton

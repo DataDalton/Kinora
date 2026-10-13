@@ -1,6 +1,7 @@
 """
 Movie repository with tag-aware queries and batch operations.
 """
+
 from typing import List, Optional, Dict, Any
 import asyncpg
 
@@ -19,9 +20,21 @@ class MovieRepository(BaseRepository[Movie]):
         limit: int = 100,
         offset: int = 0,
         monitoredOnly: bool = False,
+        status: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Fetch movies with their tags in a single query using JSON aggregation."""
-        whereClause = "WHERE m.monitored = TRUE" if monitoredOnly else ""
+        """
+        Fetch movies with their tags in a single query using JSON aggregation. The total
+        counts every movie matching the same filters, so pagination spans the filtered set.
+        """
+        conditions = []
+        filterParams: List[Any] = []
+        if monitoredOnly:
+            conditions.append("m.monitored = TRUE")
+        if status:
+            filterParams.append(status)
+            conditions.append(f"m.status = ${len(filterParams)}")
+        whereClause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        limitParam = len(filterParams) + 1
 
         query = f"""
             SELECT m.*,
@@ -37,13 +50,12 @@ class MovieRepository(BaseRepository[Movie]):
             {whereClause}
             GROUP BY m.id
             ORDER BY m.created_at DESC
-            LIMIT $1 OFFSET $2
+            LIMIT ${limitParam} OFFSET ${limitParam + 1}
         """
 
-        # Get total count of all movies in database
-        total = await self.conn.fetchval("SELECT COUNT(*) FROM movies")
+        total = await self.conn.fetchval(f"SELECT COUNT(*) FROM movies m {whereClause}", *filterParams)
 
-        rows = await self.conn.fetch(query, limit, offset)
+        rows = await self.conn.fetch(query, *filterParams, limit, offset)
         movies = [dict(row) for row in rows]
         return {"movies": movies, "total": total}
 
@@ -76,9 +88,7 @@ class MovieRepository(BaseRepository[Movie]):
 
     async def existsByTmdbId(self, tmdbId: int) -> bool:
         """Check if a movie with the given TMDB ID exists."""
-        result = await self.conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM movies WHERE tmdb_id = $1)", tmdbId
-        )
+        result = await self.conn.fetchval("SELECT EXISTS(SELECT 1 FROM movies WHERE tmdb_id = $1)", tmdbId)
         return result
 
     async def getWanted(self, limit: int = 100) -> List[Dict[str, Any]]:
@@ -92,7 +102,7 @@ class MovieRepository(BaseRepository[Movie]):
             ORDER BY m.created_at DESC
             LIMIT $1
             """,
-            limit
+            limit,
         )
         return [dict(row) for row in rows]
 
@@ -144,31 +154,22 @@ class MovieRepository(BaseRepository[Movie]):
             ORDER BY ts_rank(to_tsvector('english', title), plainto_tsquery('english', $1)) DESC
             LIMIT $2
             """,
-            query, limit
+            query,
+            limit,
         )
         return [self.modelClass(**dict(row)) for row in rows]
 
     async def deleteWithRelations(self, movieId: int) -> bool:
         """Delete a movie and all related records (tags, history, blocklist)."""
         # These could be done in a transaction, but CASCADE on FK handles some
-        await self.conn.execute(
-            "DELETE FROM download_history WHERE media_type = 'movie' AND media_id = $1",
-            movieId
-        )
-        await self.conn.execute(
-            "DELETE FROM blocklist WHERE media_type = 'movie' AND media_id = $1",
-            movieId
-        )
-        await self.conn.execute(
-            "DELETE FROM media_tags WHERE media_type = 'movie' AND media_id = $1",
-            movieId
-        )
+        await self.conn.execute("DELETE FROM download_history WHERE media_type = 'movie' AND media_id = $1", movieId)
+        await self.conn.execute("DELETE FROM blocklist WHERE media_type = 'movie' AND media_id = $1", movieId)
+        await self.conn.execute("DELETE FROM media_tags WHERE media_type = 'movie' AND media_id = $1", movieId)
         return await self.delete(movieId)
 
     async def getStats(self) -> Dict[str, Any]:
         """Get movie statistics."""
-        stats = await self.conn.fetchrow(
-            """
+        stats = await self.conn.fetchrow("""
             SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE monitored = TRUE) as monitored,
@@ -177,6 +178,5 @@ class MovieRepository(BaseRepository[Movie]):
                 COUNT(*) FILTER (WHERE status = 'downloading') as downloading,
                 COALESCE(SUM(file_size), 0) as total_size
             FROM movies
-            """
-        )
+            """)
         return dict(stats)

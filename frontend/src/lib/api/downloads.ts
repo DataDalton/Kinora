@@ -21,13 +21,19 @@ import type {
 	ImportSuggestion,
 } from "../../types/downloads";
 
-export async function listTorrents(): Promise<TorrentsResponse> {
-	const response = await api.get("/downloads/torrents");
+// fresh skips the backend's short-lived snapshot. It is used to confirm a control
+// action took effect, where the snapshot could still hold the state from before it.
+export async function listTorrents(fresh = false): Promise<TorrentsResponse> {
+	const response = await api.get("/downloads/torrents", {
+		params: fresh ? { fresh: true } : undefined,
+	});
 	return response.data;
 }
 
-export async function getDownloadStats(): Promise<DownloadStats> {
-	const response = await api.get("/downloads/stats");
+export async function getDownloadStats(fresh = false): Promise<DownloadStats> {
+	const response = await api.get("/downloads/stats", {
+		params: fresh ? { fresh: true } : undefined,
+	});
 	return response.data;
 }
 

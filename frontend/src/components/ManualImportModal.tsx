@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import {
 	X,
 	FolderOpen,
@@ -205,16 +206,22 @@ export default function ManualImportModal({
 		}
 	}
 
+	const backdropProps = useModalDismiss({
+		onClose: handleClose,
+		isOpen,
+		disabled: importMutation.isPending,
+	});
+
 	if (!isOpen) return null;
 
 	const isAudio = mediaType === "album";
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center">
-			<div
-				className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-				onClick={handleClose}
-			/>
+		<div
+			className="fixed inset-0 z-50 flex items-center justify-center"
+			{...backdropProps}
+		>
+			<div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
 			<div className="relative bg-background rounded-xl border border-border shadow-2xl w-full max-w-xl mx-4 max-h-[90vh] overflow-hidden">
 				<div className="flex items-center justify-between p-4 border-b border-border">

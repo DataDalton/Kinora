@@ -2,6 +2,7 @@
 import NamingPreview from "../shared/NamingPreview";
 
 import { useState } from "react";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { X } from "lucide-react";
 import ISO6391 from "iso-639-1";
 import { MediaProfileFormData, AnimeTab } from "../types";
@@ -136,6 +137,11 @@ export default function AnimeGroup({
 		useState("");
 	const [showBuilder, setShowBuilder] = useState(false);
 	const [activeField, setActiveField] = useState<"folder" | "file">("file");
+	const builderBackdropProps = useModalDismiss({
+		onClose: () => setShowBuilder(false),
+		isOpen: showBuilder,
+		closeOnOutsideClick: false,
+	});
 
 	const insertToken = (token: string) => {
 		if (activeField === "folder") {
@@ -550,7 +556,10 @@ export default function AnimeGroup({
 
 					{/* Naming Builder Modal */}
 					{showBuilder && (
-						<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+						<div
+							className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+							{...builderBackdropProps}
+						>
 							<div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
 								<div className="p-4 border-b border-border flex justify-between items-center">
 									<h3 className="font-semibold text-lg">

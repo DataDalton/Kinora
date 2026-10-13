@@ -36,6 +36,15 @@ body {
 	color: var(--color-foreground);
 }
 
+/* Tailwind v4 dropped the pointer cursor on buttons, so any enabled button that does not
+   set cursor-pointer itself showed the default arrow. This restores it everywhere. */
+@layer base {
+	button:not(:disabled),
+	[role="button"]:not([aria-disabled="true"]) {
+		cursor: pointer;
+	}
+}
+
 /* Dark theme scrollbars */
 * {
 	scrollbar-width: thin;
@@ -131,5 +140,43 @@ body {
 	}
 	to {
 		width: 0%;
+	}
+}
+
+/* Notification cards slide in from the right edge and fade out when dismissed. */
+@keyframes toastEnter {
+	from {
+		opacity: 0;
+		transform: translateX(24px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@keyframes toastLeave {
+	from {
+		opacity: 1;
+		transform: translateX(0);
+	}
+	to {
+		opacity: 0;
+		transform: translateX(24px);
+	}
+}
+
+.toast-enter {
+	animation: toastEnter 200ms ease-out;
+}
+
+.toast-leave {
+	animation: toastLeave 150ms ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.toast-enter,
+	.toast-leave {
+		animation: none;
 	}
 }

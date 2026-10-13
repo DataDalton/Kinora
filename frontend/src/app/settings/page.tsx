@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
-import Toast from "@/components/Toast";
+import { useToast } from "@/components/toast/ToastProvider";
 import ConfirmModal from "@/components/ConfirmModal";
 import AuthProvidersSection from "@/components/AuthProvidersSection";
 import OIDCProvidersManagement from "@/components/OIDCProvidersManagement";
@@ -16,6 +16,7 @@ import FolderHealthSection from "@/components/settings/FolderHealthSection";
 import SystemStatusSection from "@/components/settings/SystemStatusSection";
 import DatabaseBackupSection from "@/components/settings/DatabaseBackupSection";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import {
 	getPermissions,
 	getPermissionGroups,
@@ -244,6 +245,14 @@ type SettingsSection =
 	| "system-status"
 	| "database";
 
+// Reads the API error detail, which is a string or a list of validation errors.
+function getErrorDetail(error: any): string | undefined {
+	const detail = error.response?.data?.detail;
+	if (!detail) return undefined;
+	if (typeof detail === "string") return detail;
+	return detail[0]?.msg || "Validation error";
+}
+
 export default function SettingsPage() {
 	const queryClient = useQueryClient();
 	const { hasPermission } = usePermissions();
@@ -309,19 +318,7 @@ export default function SettingsPage() {
 		permissionNames: string[];
 	}>({ displayName: "", description: "", color: "", permissionNames: [] });
 
-	// Toast and confirmation state
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error" | "info";
-	} | null>(null);
-
-	// Helper to show toast and auto-dismiss any existing toast first
-	const showToast = (message: string, type: "success" | "error" | "info") => {
-		setToast(null); // Clear existing toast first
-		setTimeout(() => {
-			setToast({ message, type });
-		}, 0);
-	};
+	const toast = useToast();
 	const [confirmDialog, setConfirmDialog] = useState<{
 		isOpen: boolean;
 		title: string;
@@ -479,15 +476,12 @@ export default function SettingsPage() {
 				groupIds: [],
 				isActive: true,
 			});
-			showToast("User created successfully!", "success");
+			toast.success("User created");
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to create user";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't create user", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -510,15 +504,12 @@ export default function SettingsPage() {
 			queryClient.invalidateQueries({ queryKey: ["users"] });
 			setShowEditUserModal(false);
 			setSelectedUser(null);
-			showToast("User updated successfully!", "success");
+			toast.success("User updated");
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to update user";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't update user", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -529,15 +520,12 @@ export default function SettingsPage() {
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["users"] });
-			showToast("User deleted successfully!", "success");
+			toast.success("User deleted");
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to delete user";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't delete user", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -559,15 +547,12 @@ export default function SettingsPage() {
 			setShowResetPasswordModal(false);
 			setSelectedUser(null);
 			setResetPasswordData({ password: "" });
-			showToast("Password reset successfully!", "success");
+			toast.success("Password reset");
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to reset password";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't reset password", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -580,12 +565,9 @@ export default function SettingsPage() {
 			queryClient.invalidateQueries({ queryKey: ["users"] });
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to toggle user status";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't toggle user status", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -604,15 +586,12 @@ export default function SettingsPage() {
 				color: predefinedColors[0],
 				permissionNames: [],
 			});
-			showToast("Permission group created successfully!", "success");
+			toast.success("Permission group created");
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to create permission group";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't create permission group", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -631,15 +610,12 @@ export default function SettingsPage() {
 			queryClient.invalidateQueries({ queryKey: ["users"] });
 			setShowEditGroupModal(false);
 			setSelectedGroup(null);
-			showToast("Permission group updated successfully!", "success");
+			toast.success("Permission group updated");
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to update permission group";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't update permission group", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -650,15 +626,12 @@ export default function SettingsPage() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["permission-groups"] });
 			queryClient.invalidateQueries({ queryKey: ["users"] });
-			showToast("Permission group deleted successfully!", "success");
+			toast.success("Permission group deleted");
 		},
 		onError: (error: any) => {
-			const errorMsg = error.response?.data?.detail
-				? typeof error.response.data.detail === "string"
-					? error.response.data.detail
-					: error.response.data.detail[0]?.msg || "Validation error"
-				: "Failed to delete permission group";
-			showToast(errorMsg, "error");
+			toast.error("Couldn't delete permission group", {
+				description: getErrorDetail(error),
+			});
 		},
 	});
 
@@ -722,6 +695,69 @@ export default function SettingsPage() {
 		paths: "Root Folders",
 		system: "System",
 	};
+
+	const closeCreateUserModal = () => {
+		setShowCreateUserModal(false);
+		setNewUserData({
+			username: "",
+			password: "",
+			groupIds: [],
+			isActive: true,
+		});
+	};
+
+	const closeEditUserModal = () => {
+		setShowEditUserModal(false);
+		setSelectedUser(null);
+	};
+
+	const closeResetPasswordModal = () => {
+		setShowResetPasswordModal(false);
+		setSelectedUser(null);
+		setResetPasswordData({ password: "" });
+	};
+
+	const closeCreateGroupModal = () => {
+		setShowCreateGroupModal(false);
+		setNewGroupData({
+			name: "",
+			displayName: "",
+			description: "",
+			color: predefinedColors[0],
+			permissionNames: [],
+		});
+	};
+
+	const closeEditGroupModal = () => {
+		setShowEditGroupModal(false);
+		setSelectedGroup(null);
+	};
+
+	const createUserBackdropProps = useModalDismiss({
+		onClose: closeCreateUserModal,
+		isOpen: showCreateUserModal,
+		disabled: createUserMutation.isPending,
+	});
+	const editUserBackdropProps = useModalDismiss({
+		onClose: closeEditUserModal,
+		isOpen: showEditUserModal && selectedUser !== null,
+		disabled: updateUserMutation.isPending,
+	});
+	const resetPasswordBackdropProps = useModalDismiss({
+		onClose: closeResetPasswordModal,
+		isOpen: showResetPasswordModal && selectedUser !== null,
+		disabled: resetPasswordMutation.isPending,
+	});
+	const createGroupBackdropProps = useModalDismiss({
+		onClose: closeCreateGroupModal,
+		isOpen: showCreateGroupModal,
+		disabled: createGroupMutation.isPending,
+	});
+	const editGroupBackdropProps = useModalDismiss({
+		onClose: closeEditGroupModal,
+		isOpen: showEditGroupModal && selectedGroup !== null,
+		disabled: updateGroupMutation.isPending,
+	});
 
 	if (isLoading) {
 		return (
@@ -1843,7 +1879,10 @@ export default function SettingsPage() {
 
 			{/* Create User Modal */}
 			{showCreateUserModal && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...createUserBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-lg w-full border border-border shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
 						<h2 className="text-2xl font-bold mb-4">
 							Create New User
@@ -2008,15 +2047,7 @@ export default function SettingsPage() {
 										: "Create User"}
 								</button>
 								<button
-									onClick={() => {
-										setShowCreateUserModal(false);
-										setNewUserData({
-											username: "",
-											password: "",
-											groupIds: [],
-											isActive: true,
-										});
-									}}
+									onClick={closeCreateUserModal}
 									className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition"
 								>
 									Cancel
@@ -2029,7 +2060,10 @@ export default function SettingsPage() {
 
 			{/* Edit User Modal */}
 			{showEditUserModal && selectedUser && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...editUserBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-lg w-full border border-border shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
 						<h2 className="text-2xl font-bold mb-4">
 							Edit User: {selectedUser.username}
@@ -2179,10 +2213,7 @@ export default function SettingsPage() {
 										: "Update User"}
 								</button>
 								<button
-									onClick={() => {
-										setShowEditUserModal(false);
-										setSelectedUser(null);
-									}}
+									onClick={closeEditUserModal}
 									className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition"
 								>
 									Cancel
@@ -2195,7 +2226,10 @@ export default function SettingsPage() {
 
 			{/* Reset Password Modal */}
 			{showResetPasswordModal && selectedUser && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...resetPasswordBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-md w-full border border-border shadow-2xl p-6">
 						<h2 className="text-2xl font-bold mb-4">
 							Reset Password: {selectedUser.username}
@@ -2238,11 +2272,7 @@ export default function SettingsPage() {
 										: "Reset Password"}
 								</button>
 								<button
-									onClick={() => {
-										setShowResetPasswordModal(false);
-										setSelectedUser(null);
-										setResetPasswordData({ password: "" });
-									}}
+									onClick={closeResetPasswordModal}
 									className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition"
 								>
 									Cancel
@@ -2255,7 +2285,10 @@ export default function SettingsPage() {
 
 			{/* Create Permission Group Modal */}
 			{showCreateGroupModal && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...createGroupBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-5xl w-full border border-border shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
 						<div className="p-6 border-b border-border">
 							<h2 className="text-2xl font-bold">
@@ -2546,16 +2579,7 @@ export default function SettingsPage() {
 									: "Create Group"}
 							</button>
 							<button
-								onClick={() => {
-									setShowCreateGroupModal(false);
-									setNewGroupData({
-										name: "",
-										displayName: "",
-										description: "",
-										color: predefinedColors[0],
-										permissionNames: [],
-									});
-								}}
+								onClick={closeCreateGroupModal}
 								className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition"
 							>
 								Cancel
@@ -2567,7 +2591,10 @@ export default function SettingsPage() {
 
 			{/* Edit Permission Group Modal */}
 			{showEditGroupModal && selectedGroup && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...editGroupBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-5xl w-full border border-border shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
 						<div className="p-6 border-b border-border">
 							<div className="flex items-center gap-3">
@@ -2856,10 +2883,7 @@ export default function SettingsPage() {
 									: "Update Group"}
 							</button>
 							<button
-								onClick={() => {
-									setShowEditGroupModal(false);
-									setSelectedGroup(null);
-								}}
+								onClick={closeEditGroupModal}
 								className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 cursor-pointer transition"
 							>
 								Cancel
@@ -2887,17 +2911,6 @@ export default function SettingsPage() {
 					})
 				}
 			/>
-
-			{/* Toast Notification */}
-			{toast && (
-				<div className="fixed bottom-4 right-4 z-70">
-					<Toast
-						message={toast.message}
-						type={toast.type}
-						onClose={() => setToast(null)}
-					/>
-				</div>
-			)}
 		</div>
 	);
 }

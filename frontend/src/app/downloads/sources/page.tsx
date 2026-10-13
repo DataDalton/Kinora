@@ -4,10 +4,9 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, RotateCcw, Link2, Magnet } from "lucide-react";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { useToast } from "@/components/toast/ToastProvider";
 import { listSources, reAddSource } from "@/lib/api/downloads";
-
-// Toast ids come from a counter so render stays free of impure calls.
-let toastSequence = 0;
+import type { SourceItem } from "@/types/downloads";
 
 export default function SourceArchivePage() {
 	const { hasPermission } = usePermissions();
@@ -15,15 +14,7 @@ export default function SourceArchivePage() {
 	const [search, setSearch] = useState("");
 	const [query, setQuery] = useState("");
 	const [busyId, setBusyId] = useState<number | null>(null);
-	const [toasts, setToasts] = useState<
-		{ id: number; message: string; type: "success" | "error" }[]
-	>([]);
-
-	const notify = (message: string, type: "success" | "error" = "success") => {
-		const id = ++toastSequence;
-		setToasts((t) => [...t, { id, message, type }]);
-		setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
-	};
+	const toast = useToast();
 
 	const {
 		data: sources,
@@ -34,17 +25,24 @@ export default function SourceArchivePage() {
 		queryFn: () => listSources(query || undefined),
 	});
 
-	const handleReAdd = async (id: number) => {
-		setBusyId(id);
+	const handleReAdd = async (source: SourceItem) => {
+		setBusyId(source.id);
+		const releaseTitle = source.torrent_title ?? undefined;
 		try {
-			await reAddSource(id);
-			notify("Re-added to download client", "success");
+			await reAddSource(source.id);
+			toast.success("Re-added to download client", {
+				description: releaseTitle,
+			});
 			refetch();
 		} catch (err: unknown) {
-			notify(
-				err instanceof Error ? err.message : "Failed to re-add",
-				"error",
-			);
+			toast.error("Couldn't re-add to download client", {
+				description: [
+					releaseTitle,
+					err instanceof Error ? err.message : undefined,
+				]
+					.filter(Boolean)
+					.join(". "),
+			});
 		} finally {
 			setBusyId(null);
 		}
@@ -146,7 +144,7 @@ export default function SourceArchivePage() {
 											</div>
 										</div>
 										<button
-											onClick={() => handleReAdd(s.id)}
+											onClick={() => handleReAdd(s)}
 											disabled={busyId === s.id}
 											className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border hover:bg-accent text-sm cursor-pointer flex-shrink-0 disabled:opacity-50"
 										>
@@ -159,17 +157,6 @@ export default function SourceArchivePage() {
 						)}
 					</>
 				)}
-			</div>
-
-			<div className="fixed bottom-4 right-4 z-[60] space-y-2">
-				{toasts.map((toast) => (
-					<div
-						key={toast.id}
-						className={`px-4 py-3 rounded-lg shadow-lg text-sm text-white ${toast.type === "error" ? "bg-destructive" : "bg-green-600"}`}
-					>
-						{toast.message}
-					</div>
-				))}
 			</div>
 		</div>
 	);

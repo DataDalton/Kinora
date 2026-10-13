@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Gauge, Zap } from "lucide-react";
+import { Plus, Gauge, Zap, Loader2 } from "lucide-react";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { useToast } from "@/components/toast/ToastProvider";
 import {
 	listTorrents,
 	getDownloadStats,
@@ -15,8 +16,13 @@ import {
 	setGlobalSpeedLimits,
 	toggleAltSpeed,
 } from "@/lib/api/downloads";
-import type { Torrent, TorrentGroup } from "@/types/downloads";
-import TorrentCard from "./components/TorrentCard";
+import type {
+	DownloadStats,
+	Torrent,
+	TorrentGroup,
+	TorrentsResponse,
+} from "@/types/downloads";
+import TorrentCard, { type TorrentAction } from "./components/TorrentCard";
 import AddTorrentModal from "./components/AddTorrentModal";
 import DeleteTorrentModal from "./components/DeleteTorrentModal";
 import LimitsModal from "./components/LimitsModal";
@@ -37,14 +43,33 @@ const RANGES = [
 	{ label: "7d", hours: 168 },
 ];
 
-type ToastState = { id: number; message: string; type: "success" | "error" };
+const TORRENTS_KEY = ["downloads-torrents"];
+const STATS_KEY = ["downloads-stats"];
+// How often the state is re-read while waiting for a control action to show up in
+// qBittorrent, and how many reads happen before it is reported as not applied.
+const CONFIRM_POLL_MS = 1_000;
+const CONFIRM_MAX_READS = 10;
+const ALT_SPEED_KEY = "alt-speed";
+// Queries holding download history or a library item's status.
+const LIBRARY_QUERY_KEYS = [
+	"download-history",
+	"movie",
+	"movies",
+	"show",
+	"shows",
+	"anime",
+	"album",
+	"albums",
+];
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function DownloadsPage() {
 	const queryClient = useQueryClient();
 	const { hasPermission } = usePermissions();
 	const canControl = hasPermission("system.downloads");
 
-	const [toasts, setToasts] = useState<ToastState[]>([]);
+	const toast = useToast();
 	const [showAdd, setShowAdd] = useState(false);
 	const [deleteTarget, setDeleteTarget] = useState<Torrent | null>(null);
 	const [shareTarget, setShareTarget] = useState<Torrent | null>(null);
@@ -52,26 +77,118 @@ export default function DownloadsPage() {
 	const [showGlobalSpeed, setShowGlobalSpeed] = useState(false);
 	const [rangeHours, setRangeHours] = useState(24);
 
-	const notify = (message: string, type: "success" | "error" = "success") => {
-		const id = Date.now() + Math.random();
-		setToasts((t) => [...t, { id, message, type }]);
-		setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
+	const invalidate = () => {
+		queryClient.invalidateQueries({ queryKey: TORRENTS_KEY });
+		queryClient.invalidateQueries({ queryKey: STATS_KEY });
 	};
 
-	const invalidate = () => {
-		queryClient.invalidateQueries({ queryKey: ["downloads-torrents"] });
-		queryClient.invalidateQueries({ queryKey: ["downloads-stats"] });
+	// Action id in flight per pending key, a torrent hash or ALT_SPEED_KEY. The matching
+	// controls stay disabled with a spinner until qBittorrent reports the new state.
+	const [pendingActions, setPendingActions] = useState<
+		Record<string, string>
+	>({});
+	// Mirrors pendingActions synchronously, so a second click in the same render cannot
+	// start a duplicate request before the state update lands.
+	const pendingKeys = useRef(new Set<string>());
+	const mounted = useRef(true);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
+
+	// Sends a control action, then re-reads fresh client state until reached() confirms
+	// qBittorrent applied it or CONFIRM_MAX_READS reads pass without it. Actions with no observable
+	// state pass reached as null and finish once the request succeeds. subject names what
+	// the action applied to, such as a torrent, and is shown under the toast title.
+	const runConfirmed = async (
+		key: string,
+		actionId: string,
+		label: string,
+		request: () => Promise<unknown>,
+		reached: (() => Promise<boolean>) | null,
+		successMessage: string,
+		subject?: string,
+	) => {
+		if (pendingKeys.current.has(key)) return;
+		pendingKeys.current.add(key);
+		setPendingActions((current) => ({ ...current, [key]: actionId }));
+		try {
+			await request();
+			if (reached) {
+				let confirmed = await reached();
+				for (
+					let read = 1;
+					!confirmed && mounted.current && read < CONFIRM_MAX_READS;
+					read++
+				) {
+					await wait(CONFIRM_POLL_MS);
+					confirmed = await reached();
+				}
+				if (!mounted.current) return;
+				if (!confirmed) {
+					toast.warning(`${label} was sent but not applied yet`, {
+						description: subject
+							? `qBittorrent has not applied it to ${subject} yet`
+							: "qBittorrent has not applied it yet",
+					});
+					return;
+				}
+			}
+			toast.success(successMessage, { description: subject });
+		} catch (err: unknown) {
+			toast.error(`${label} failed`, {
+				description: [
+					subject,
+					err instanceof Error ? err.message : undefined,
+				]
+					.filter(Boolean)
+					.join(". "),
+			});
+		} finally {
+			pendingKeys.current.delete(key);
+			setPendingActions((current) => {
+				const next = { ...current };
+				delete next[key];
+				return next;
+			});
+			invalidate();
+		}
 	};
+
+	// Reads the torrent list past the snapshot and stores it, so every card updates from
+	// the same read. A torrent that is gone counts as reached, since nothing is left to wait on.
+	const torrentReached =
+		(hash: string, check: (torrent: Torrent) => boolean) => async () => {
+			const fresh = await listTorrents(true);
+			queryClient.setQueryData<TorrentsResponse>(TORRENTS_KEY, fresh);
+			const latest = fresh.torrents.find((t) => t.hash === hash);
+			return !latest || check(latest);
+		};
+
+	const runTorrentAction = (torrent: Torrent, action: TorrentAction) =>
+		runConfirmed(
+			torrent.hash,
+			action.id,
+			action.label,
+			action.request,
+			action.reached
+				? torrentReached(torrent.hash, action.reached)
+				: null,
+			action.successMessage,
+			torrent.name,
+		);
 
 	const { data: torrentsData, isLoading } = useQuery({
-		queryKey: ["downloads-torrents"],
-		queryFn: listTorrents,
+		queryKey: TORRENTS_KEY,
+		queryFn: () => listTorrents(),
 		refetchInterval: 3000,
 	});
 
 	const { data: stats } = useQuery({
-		queryKey: ["downloads-stats"],
-		queryFn: getDownloadStats,
+		queryKey: STATS_KEY,
+		queryFn: () => getDownloadStats(),
 		refetchInterval: 3000,
 	});
 
@@ -96,23 +213,33 @@ export default function DownloadsPage() {
 		if (!deleteTarget) return;
 		await deleteTorrent(deleteTarget.hash, deleteFiles);
 		invalidate();
-		notify("Torrent removed", "success");
+		// Removing a torrent also changes its history row and its library item's status,
+		// so pages showing either refetch instead of serving the cached copy.
+		for (const key of LIBRARY_QUERY_KEYS) {
+			queryClient.invalidateQueries({ queryKey: [key] });
+		}
+		toast.success(
+			deleteFiles ? "Torrent and files removed" : "Torrent removed",
+			{ description: deleteTarget.name },
+		);
 	};
 
-	const handleAltSpeed = async () => {
-		try {
-			const result = await toggleAltSpeed();
-			invalidate();
-			notify(
-				result.alt_speed_enabled
-					? "Alternative speed on"
-					: "Alternative speed off",
-				"success",
-			);
-		} catch {
-			notify("Failed to toggle alt speed", "error");
-		}
+	const handleAltSpeed = () => {
+		const target = !stats?.alt_speed_enabled;
+		runConfirmed(
+			ALT_SPEED_KEY,
+			"alt-speed",
+			"Alternative speed",
+			toggleAltSpeed,
+			async () => {
+				const fresh = await getDownloadStats(true);
+				queryClient.setQueryData<DownloadStats>(STATS_KEY, fresh);
+				return fresh.alt_speed_enabled === target;
+			},
+			target ? "Alternative speed on" : "Alternative speed off",
+		);
 	};
+	const altSpeedPending = ALT_SPEED_KEY in pendingActions;
 
 	return (
 		<div className="container mx-auto px-6 py-8">
@@ -132,10 +259,7 @@ export default function DownloadsPage() {
 				</div>
 			) : (
 				<>
-					<ConnectionSafetyBanner
-						canControl={canControl}
-						notify={notify}
-					/>
+					<ConnectionSafetyBanner canControl={canControl} />
 
 					{/* Toolbar */}
 					<div className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -151,13 +275,19 @@ export default function DownloadsPage() {
 							<div className="flex gap-2">
 								<button
 									onClick={handleAltSpeed}
-									className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm transition cursor-pointer ${
+									disabled={altSpeedPending}
+									className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
 										stats?.alt_speed_enabled
 											? "bg-primary text-primary-foreground border-primary"
 											: "border-border hover:bg-accent"
 									}`}
 								>
-									<Zap className="w-4 h-4" /> Alt speed
+									{altSpeedPending ? (
+										<Loader2 className="w-4 h-4 animate-spin" />
+									) : (
+										<Zap className="w-4 h-4" />
+									)}{" "}
+									Alt speed
 								</button>
 								<button
 									onClick={() => setShowGlobalSpeed(true)}
@@ -289,8 +419,17 @@ export default function DownloadsPage() {
 														key={torrent.hash}
 														torrent={torrent}
 														canControl={canControl}
-														onChanged={invalidate}
-														notify={notify}
+														pendingAction={
+															pendingActions[
+																torrent.hash
+															]
+														}
+														onAction={(action) =>
+															runTorrentAction(
+																torrent,
+																action,
+															)
+														}
 														onDelete={() =>
 															setDeleteTarget(
 																torrent,
@@ -324,7 +463,7 @@ export default function DownloadsPage() {
 					onSubmit={async (input) => {
 						await addTorrent(input);
 						invalidate();
-						notify("Torrent added", "success");
+						toast.success("Torrent added");
 					}}
 				/>
 			)}
@@ -343,7 +482,9 @@ export default function DownloadsPage() {
 					onSubmitShare={async (limits) => {
 						await setTorrentShareLimits(shareTarget.hash, limits);
 						invalidate();
-						notify("Seeding limits updated", "success");
+						toast.success("Seeding limits updated", {
+							description: shareTarget.name,
+						});
 					}}
 				/>
 			)}
@@ -355,7 +496,9 @@ export default function DownloadsPage() {
 					onSubmitSpeed={async (limits) => {
 						await setTorrentSpeedLimits(speedTarget.hash, limits);
 						invalidate();
-						notify("Speed limits updated", "success");
+						toast.success("Speed limits updated", {
+							description: speedTarget.name,
+						});
 					}}
 				/>
 			)}
@@ -373,26 +516,10 @@ export default function DownloadsPage() {
 					onSubmitSpeed={async (limits) => {
 						await setGlobalSpeedLimits(limits);
 						invalidate();
-						notify("Global speed limits updated", "success");
+						toast.success("Global speed limits updated");
 					}}
 				/>
 			)}
-
-			{/* Toasts */}
-			<div className="fixed bottom-4 right-4 z-[60] space-y-2">
-				{toasts.map((toast) => (
-					<div
-						key={toast.id}
-						className={`px-4 py-3 rounded-lg shadow-lg text-sm text-white ${
-							toast.type === "error"
-								? "bg-destructive"
-								: "bg-green-600"
-						}`}
-					>
-						{toast.message}
-					</div>
-				))}
-			</div>
 		</div>
 	);
 }

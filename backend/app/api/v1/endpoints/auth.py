@@ -40,6 +40,8 @@ from app.schemas.user import (
     UserWithPermissions,
     PermissionGroup,
     PasswordChange,
+    UserPreferences,
+    UserPreferencesUpdate,
 )
 from app.core.two_factor import verify_totp_code
 from app.core.auth_cache import getCachedAuthUser, setCachedAuthUser
@@ -414,6 +416,36 @@ async def get_current_user_info(current_user: UserWithPermissions = Depends(get_
     Get current user information including groups and permissions
     """
     return current_user
+
+
+@router.get("/me/preferences", response_model=UserPreferences)
+async def get_my_preferences(
+    current_user: UserWithPermissions = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Get the current user's preferences, with defaults filled in for keys never set
+    """
+    stored = await conn.fetchval("SELECT preferences FROM users WHERE id = $1", current_user.id)
+    return UserPreferences(**(stored or {}))
+
+
+@router.patch("/me/preferences", response_model=UserPreferences)
+async def update_my_preferences(
+    update: UserPreferencesUpdate,
+    current_user: UserWithPermissions = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Merge the sent fields into the current user's preferences and return the result
+    """
+    changes = update.model_dump(exclude_none=True)
+    stored = await conn.fetchval(
+        "UPDATE users SET preferences = preferences || $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING preferences",
+        current_user.id,
+        changes,
+    )
+    return UserPreferences(**(stored or {}))
 
 
 # Helper functions for SSO/OIDC

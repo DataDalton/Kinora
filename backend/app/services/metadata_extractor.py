@@ -8,6 +8,31 @@ import subprocess
 from typing import Optional, Dict, Any
 from pathlib import Path
 
+# Lowest 16:9 equivalent height that still earns each label. Each sits below the nominal
+# height so encoder crops (3832 wide instead of 3840) keep their label.
+QUALITY_MIN_HEIGHTS = (
+    ("2160p", 2000),
+    ("1080p", 1000),
+    ("720p", 700),
+    ("480p", 460),
+)
+
+
+def qualityFromDimensions(width: Optional[int], height: Optional[int]) -> Optional[str]:
+    """
+    Label a video by its 16:9 equivalent height, the larger of its height and the height
+    its width implies. A letterboxed 3840x1600 scope film is 2160p rather than 1080p.
+    """
+    width = width or 0
+    height = height or 0
+    nominalHeight = max(height, width * 9 // 16)
+    if not nominalHeight:
+        return None
+    for label, minHeight in QUALITY_MIN_HEIGHTS:
+        if nominalHeight >= minHeight:
+            return label
+    return f"{height or nominalHeight}p"
+
 
 class MetadataExtractor:
     """Extracts metadata from media files using ffprobe."""
@@ -158,19 +183,9 @@ class MetadataExtractor:
                 "dynamic_range": self._parse_dynamic_range(video_stream),
             }
 
-            # Determine quality from resolution
-            height = metadata["video"]["height"]
-            if height:
-                if height >= 2160:
-                    metadata["quality"] = "2160p"
-                elif height >= 1080:
-                    metadata["quality"] = "1080p"
-                elif height >= 720:
-                    metadata["quality"] = "720p"
-                elif height >= 480:
-                    metadata["quality"] = "480p"
-                else:
-                    metadata["quality"] = f"{height}p"
+            quality = qualityFromDimensions(metadata["video"]["width"], metadata["video"]["height"])
+            if quality:
+                metadata["quality"] = quality
 
         # Audio streams metadata
         if audio_streams:

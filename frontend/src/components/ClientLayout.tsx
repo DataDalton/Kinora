@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
 import { RealtimeProvider } from "@/contexts/RealtimeContext";
+import { ToastProvider } from "@/components/toast/ToastProvider";
 import Navigation from "@/components/Navigation";
 
 // The login and register routes escape this margin with their own layout, so
@@ -26,16 +27,19 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 	return (
 		<ThemeProvider>
 			<PermissionProvider>
-				<RealtimeProvider>
-					<SidebarProvider>
-						<div className="flex min-h-screen">
-							<Suspense fallback={null}>
-								<Navigation />
-							</Suspense>
-							<MainContent>{children}</MainContent>
-						</div>
-					</SidebarProvider>
-				</RealtimeProvider>
+				{/* Outside RealtimeProvider so server notifications can raise toasts. */}
+				<ToastProvider>
+					<RealtimeProvider>
+						<SidebarProvider>
+							<div className="flex min-h-screen">
+								<Suspense fallback={null}>
+									<Navigation />
+								</Suspense>
+								<MainContent>{children}</MainContent>
+							</div>
+						</SidebarProvider>
+					</RealtimeProvider>
+				</ToastProvider>
 			</PermissionProvider>
 		</ThemeProvider>
 	);

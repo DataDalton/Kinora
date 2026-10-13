@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { X } from "lucide-react";
 import type { AddTorrentInput } from "../../../types/downloads";
 
@@ -18,6 +19,11 @@ export default function AddTorrentModal({
 	const [savePath, setSavePath] = useState("");
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const backdropProps = useModalDismiss({
+		onClose,
+		closeOnOutsideClick: false,
+		disabled: submitting,
+	});
 
 	const handleSubmit = async () => {
 		if (!url.trim()) {
@@ -42,7 +48,10 @@ export default function AddTorrentModal({
 	};
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+		<div
+			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			{...backdropProps}
+		>
 			<div className="bg-card text-card-foreground rounded-lg shadow-xl w-full max-w-lg">
 				<div className="flex items-center justify-between p-4 border-b border-border">
 					<h2 className="text-lg font-semibold">Add Torrent</h2>

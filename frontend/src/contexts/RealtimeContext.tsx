@@ -8,7 +8,14 @@ import {
 	ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { RealtimeClient } from "@/lib/realtime";
+import { useToast } from "@/components/toast/ToastProvider";
+import {
+	claimNotification,
+	showNotificationToast,
+} from "@/lib/notificationToasts";
+import type { AppNotification } from "@/types/notifications";
 
 // Resolve the realtime WebSocket URL. An explicit NEXT_PUBLIC_WS_URL wins, otherwise it
 // is derived from the current page origin so it works on any domain served by the proxy
@@ -33,6 +40,8 @@ const RealtimeContext = createContext<RealtimeClient | null>(null);
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
 	const queryClient = useQueryClient();
+	const toast = useToast();
+	const router = useRouter();
 	const [client] = useState<RealtimeClient | null>(() =>
 		typeof window !== "undefined"
 			? new RealtimeClient(resolveWsUrl(), readToken)
@@ -42,7 +51,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		if (!client) return;
 
-		// Refresh notification badge and lists the moment a notification arrives.
+		// Refresh notification badge and lists the moment a notification arrives, and
+		// raise a toast for the kinds that need attention, in one tab only.
 		const unsubscribe = client.subscribe((message) => {
 			if (message.type === "notification") {
 				queryClient.invalidateQueries({ queryKey: ["notif-unread"] });
@@ -50,6 +60,18 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 				queryClient.invalidateQueries({
 					queryKey: ["notifications-page"],
 				});
+				const notification = message.notification as
+					| AppNotification
+					| undefined;
+				if (notification) {
+					claimNotification(notification.id).then((claimed) => {
+						if (claimed) {
+							showNotificationToast(notification, toast, (href) =>
+								router.push(href),
+							);
+						}
+					});
+				}
 			}
 		});
 
@@ -58,7 +80,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 			unsubscribe();
 			client.close();
 		};
-	}, [client, queryClient]);
+	}, [client, queryClient, toast, router]);
 
 	return (
 		<RealtimeContext.Provider value={client}>

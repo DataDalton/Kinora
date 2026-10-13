@@ -739,7 +739,6 @@ export default function TrackDetailPage() {
 				onCancel={() => setShowDeleteModal(false)}
 				onConfirm={handleDeleteConfirm}
 				title={track.title}
-				itemName="track"
 				hasFiles={track.has_file}
 			/>
 
@@ -749,6 +748,7 @@ export default function TrackDetailPage() {
 				mediaType="track"
 				mediaId={track.id}
 				mediaTitle={track.title}
+				mediaPoster={track.album_cover_xl}
 				searchQuery={`${track.artist_name} ${track.title}`}
 			/>
 

@@ -21,9 +21,25 @@ api.interceptors.request.use((config) => {
 	return config;
 });
 
+// The server's explanation from a FastAPI error body. detail is a string for raised
+// HTTP errors and a list of field errors for request validation failures.
+function serverDetail(data: unknown): string | null {
+	const detail = (data as { detail?: unknown } | undefined)?.detail;
+	if (typeof detail === "string") return detail;
+	if (Array.isArray(detail) && typeof detail[0]?.msg === "string") {
+		return detail[0].msg;
+	}
+	return null;
+}
+
 api.interceptors.response.use(
 	(response) => response,
 	async (error) => {
+		// Replaces the generic "Request failed with status code N" so any handler that
+		// shows error.message shows the server's reason instead.
+		const detail = serverDetail(error.response?.data);
+		if (detail) error.message = detail;
+
 		if (error.response?.status === 401) {
 			const isLoginPage = window.location.pathname === "/login";
 			if (!isLoginPage) {

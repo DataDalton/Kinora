@@ -6,6 +6,7 @@ import {
 	Users,
 	ChevronLeft,
 	ChevronRight,
+	ChevronDown,
 	User,
 	Clapperboard,
 	Mic,
@@ -55,9 +56,14 @@ interface CastCrewSectionProps {
 	animeCharacters?: AnimeCastMember[];
 	animeStaff?: AnimeStaffMember[];
 	tmdbImageBaseUrl?: string;
+	// carousel scrolls one row sideways. grid wraps into rows and shows GRID_PREVIEW_COUNT
+	// people until expanded.
+	layout?: "carousel" | "grid";
 }
 
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w185";
+// Two rows of the widest grid before "Show all" is needed.
+const GRID_PREVIEW_COUNT = 12;
 
 export default function CastCrewSection({
 	mediaType,
@@ -66,10 +72,13 @@ export default function CastCrewSection({
 	animeCharacters,
 	animeStaff,
 	tmdbImageBaseUrl = TMDB_IMAGE_BASE,
+	layout = "carousel",
 }: CastCrewSectionProps) {
 	const [activeTab, setActiveTab] = useState<
 		"cast" | "crew" | "characters" | "staff"
 	>("cast");
+	const [showAll, setShowAll] = useState(false);
+	const isGrid = layout === "grid";
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 
 	const scroll = (direction: "left" | "right") => {
@@ -145,7 +154,10 @@ export default function CastCrewSection({
 				: null;
 
 		return (
-			<div key={id} className="flex-shrink-0 w-32 text-center group">
+			<div
+				key={id}
+				className={`text-center group min-w-0 ${isGrid ? "" : "flex-shrink-0 w-32"}`}
+			>
 				<div className="w-24 h-24 mx-auto mb-2 rounded-full overflow-hidden bg-muted border-2 border-border group-hover:border-primary transition">
 					{imageUrl ? (
 						<Image
@@ -178,7 +190,7 @@ export default function CastCrewSection({
 	const renderContent = () => {
 		if (currentTab === "cast" && hasCast) {
 			return cast!
-				.slice(0, 20)
+				.slice(0, isGrid ? cast!.length : 20)
 				.map((member) =>
 					renderPersonCard(
 						member.id,
@@ -227,6 +239,17 @@ export default function CastCrewSection({
 		return null;
 	};
 
+	const people = renderContent() ?? [];
+	const hiddenCount = isGrid
+		? Math.max(people.length - GRID_PREVIEW_COUNT, 0)
+		: 0;
+	const shownPeople =
+		isGrid && !showAll ? people.slice(0, GRID_PREVIEW_COUNT) : people;
+	const showAllLabel =
+		currentTab === "crew" || currentTab === "staff"
+			? "Show all crew"
+			: "Show all cast";
+
 	const getTabIcon = (tabId: string) => {
 		switch (tabId) {
 			case "cast":
@@ -249,7 +272,10 @@ export default function CastCrewSection({
 					{availableTabs.map((tab) => (
 						<button
 							key={tab.id}
-							onClick={() => setActiveTab(tab.id)}
+							onClick={() => {
+								setActiveTab(tab.id);
+								setShowAll(false);
+							}}
 							className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition cursor-pointer ${
 								currentTab === tab.id
 									? "bg-primary text-primary-foreground"
@@ -262,31 +288,59 @@ export default function CastCrewSection({
 					))}
 				</div>
 
-				<div className="flex items-center gap-1">
-					<button
-						onClick={() => scroll("left")}
-						className="p-1.5 hover:bg-muted rounded-lg transition cursor-pointer"
-						aria-label="Scroll left"
-					>
-						<ChevronLeft className="w-5 h-5" />
-					</button>
-					<button
-						onClick={() => scroll("right")}
-						className="p-1.5 hover:bg-muted rounded-lg transition cursor-pointer"
-						aria-label="Scroll right"
-					>
-						<ChevronRight className="w-5 h-5" />
-					</button>
-				</div>
+				{!isGrid && (
+					<div className="flex items-center gap-1">
+						<button
+							onClick={() => scroll("left")}
+							className="p-1.5 hover:bg-muted rounded-lg transition cursor-pointer"
+							aria-label="Scroll left"
+						>
+							<ChevronLeft className="w-5 h-5" />
+						</button>
+						<button
+							onClick={() => scroll("right")}
+							className="p-1.5 hover:bg-muted rounded-lg transition cursor-pointer"
+							aria-label="Scroll right"
+						>
+							<ChevronRight className="w-5 h-5" />
+						</button>
+					</div>
+				)}
 			</div>
 
-			<div
-				ref={scrollContainerRef}
-				className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent"
-				style={{ scrollbarWidth: "thin" }}
-			>
-				{renderContent()}
-			</div>
+			{isGrid ? (
+				<>
+					<div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-x-3 gap-y-5">
+						{shownPeople}
+					</div>
+					{hiddenCount > 0 && (
+						<div className="flex justify-center mt-4">
+							<button
+								onClick={() =>
+									setShowAll((current) => !current)
+								}
+								aria-expanded={showAll}
+								className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-sm font-medium hover:bg-accent transition cursor-pointer"
+							>
+								{showAll
+									? "Show less"
+									: `${showAllLabel} (${people.length})`}
+								<ChevronDown
+									className={`w-4 h-4 transition-transform ${showAll ? "rotate-180" : ""}`}
+								/>
+							</button>
+						</div>
+					)}
+				</>
+			) : (
+				<div
+					ref={scrollContainerRef}
+					className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent"
+					style={{ scrollbarWidth: "thin" }}
+				>
+					{people}
+				</div>
+			)}
 		</div>
 	);
 }

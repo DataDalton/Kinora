@@ -1067,7 +1067,6 @@ export default function ArtistDetailPage() {
 				onCancel={() => setShowDeleteModal(false)}
 				onConfirm={handleDeleteConfirm}
 				title={artist.name}
-				itemName="artist"
 				hasFiles={artist.has_files}
 			/>
 
@@ -1077,6 +1076,7 @@ export default function ArtistDetailPage() {
 				mediaType="album"
 				mediaId={artist.id}
 				mediaTitle={artist.name}
+				mediaPoster={artist.picture_xl ?? artist.picture_big}
 				searchQuery={artist.name}
 			/>
 		</div>

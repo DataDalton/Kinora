@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import {
 	CheckSquare,
 	Square,
@@ -90,6 +91,35 @@ export default function BulkSelectionToolbar({
 		total: number;
 		message: string;
 	} | null>(null);
+
+	const confirmBackdropProps = useModalDismiss({
+		onClose: () => {
+			setShowConfirmModal(false);
+			setPendingAction(null);
+		},
+		isOpen: showConfirmModal,
+		closeOnOutsideClick: true,
+	});
+
+	const tagSelectorBackdropProps = useModalDismiss({
+		onClose: () => {
+			setShowTagSelector(false);
+			setPendingAction(null);
+			setSelectedTagIds([]);
+		},
+		isOpen: showTagSelector,
+		closeOnOutsideClick: true,
+	});
+
+	const profileSelectorBackdropProps = useModalDismiss({
+		onClose: () => {
+			setShowProfileSelector(false);
+			setPendingAction(null);
+			setSelectedProfileId(null);
+		},
+		isOpen: showProfileSelector,
+		closeOnOutsideClick: true,
+	});
 
 	const actionsRef = useRef<HTMLDivElement>(null);
 	const selectByTagRef = useRef<HTMLDivElement>(null);
@@ -575,10 +605,7 @@ export default function BulkSelectionToolbar({
 				<div className="fixed inset-0 z-50 flex items-center justify-center">
 					<div
 						className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-						onClick={() => {
-							setShowConfirmModal(false);
-							setPendingAction(null);
-						}}
+						{...confirmBackdropProps}
 					/>
 					<div className="relative bg-background rounded-xl border border-border shadow-2xl w-full max-w-md mx-4 p-6">
 						<div className="flex items-center gap-3 mb-4">
@@ -620,15 +647,11 @@ export default function BulkSelectionToolbar({
 			)}
 
 			{showTagSelector && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center">
-					<div
-						className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-						onClick={() => {
-							setShowTagSelector(false);
-							setPendingAction(null);
-							setSelectedTagIds([]);
-						}}
-					/>
+				<div
+					className="fixed inset-0 z-50 flex items-center justify-center"
+					{...tagSelectorBackdropProps}
+				>
+					<div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 					<div className="relative bg-background rounded-xl border border-border shadow-2xl w-full max-w-md mx-4 p-6">
 						<div className="flex items-center gap-3 mb-4">
 							<div className="p-2 bg-primary/20 rounded-lg">
@@ -711,15 +734,11 @@ export default function BulkSelectionToolbar({
 			)}
 
 			{showProfileSelector && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center">
-					<div
-						className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-						onClick={() => {
-							setShowProfileSelector(false);
-							setPendingAction(null);
-							setSelectedProfileId(null);
-						}}
-					/>
+				<div
+					className="fixed inset-0 z-50 flex items-center justify-center"
+					{...profileSelectorBackdropProps}
+				>
+					<div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 					<div className="relative bg-background rounded-xl border border-border shadow-2xl w-full max-w-md mx-4 p-6">
 						<div className="flex items-center gap-3 mb-4">
 							<div className="p-2 bg-primary/20 rounded-lg">

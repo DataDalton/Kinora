@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 
 interface TOTPStatus {
 	enabled: boolean;
@@ -253,6 +254,18 @@ export default function TwoFactorSettings() {
 			URL.revokeObjectURL(url);
 		}
 	};
+
+	const closeDisableModal = () => {
+		setShowDisableModal(false);
+		setDisableCode("");
+		setError(null);
+	};
+
+	const disableBackdropProps = useModalDismiss({
+		onClose: closeDisableModal,
+		isOpen: showDisableModal,
+		disabled: disableTOTPMutation.isPending,
+	});
 
 	if (statusLoading) {
 		return (
@@ -537,7 +550,10 @@ export default function TwoFactorSettings() {
 
 			{/* Disable TOTP Modal */}
 			{showDisableModal && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...disableBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-md w-full border border-border shadow-2xl p-6">
 						<h2 className="text-2xl font-bold mb-4">
 							Disable TOTP
@@ -585,11 +601,7 @@ export default function TwoFactorSettings() {
 										: "Disable TOTP"}
 								</button>
 								<button
-									onClick={() => {
-										setShowDisableModal(false);
-										setDisableCode("");
-										setError(null);
-									}}
+									onClick={closeDisableModal}
 									className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 transition cursor-pointer"
 								>
 									Cancel

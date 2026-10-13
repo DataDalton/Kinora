@@ -5,6 +5,7 @@ Exposes the live qBittorrent state (merged with Kinora download history), per-to
 controls (pause/resume/delete/recheck/reannounce/force-start/super-seed/sequential/queue),
 share- and speed-limit management, and global transfer stats.
 """
+
 import logging
 from typing import List, Optional, Dict, Any
 from dataclasses import asdict
@@ -15,6 +16,7 @@ import asyncpg
 
 from app.db import get_db
 from app.core.cache import cacheGet, cacheSet, cacheDelete
+from app.services.media_status import releaseDownloadingStatus
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.download_clients.base import TorrentInfo, TorrentState
 from app.api.v1.endpoints.auth import get_current_user, require_permission
@@ -91,9 +93,7 @@ _PROFILE_TABLE_MAP = {
 def _serialize_torrent(torrent: TorrentInfo) -> Dict[str, Any]:
     """Convert a TorrentInfo dataclass into a JSON-friendly dict."""
     data = asdict(torrent)
-    data["state"] = (
-        torrent.state.value if isinstance(torrent.state, TorrentState) else torrent.state
-    )
+    data["state"] = torrent.state.value if isinstance(torrent.state, TorrentState) else torrent.state
     return data
 
 
@@ -124,14 +124,16 @@ def _group_for_state(state: str) -> str:
 # ---------------------------------------------------------------------------
 @router.get("/torrents")
 async def list_torrents(
+    fresh: bool = Query(False, description="Skip the cached snapshot and read qBittorrent directly"),
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
     List all torrents in the download client, merged with Kinora download history
-    so each entry carries media context and validation state.
+    so each entry carries media context and validation state. A fresh read still
+    replaces the snapshot, so other viewers see the new state too.
     """
-    snapshot = await cacheGet(SNAPSHOT_TORRENTS_KEY)
+    snapshot = None if fresh else await cacheGet(SNAPSHOT_TORRENTS_KEY)
     if snapshot is not None:
         return snapshot
 
@@ -151,9 +153,7 @@ async def list_torrents(
 
     history_map: Dict[str, Dict[str, Any]] = {}
     if hashes:
-        rows = await conn.fetch(
-            "SELECT * FROM download_history WHERE torrent_hash = ANY($1)", hashes
-        )
+        rows = await conn.fetch("SELECT * FROM download_history WHERE torrent_hash = ANY($1)", hashes)
         history_map = {row["torrent_hash"]: dict(row) for row in rows}
 
     result = []
@@ -188,10 +188,14 @@ async def list_torrents(
 
 @router.get("/stats")
 async def get_download_stats(
+    fresh: bool = Query(False, description="Skip the cached snapshot and read qBittorrent directly"),
     current_user: User = Depends(get_current_user),
 ):
-    """Aggregate live stats for the download client (speeds, totals, group counts)."""
-    snapshot = await cacheGet(SNAPSHOT_STATS_KEY)
+    """
+    Aggregate live stats for the download client (speeds, totals, group counts). A fresh
+    read still replaces the snapshot, so other viewers see the new state too.
+    """
+    snapshot = None if fresh else await cacheGet(SNAPSHOT_STATS_KEY)
     if snapshot is not None:
         return snapshot
 
@@ -254,15 +258,11 @@ async def validate_preview(
 
     profile_row = None
     if body.profile_id:
-        profile_row = await conn.fetchrow(
-            "SELECT * FROM media_profiles WHERE id = $1", body.profile_id
-        )
+        profile_row = await conn.fetchrow("SELECT * FROM media_profiles WHERE id = $1", body.profile_id)
     elif body.media_id:
         table = _PROFILE_TABLE_MAP.get(body.media_type)
         if table:
-            media = await conn.fetchrow(
-                f"SELECT media_profile_id FROM {table} WHERE id = $1", body.media_id
-            )
+            media = await conn.fetchrow(f"SELECT media_profile_id FROM {table} WHERE id = $1", body.media_id)
             if media and media.get("media_profile_id"):
                 profile_row = await conn.fetchrow(
                     "SELECT * FROM media_profiles WHERE id = $1", media["media_profile_id"]
@@ -311,17 +311,13 @@ async def get_torrent_detail(
 
     torrent = await client.get_torrent(torrent_hash)
     if not torrent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Torrent not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Torrent not found")
 
     files = await client.get_torrent_files(torrent_hash)
     trackers = await client.get_torrent_trackers(torrent_hash)
     piece_states = await client.get_piece_states(torrent_hash)
 
-    history = await conn.fetchrow(
-        "SELECT * FROM download_history WHERE torrent_hash = $1", torrent_hash
-    )
+    history = await conn.fetchrow("SELECT * FROM download_history WHERE torrent_hash = $1", torrent_hash)
 
     entry = _serialize_torrent(torrent)
     entry["group"] = _group_for_state(entry["state"])
@@ -474,9 +470,7 @@ async def set_global_speed_limits(
     current_user: UserWithPermissions = Depends(require_permission("system.downloads")),
 ):
     client = await _get_client_or_503()
-    await client.set_global_speed_limits(
-        download_limit=body.download_limit, upload_limit=body.upload_limit
-    )
+    await client.set_global_speed_limits(download_limit=body.download_limit, upload_limit=body.upload_limit)
     await _invalidateSnapshots()
     return {"success": True}
 
@@ -501,10 +495,13 @@ async def delete_torrent(
 ):
     client = await _get_client_or_503()
     await client.delete_torrent(torrent_hash, delete_files=delete_files)
-    await conn.execute(
-        "UPDATE download_history SET status = 'removed', updated_at = NOW() WHERE torrent_hash = $1",
+    removed = await conn.fetchrow(
+        "UPDATE download_history SET status = 'removed', updated_at = NOW() WHERE torrent_hash = $1 "
+        "RETURNING media_type, media_id",
         torrent_hash,
     )
+    if removed:
+        await releaseDownloadingStatus(conn, removed["media_type"], removed["media_id"])
     await _invalidateSnapshots()
     return {"success": True}
 
@@ -615,13 +612,11 @@ class DownloadSettingsUpdate(BaseModel):
 
 
 async def _get_enabled_client_row(conn: asyncpg.Connection):
-    return await conn.fetchrow(
-        """
+    return await conn.fetchrow("""
         SELECT * FROM download_clients
         WHERE client_type = 'qbittorrent' AND is_enabled = TRUE
         LIMIT 1
-        """
-    )
+        """)
 
 
 def _parse_automation(raw: Any) -> Dict[str, Any]:
@@ -746,9 +741,7 @@ async def list_indexer_rules(
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    rows = await conn.fetch(
-        "SELECT * FROM indexer_seed_rules ORDER BY indexer"
-    )
+    rows = await conn.fetch("SELECT * FROM indexer_seed_rules ORDER BY indexer")
     return [dict(r) for r in rows]
 
 
@@ -802,9 +795,7 @@ async def list_import_queue(
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """List files awaiting manual import mapping."""
-    rows = await conn.fetch(
-        "SELECT * FROM import_queue WHERE status = 'pending' ORDER BY created_at DESC"
-    )
+    rows = await conn.fetch("SELECT * FROM import_queue WHERE status = 'pending' ORDER BY created_at DESC")
     return [dict(r) for r in rows]
 
 
@@ -856,18 +847,15 @@ async def resolve_import(
     item_dict = dict(item)
     media_id = body.media_id or item_dict.get("media_id")
     if not media_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="A media_id is required"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A media_id is required")
 
     try:
-        destination = await resolve_import_item(
-            conn, item_dict, media_id, body.season_number, body.episode_number
-        )
+        destination = await resolve_import_item(conn, item_dict, media_id, body.season_number, body.episode_number)
     except Exception as e:
         await conn.execute(
             "UPDATE import_queue SET error_message = $1, updated_at = NOW() WHERE id = $2",
-            str(e), item_id,
+            str(e),
+            item_id,
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -878,7 +866,10 @@ async def resolve_import(
             error_message = NULL, updated_at = NOW()
         WHERE id = $4
         """,
-        media_id, body.season_number, body.episode_number, item_id,
+        media_id,
+        body.season_number,
+        body.episode_number,
+        item_id,
     )
     return {"success": True, "destination": destination}
 
@@ -919,7 +910,8 @@ async def list_sources(
             ORDER BY created_at DESC
             LIMIT $2
             """,
-            f"%{search}%", limit,
+            f"%{search}%",
+            limit,
         )
     else:
         rows = await conn.fetch(
@@ -946,17 +938,13 @@ async def re_add_source(
     """Re-add a previously grabbed release from its stored magnet or .torrent URL."""
     from app.services.folder_selector import folderSelector
 
-    row = await conn.fetchrow(
-        "SELECT * FROM download_history WHERE id = $1", history_id
-    )
+    row = await conn.fetchrow("SELECT * FROM download_history WHERE id = $1", history_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     source = row["torrent_url"] or row["magnet_link"]
     if not source:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="No stored magnet or torrent URL"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No stored magnet or torrent URL")
 
     client = await _get_client_or_503()
 
@@ -979,7 +967,8 @@ async def re_add_source(
 
     await conn.execute(
         "UPDATE download_history SET status = 'downloading', torrent_hash = $1, progress = 0.0, updated_at = NOW() WHERE id = $2",
-        torrent_hash, history_id,
+        torrent_hash,
+        history_id,
     )
     await _invalidateSnapshots()
     return {"success": True, "hash": torrent_hash}
@@ -1077,10 +1066,7 @@ async def connection_safety(
 
     if not bound:
         severity = "warn"
-        message = (
-            "qBittorrent is not bound to a specific interface, so a VPN drop would not "
-            "stop torrent traffic."
-        )
+        message = "qBittorrent is not bound to a specific interface, so a VPN drop would not " "stop torrent traffic."
         if same_host:
             message += " The client is also on Kinora's network."
     else:

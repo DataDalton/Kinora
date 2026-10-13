@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { AlertTriangle, X } from "lucide-react";
 
 interface DeleteTorrentModalProps {
@@ -16,6 +17,11 @@ export default function DeleteTorrentModal({
 }: DeleteTorrentModalProps) {
 	const [deleteFiles, setDeleteFiles] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
+	const backdropProps = useModalDismiss({
+		onClose,
+		closeOnOutsideClick: true,
+		disabled: submitting,
+	});
 
 	const handleConfirm = async () => {
 		setSubmitting(true);
@@ -28,7 +34,10 @@ export default function DeleteTorrentModal({
 	};
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+		<div
+			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			{...backdropProps}
+		>
 			<div className="bg-card text-card-foreground rounded-lg shadow-xl w-full max-w-md">
 				<div className="flex items-center justify-between p-4 border-b border-border">
 					<h2 className="text-lg font-semibold flex items-center gap-2">

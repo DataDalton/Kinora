@@ -344,20 +344,6 @@ export default function ShowDetailPage() {
 
 	return (
 		<div className="min-h-screen">
-			{/* Backdrop */}
-			{show.backdrop_path && (
-				<div className="fixed inset-0 z-0">
-					<Image
-						src={getPosterUrl(show.backdrop_path, "original")}
-						alt=""
-						className="w-full h-full object-cover opacity-10"
-						width={1280}
-						height={720}
-					/>
-					<div className="absolute inset-0 bg-gradient-to-b from-background/50 via-background to-background" />
-				</div>
-			)}
-
 			<div className="relative z-10">
 				<PageHeader
 					title={show.title}
@@ -743,7 +729,6 @@ export default function ShowDetailPage() {
 				onCancel={() => setShowDeleteModal(false)}
 				onConfirm={handleDeleteConfirm}
 				title={show.title}
-				itemName="show"
 				hasFiles={!!show.root_folder_path}
 			/>
 
@@ -753,6 +738,7 @@ export default function ShowDetailPage() {
 				mediaType="show"
 				mediaId={show.id}
 				mediaTitle={show.title}
+				mediaPoster={show.poster_path}
 				searchQuery={show.title}
 			/>
 

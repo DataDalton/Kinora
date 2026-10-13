@@ -301,6 +301,18 @@ class UserWithPermissions(UserBase):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+class UserPreferences(BaseModel):
+    """Per-user preferences. A key the user never set reads as the default here."""
+
+    notificationSounds: bool = True
+
+
+class UserPreferencesUpdate(BaseModel):
+    """Partial preferences update. Only the fields sent are changed."""
+
+    notificationSounds: Optional[bool] = None
+
+
 class UserPermissionsResponse(BaseModel):
     """Schema for effective permissions response"""
 

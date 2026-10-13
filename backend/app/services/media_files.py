@@ -10,6 +10,7 @@ instead of an ffprobe per load, and one row per file represents movie versions.
 """
 
 import os
+import re
 import asyncio
 from typing import List, Dict, Any, Optional
 
@@ -57,10 +58,14 @@ _UPSERT_SQL = """
 
 
 def _audio_channels(stream: Dict[str, Any]) -> Optional[str]:
+    """
+    Channel layout as a viewer reads it. FFmpeg suffixes some layouts with which speakers
+    the surround channels target, such as 5.1(side), and that suffix is dropped.
+    """
     channels = stream.get("channel_layout")
     if not channels and stream.get("channels"):
         channels = str(stream.get("channels"))
-    return channels
+    return re.sub(r"\(.*\)$", "", channels) if channels else channels
 
 
 def attrs_from_metadata(path: str, metadata: Optional[Dict[str, Any]], is_audio: bool) -> Dict[str, Any]:

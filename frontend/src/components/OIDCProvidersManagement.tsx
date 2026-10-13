@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Edit, Trash2, Globe } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 
 interface OIDCProvider {
 	id: number;
@@ -122,6 +123,18 @@ export default function OIDCProvidersManagement() {
 			createMutation.mutate(formData);
 		}
 	};
+
+	const closeModal = () => {
+		setShowModal(false);
+		setEditingProvider(null);
+		resetForm();
+	};
+
+	const providerBackdropProps = useModalDismiss({
+		onClose: closeModal,
+		isOpen: showModal,
+		disabled: createMutation.isPending || updateMutation.isPending,
+	});
 
 	if (isLoading) {
 		return (
@@ -261,7 +274,10 @@ export default function OIDCProvidersManagement() {
 
 			{/* Modal */}
 			{showModal && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-50 flex items-center justify-center p-4"
+					{...providerBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-2xl w-full border border-border shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
 						<h2 className="text-2xl font-bold mb-6">
 							{editingProvider
@@ -449,11 +465,7 @@ export default function OIDCProvidersManagement() {
 								</button>
 								<button
 									type="button"
-									onClick={() => {
-										setShowModal(false);
-										setEditingProvider(null);
-										resetForm();
-									}}
+									onClick={closeModal}
 									className="px-6 py-3 bg-muted text-foreground rounded-lg hover:opacity-90 transition cursor-pointer"
 								>
 									Cancel

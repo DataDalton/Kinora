@@ -317,7 +317,7 @@ async def check_and_grab_movie(conn, release, movie, profile):
             title=f"Downloading {movie['title']}",
             message=release.title,
             severity=SEVERITY_INFO,
-            data={"media_type": "movie", "media_id": movie["id"]},
+            data={"media_type": "movie", "media_id": movie["id"], "poster": movie.get("poster_path")},
         )
 
         return True
@@ -372,7 +372,7 @@ async def check_and_grab_show(conn, release, show, profile):
             title=f"Downloading {show['title']} S{matchedSeason:02d}E{matchedEpisode:02d}",
             message=release.title,
             severity=SEVERITY_INFO,
-            data={"media_type": "show", "media_id": show["id"]},
+            data={"media_type": "show", "media_id": show["id"], "poster": show.get("poster_path")},
         )
 
         return True
@@ -427,7 +427,7 @@ async def check_and_download_anime(conn, release, anime, profile):
             title=f"Downloading {anime['title']} episode {matchedEpisode}",
             message=release.title,
             severity=SEVERITY_INFO,
-            data={"media_type": "anime", "media_id": anime["id"]},
+            data={"media_type": "anime", "media_id": anime["id"], "poster": anime.get("poster_path")},
         )
 
         return True
@@ -482,7 +482,11 @@ async def check_and_download_album(conn, release, album, profile):
             title=f"Downloading {album['title']}" + (f" by {artistName}" if artistName else ""),
             message=release.title,
             severity=SEVERITY_INFO,
-            data={"media_type": "album", "media_id": album["id"]},
+            data={
+                "media_type": "album",
+                "media_id": album["id"],
+                "poster": album.get("cover_medium") or album.get("cover"),
+            },
         )
 
         return True

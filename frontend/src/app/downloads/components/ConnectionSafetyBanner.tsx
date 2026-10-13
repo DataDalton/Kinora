@@ -12,6 +12,7 @@ import {
 	Lock,
 	Unlock,
 } from "lucide-react";
+import { useToast } from "@/components/toast/ToastProvider";
 import {
 	getConnectionSafety,
 	getGluetunStatus,
@@ -21,7 +22,6 @@ import {
 
 interface Props {
 	canControl: boolean;
-	notify: (message: string, type?: "success" | "error") => void;
 }
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -30,7 +30,8 @@ const SEVERITY_STYLES: Record<string, string> = {
 	error: "bg-red-500/10 border-red-500/30 text-red-600",
 };
 
-export default function ConnectionSafetyBanner({ canControl, notify }: Props) {
+export default function ConnectionSafetyBanner({ canControl }: Props) {
+	const toast = useToast();
 	const [busy, setBusy] = useState(false);
 
 	const { data: safety, refetch: refetchSafety } = useQuery({
@@ -55,19 +56,25 @@ export default function ConnectionSafetyBanner({ canControl, notify }: Props) {
 				? ShieldX
 				: ShieldAlert;
 
-	const runControl = async (fn: () => Promise<unknown>, msg: string) => {
+	// A failed VPN control leaves the connection in a state the user has to resolve,
+	// so its toast stays until dismissed.
+	const runControl = async (
+		fn: () => Promise<unknown>,
+		successTitle: string,
+		failureTitle: string,
+	) => {
 		if (busy) return;
 		setBusy(true);
 		try {
 			await fn();
-			notify(msg, "success");
+			toast.success(successTitle);
 			refetchSafety();
 			refetchGluetun();
 		} catch (err: unknown) {
-			notify(
-				err instanceof Error ? err.message : "Action failed",
-				"error",
-			);
+			toast.error(failureTitle, {
+				description: err instanceof Error ? err.message : undefined,
+				persistent: true,
+			});
 		} finally {
 			setBusy(false);
 		}
@@ -133,6 +140,7 @@ export default function ConnectionSafetyBanner({ canControl, notify }: Props) {
 								runControl(
 									() => gluetunControl("restart"),
 									"Reconnecting VPN",
+									"Couldn't reconnect VPN",
 								)
 							}
 							disabled={busy}
@@ -150,6 +158,9 @@ export default function ConnectionSafetyBanner({ canControl, notify }: Props) {
 									gluetun.running
 										? "Stopping VPN"
 										: "Starting VPN",
+									gluetun.running
+										? "Couldn't stop VPN"
+										: "Couldn't start VPN",
 								)
 							}
 							disabled={busy}
@@ -163,6 +174,7 @@ export default function ConnectionSafetyBanner({ canControl, notify }: Props) {
 								runControl(
 									gluetunSyncPort,
 									"Synced forwarded port",
+									"Couldn't sync forwarded port",
 								)
 							}
 							disabled={busy}

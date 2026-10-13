@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { X, Folder, Upload, Check, AlertCircle, Loader2 } from "lucide-react";
 
 interface LibraryImportModalProps {
@@ -150,6 +151,13 @@ export default function LibraryImportModal({
 		onClose();
 	};
 
+	const backdropProps = useModalDismiss({
+		onClose: handleClose,
+		isOpen,
+		closeOnOutsideClick: false,
+		disabled: scanMutation.isPending || importMutation.isPending,
+	});
+
 	if (!isOpen) return null;
 
 	const mediaTypeLabel =
@@ -164,7 +172,7 @@ export default function LibraryImportModal({
 	return (
 		<div
 			className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-			onClick={handleClose}
+			{...backdropProps}
 		>
 			<div
 				className="bg-zinc-900 rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"

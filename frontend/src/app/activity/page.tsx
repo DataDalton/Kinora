@@ -19,6 +19,7 @@ interface Download {
 	quality: string;
 	size: number;
 	status: string;
+	// Fraction from 0 to 1, as reported by the download client.
 	progress: number;
 	download_client: string;
 	grab_mode?: string;
@@ -35,20 +36,22 @@ export default function ActivityPage() {
 		queryKey: ["download-history"],
 		queryFn: async () => {
 			try {
-				const response = await api.get("/download-history", {
+				const response = await api.get("/history/", {
 					params: { limit: 50 },
 				});
-				return response.data.downloads || [];
+				return response.data || [];
 			} catch (error) {
 				return [];
 			}
 		},
 		refetchInterval: 5000,
+		// Always refetch on arrival, since downloads change while the page is closed.
+		staleTime: 0,
 	});
 
 	const { data: clientStats } = useQuery({
 		queryKey: ["downloads-stats-widget"],
-		queryFn: getDownloadStats,
+		queryFn: () => getDownloadStats(),
 		refetchInterval: 5000,
 		enabled: canViewDownloads,
 	});
@@ -203,14 +206,14 @@ export default function ActivityPage() {
 														<div
 															className="bg-primary h-2 rounded-full transition-all"
 															style={{
-																width: `${download.progress || 0}%`,
+																width: `${(download.progress || 0) * 100}%`,
 															}}
 														/>
 													</div>
 													<span className="text-sm font-medium min-w-[4rem] text-right">
 														{(
-															download.progress ||
-															0
+															(download.progress ||
+																0) * 100
 														).toFixed(1)}
 														%
 													</span>

@@ -29,15 +29,18 @@ class MovieAddRequest(BaseModel):
 
 @router.get("/")
 async def get_movies(
-    skip: int = 0,
-    limit: int = 100,
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=500),
+    skip: Optional[int] = Query(None, ge=0, description="Row offset. Overrides page when set."),
+    status: Optional[str] = None,
     monitored_only: bool = False,
     current_user: UserWithPermissions = Depends(require_permission("movies.view")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """Get all movies from library with their tags (single query with JSON aggregation)."""
+    """Get movies from the library with their tags, filtered by status and paginated."""
+    offset = skip if skip is not None else (page - 1) * limit
     repo = MovieRepository(conn)
-    return await repo.listWithTags(limit=limit, offset=skip, monitoredOnly=monitored_only)
+    return await repo.listWithTags(limit=limit, offset=offset, monitoredOnly=monitored_only, status=status)
 
 
 @router.get("/{movie_id}")
@@ -122,6 +125,7 @@ async def add_movie(
 
         # Create a media request
         import json
+
         request_row = await conn.fetchrow(
             """
             INSERT INTO media_requests (user_id, media_type, external_id, title, poster_path, year, overview, metadata, status)
@@ -214,8 +218,7 @@ async def update_movie_monitoring(
     # Update with raw SQL and return dict (like shows do) to avoid Pydantic validation
     setClause = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updateData.keys()))
     row = await conn.fetchrow(
-        f"UPDATE movies SET {setClause}, updated_at = NOW() WHERE id = $1 RETURNING *",
-        movie_id, *updateData.values()
+        f"UPDATE movies SET {setClause}, updated_at = NOW() WHERE id = $1 RETURNING *", movie_id, *updateData.values()
     )
 
     if not row:
@@ -256,7 +259,7 @@ async def delete_movie_with_files(
                 parentDir = os.path.dirname(filePath)
                 if parentDir and os.path.isdir(parentDir):
                     remaining = os.listdir(parentDir)
-                    if not remaining or all(f.endswith(('.nfo', '.jpg', '.png', '.srt', '.sub')) for f in remaining):
+                    if not remaining or all(f.endswith((".nfo", ".jpg", ".png", ".srt", ".sub")) for f in remaining):
                         shutil.rmtree(parentDir)
                         filesDeleted.append(parentDir)
             elif os.path.isdir(filePath):
@@ -333,7 +336,7 @@ async def rescan_movie_files(
             hasFile = True
             fileSize = os.path.getsize(filePath)
         elif os.path.isdir(filePath):
-            videoExtensions = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v')
+            videoExtensions = (".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v")
             for f in os.listdir(filePath):
                 if f.lower().endswith(videoExtensions):
                     hasFile = True
@@ -378,7 +381,15 @@ async def get_movie_credits(
             for person in credits.get("cast", [])[:20]
         ]
 
-        crewJobs = ["Director", "Writer", "Screenplay", "Producer", "Executive Producer", "Cinematography", "Original Music Composer"]
+        crewJobs = [
+            "Director",
+            "Writer",
+            "Screenplay",
+            "Producer",
+            "Executive Producer",
+            "Cinematography",
+            "Original Music Composer",
+        ]
         crew = [
             {
                 "id": person.get("id"),

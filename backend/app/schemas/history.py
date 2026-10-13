@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DownloadHistoryBase(BaseModel):
@@ -55,6 +55,18 @@ class DownloadHistory(DownloadHistoryBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    # Both columns are nullable and several insert paths leave them unset, so NULL reads as
+    # no upgrade and no progress instead of failing the whole response.
+    @field_validator("was_upgrade", mode="before")
+    @classmethod
+    def nullUpgradeIsFalse(cls, value):
+        return False if value is None else value
+
+    @field_validator("progress", mode="before")
+    @classmethod
+    def nullProgressIsZero(cls, value):
+        return 0.0 if value is None else value
 
 
 class DownloadHistoryStats(BaseModel):

@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import {
 	User,
 	Shield,
+	Bell,
 	Eye,
 	EyeOff,
 	Check,
@@ -16,8 +17,15 @@ import {
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
+import NotificationPreferences from "@/components/NotificationPreferences";
 
-type ProfileSection = "account" | "security";
+type ProfileSection = "account" | "security" | "notifications";
+
+const PROFILE_SECTIONS: ProfileSection[] = [
+	"account",
+	"security",
+	"notifications",
+];
 
 interface UserData {
 	id: number;
@@ -239,8 +247,10 @@ function PasswordChangeSection() {
 
 function ProfileContent() {
 	const searchParams = useSearchParams();
-	const initialSection =
-		searchParams?.get("section") === "security" ? "security" : "account";
+	const requestedSection = searchParams?.get("section") as ProfileSection;
+	const initialSection = PROFILE_SECTIONS.includes(requestedSection)
+		? requestedSection
+		: "account";
 	const [selectedSection, setSelectedSection] =
 		useState<ProfileSection>(initialSection);
 
@@ -255,6 +265,11 @@ function ProfileContent() {
 	const sections = [
 		{ id: "account" as ProfileSection, label: "Account", icon: User },
 		{ id: "security" as ProfileSection, label: "Security", icon: Shield },
+		{
+			id: "notifications" as ProfileSection,
+			label: "Notifications",
+			icon: Bell,
+		},
 	];
 
 	return (
@@ -403,6 +418,10 @@ function ProfileContent() {
 							<PasswordChangeSection />
 							<TwoFactorSettings />
 						</div>
+					)}
+
+					{selectedSection === "notifications" && (
+						<NotificationPreferences />
 					)}
 				</div>
 			</div>

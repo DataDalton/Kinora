@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/toast/ToastProvider";
+import DeleteFileModal from "@/components/DeleteFileModal";
 import {
 	HardDrive,
 	FolderOpen,
@@ -16,7 +18,6 @@ import {
 	Copy,
 	Check,
 	Trash2,
-	X,
 } from "lucide-react";
 
 interface FileInfo {
@@ -82,8 +83,9 @@ export default function FileQualityInfo({
 	onRescanComplete,
 }: FileQualityInfoProps) {
 	const [copiedPath, setCopiedPath] = useState<string | null>(null);
-	const [confirmingPath, setConfirmingPath] = useState<string | null>(null);
+	const [fileToDelete, setFileToDelete] = useState<FileInfo | null>(null);
 	const queryClient = useQueryClient();
+	const toast = useToast();
 
 	const rescanMutation = useMutation({
 		mutationFn: async () => {
@@ -98,6 +100,12 @@ export default function FileQualityInfo({
 				queryKey: ["files", mediaType, mediaId],
 			});
 			onRescanComplete?.();
+			toast.success("Rescan complete");
+		},
+		onError: (error: Error) => {
+			toast.error("Couldn't rescan files", {
+				description: error.message,
+			});
 		},
 	});
 
@@ -109,13 +117,19 @@ export default function FileQualityInfo({
 			);
 			return response.data;
 		},
-		onSuccess: () => {
-			setConfirmingPath(null);
+		onSuccess: (_data, filePath) => {
+			setFileToDelete(null);
 			queryClient.invalidateQueries({ queryKey: [mediaType, mediaId] });
 			queryClient.invalidateQueries({
 				queryKey: ["files", mediaType, mediaId],
 			});
 			onRescanComplete?.();
+			toast.success("File deleted", {
+				description: formatPath(filePath).filename,
+			});
+		},
+		onError: (error: Error) => {
+			toast.error("Couldn't delete file", { description: error.message });
 		},
 	});
 
@@ -140,7 +154,7 @@ export default function FileQualityInfo({
 					<button
 						onClick={() => rescanMutation.mutate()}
 						disabled={rescanMutation.isPending}
-						className="flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+						className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border hover:bg-accent rounded-lg transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<RefreshCw
 							className={`w-4 h-4 ${rescanMutation.isPending ? "animate-spin" : ""}`}
@@ -179,7 +193,7 @@ export default function FileQualityInfo({
 				<button
 					onClick={() => rescanMutation.mutate()}
 					disabled={rescanMutation.isPending}
-					className="flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg transition text-sm"
+					className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border hover:bg-accent rounded-lg transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 				>
 					<RefreshCw
 						className={`w-4 h-4 ${rescanMutation.isPending ? "animate-spin" : ""}`}
@@ -351,45 +365,14 @@ export default function FileQualityInfo({
 									</div>
 								</div>
 								<div className="shrink-0">
-									{confirmingPath === file.file_path ? (
-										<div className="flex items-center gap-1">
-											<button
-												onClick={() =>
-													deleteVersionMutation.mutate(
-														file.file_path,
-													)
-												}
-												disabled={
-													deleteVersionMutation.isPending
-												}
-												className="p-1.5 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded transition"
-												title="Confirm delete"
-											>
-												<Check className="w-4 h-4" />
-											</button>
-											<button
-												onClick={() =>
-													setConfirmingPath(null)
-												}
-												className="p-1.5 bg-muted hover:bg-muted/80 rounded transition"
-												title="Cancel"
-											>
-												<X className="w-4 h-4" />
-											</button>
-										</div>
-									) : (
-										<button
-											onClick={() =>
-												setConfirmingPath(
-													file.file_path,
-												)
-											}
-											className="p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded transition"
-											title="Delete this version"
-										>
-											<Trash2 className="w-4 h-4" />
-										</button>
-									)}
+									<button
+										onClick={() => setFileToDelete(file)}
+										className="p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded transition cursor-pointer"
+										title="Delete this version"
+										aria-label="Delete this version"
+									>
+										<Trash2 className="w-4 h-4" />
+									</button>
 								</div>
 							</div>
 						</div>
@@ -412,6 +395,20 @@ export default function FileQualityInfo({
 						{files.length > 1 && <span>{files.length} files</span>}
 					</div>
 				</div>
+			)}
+
+			{fileToDelete && (
+				<DeleteFileModal
+					fileName={formatPath(fileToDelete.file_path).filename}
+					directory={formatPath(fileToDelete.file_path).directory}
+					sizeLabel={formatSize(fileToDelete.file_size)}
+					isLastFile={files.length === 1}
+					isLoading={deleteVersionMutation.isPending}
+					onConfirm={() =>
+						deleteVersionMutation.mutate(fileToDelete.file_path)
+					}
+					onCancel={() => setFileToDelete(null)}
+				/>
 			)}
 		</div>
 	);

@@ -11,6 +11,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/toast/ToastProvider";
 
 interface AuthProvider {
 	id: number;
@@ -26,6 +27,7 @@ interface AuthProvider {
 export default function AuthProvidersSection() {
 	const [unlinkingId, setUnlinkingId] = useState<number | null>(null);
 	const queryClient = useQueryClient();
+	const toast = useToast();
 
 	const providersQueryKey = ["auth", "me", "auth-providers"];
 
@@ -68,10 +70,11 @@ export default function AuthProvidersSection() {
 				(current) => (current ?? []).filter((p) => p.id !== providerId),
 			);
 		} catch (err: any) {
-			alert(
-				err.response?.data?.detail ||
-					"Failed to unlink provider. Make sure you have at least one authentication method.",
-			);
+			toast.error("Couldn't unlink provider", {
+				description:
+					err.response?.data?.detail ||
+					"Make sure you have at least one authentication method.",
+			});
 		} finally {
 			setUnlinkingId(null);
 		}

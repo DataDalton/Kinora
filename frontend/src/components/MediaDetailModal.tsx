@@ -2,13 +2,14 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import InteractiveSearchModal from "./InteractiveSearchModal";
 import Image from "next/image";
-import Toast from "./Toast";
+import { useToast } from "@/components/toast/ToastProvider";
 import { Folder, HardDrive, User, ArrowLeft, X } from "lucide-react";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { createRequest } from "@/lib/api/requests";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 
 interface Media {
 	id: number;
@@ -80,10 +81,7 @@ export default function MediaDetailModal({
 	const deferredAddRef = useRef(false);
 	const [navigationStack, setNavigationStack] = useState<Media[]>([]);
 	const [currentMedia, setCurrentMedia] = useState<Media | null>(null);
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error" | "info";
-	} | null>(null);
+	const toast = useToast();
 	const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
 	const displayMedia = currentMedia || media;
@@ -106,13 +104,6 @@ export default function MediaDetailModal({
 	const canDirectAdd =
 		canManage(permissionMediaType) || canDownload(permissionMediaType);
 	const canRequestAdd = canRequest(permissionMediaType) && !canDirectAdd;
-
-	const showToast = (message: string, type: "success" | "error" | "info") => {
-		setToast(null);
-		setTimeout(() => {
-			setToast({ message, type });
-		}, 0);
-	};
 
 	// Parse genres from various formats (JSON string, array of objects, or array of strings)
 	const parseGenres = (genres: any): string[] => {
@@ -241,17 +232,6 @@ export default function MediaDetailModal({
 		}
 	}
 
-	useEffect(() => {
-		const handleEscape = (e: KeyboardEvent) => {
-			if (e.key === "Escape" && isOpen) {
-				onClose();
-			}
-		};
-
-		document.addEventListener("keydown", handleEscape);
-		return () => document.removeEventListener("keydown", handleEscape);
-	}, [isOpen, onClose]);
-
 	const { data: mediaDetails, isLoading: detailsLoading } = useQuery({
 		queryKey: ["media-details", displayMedia?.id, mediaType],
 		queryFn: async () => {
@@ -262,6 +242,21 @@ export default function MediaDetailModal({
 			return response.data;
 		},
 		enabled: isOpen && !!displayMedia,
+	});
+
+	// Poster and title for toasts about the item shown in this modal. Movies, shows and
+	// anime use poster_path, albums use cover_xl and artists use picture_xl.
+	const toastMedia = () => ({
+		poster:
+			mediaDetails?.poster_path ||
+			mediaDetails?.cover_xl ||
+			mediaDetails?.picture_xl ||
+			displayMedia?.poster_path,
+		name:
+			mediaDetails?.title ||
+			mediaDetails?.name ||
+			displayMedia?.title ||
+			displayMedia?.name,
 	});
 
 	const { data: collectionDetails, isLoading: collectionLoading } = useQuery({
@@ -332,12 +327,12 @@ export default function MediaDetailModal({
 
 			// Show count of related seasons added for anime
 			if (mediaType === "anime" && data.total_added > 1) {
-				showToast(
-					`Added ${data.total_added} entries to library (including ${data.related_added} related seasons)!`,
-					"success",
-				);
+				toast.success("Added to library", {
+					media: toastMedia(),
+					description: `${data.total_added} entries, including ${data.related_added} related seasons`,
+				});
 			} else {
-				showToast("Added to library successfully!", "success");
+				toast.success("Added to library", { media: toastMedia() });
 			}
 			onClose();
 			setShowAddModal(false);
@@ -480,26 +475,38 @@ export default function MediaDetailModal({
 		});
 	};
 
+	const detailBackdropProps = useModalDismiss({
+		onClose,
+		isOpen: isOpen && !!media,
+		closeOnOutsideClick: true,
+	});
+
+	const addBackdropProps = useModalDismiss({
+		onClose: () => {
+			setShowAddModal(false);
+			setAutoSearch(true);
+			setAddCollection(false);
+			setSelectedFolderId(null);
+		},
+		isOpen: isOpen && !!media && showAddModal && !!mediaDetails,
+		disabled: addMediaMutation.isPending,
+	});
+
+	const requestBackdropProps = useModalDismiss({
+		onClose: () => {
+			setShowRequestModal(false);
+			setRequestNotes("");
+		},
+		isOpen: isOpen && !!media && showRequestModal && !!mediaDetails,
+		disabled: isSubmittingRequest,
+	});
+
 	if (!isOpen || !media) return null;
 
 	return (
 		<>
-			<div
-				className="fixed inset-0 backdrop-blur-sm bg-background/20 z-50 overflow-y-auto"
-				onClick={(e) => {
-					if (e.target === e.currentTarget) {
-						handleBack();
-					}
-				}}
-			>
-				<div
-					className="min-h-screen p-4"
-					onClick={(e) => {
-						if (e.target === e.currentTarget) {
-							handleBack();
-						}
-					}}
-				>
+			<div className="fixed inset-0 backdrop-blur-sm bg-background/20 z-50 overflow-y-auto">
+				<div className="min-h-screen p-4" {...detailBackdropProps}>
 					<div className="relative bg-background/95 backdrop-blur-sm rounded-lg max-w-6xl mx-auto mt-8 mb-8 overflow-hidden border border-border shadow-2xl">
 						<button
 							onClick={handleBack}
@@ -1466,7 +1473,10 @@ export default function MediaDetailModal({
 			</div>
 
 			{showAddModal && mediaDetails && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-[60] flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-[60] flex items-center justify-center p-4"
+					{...addBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-2xl w-full border border-border shadow-2xl p-6">
 						<h2 className="text-2xl font-bold mb-4">
 							Add to Library
@@ -1727,9 +1737,12 @@ export default function MediaDetailModal({
 								<button
 									onClick={() => {
 										if (autoSearch && !selectedProfileId) {
-											showToast(
-												"Select a media profile to search automatically, or turn off automatic search to add without one",
-												"info",
+											toast.info(
+												"Select a media profile",
+												{
+													description:
+														"Automatic search needs a profile. Turn off automatic search to add without one",
+												},
 											);
 											return;
 										}
@@ -1849,9 +1862,15 @@ export default function MediaDetailModal({
 															],
 														},
 													);
-													showToast(
-														`Added ${successCount} of ${collectionDetails.parts.length} movies to library!`,
-														"success",
+													toast.success(
+														"Collection added to library",
+														{
+															media: {
+																poster: collectionDetails.poster_path,
+																name: collectionDetails.name,
+															},
+															description: `Added ${successCount} of ${collectionDetails.parts.length} movies`,
+														},
 													);
 													onClose();
 													setShowAddModal(false);
@@ -1924,7 +1943,10 @@ export default function MediaDetailModal({
 
 			{/* Request Modal */}
 			{showRequestModal && mediaDetails && (
-				<div className="fixed inset-0 backdrop-blur-sm bg-background/50 z-[60] flex items-center justify-center p-4">
+				<div
+					className="fixed inset-0 backdrop-blur-sm bg-background/50 z-[60] flex items-center justify-center p-4"
+					{...requestBackdropProps}
+				>
 					<div className="bg-background rounded-lg max-w-md w-full border border-border shadow-2xl p-6">
 						<h2 className="text-2xl font-bold mb-2">
 							Request {mediaDetails.title || mediaDetails.name}
@@ -1987,18 +2009,22 @@ export default function MediaDetailModal({
 												requestNotes:
 													requestNotes || undefined,
 											});
-											showToast(
+											toast.success(
 												"Request submitted for approval",
-												"success",
+												{ media: toastMedia() },
 											);
 											setShowRequestModal(false);
 											setRequestNotes("");
 											onClose();
 										} catch (error: any) {
-											showToast(
-												error?.response?.data?.detail ||
-													"Failed to submit request",
-												"error",
+											toast.error(
+												"Couldn't submit request",
+												{
+													media: toastMedia(),
+													description:
+														error?.response?.data
+															?.detail,
+												},
 											);
 										} finally {
 											setIsSubmittingRequest(false);
@@ -2023,17 +2049,6 @@ export default function MediaDetailModal({
 							</div>
 						</div>
 					</div>
-				</div>
-			)}
-
-			{/* Toast Notification */}
-			{toast && (
-				<div className="fixed bottom-4 right-4 z-[70]">
-					<Toast
-						message={toast.message}
-						type={toast.type}
-						onClose={() => setToast(null)}
-					/>
 				</div>
 			)}
 
@@ -2065,6 +2080,7 @@ export default function MediaDetailModal({
 						displayMedia?.name ||
 						""
 					}
+					mediaPoster={toastMedia().poster}
 					searchQuery={
 						(mediaDetails?.title || mediaDetails?.name || "") +
 						(mediaType === "movie" && mediaDetails?.release_date

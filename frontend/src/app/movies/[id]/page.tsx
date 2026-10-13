@@ -329,21 +329,7 @@ export default function MovieDetailPage() {
 
 	return (
 		<div className="min-h-screen">
-			{/* Backdrop */}
-			{movie.backdrop_path && (
-				<div className="fixed inset-0 z-0">
-					<Image
-						src={getPosterUrl(movie.backdrop_path, "original")}
-						alt=""
-						className="w-full h-full object-cover opacity-10"
-						width={1280}
-						height={720}
-					/>
-					<div className="absolute inset-0 bg-gradient-to-b from-background/50 via-background to-background" />
-				</div>
-			)}
-
-			<div className="relative z-10">
+			<div>
 				<PageHeader
 					title={movie.title}
 					description={
@@ -365,9 +351,9 @@ export default function MovieDetailPage() {
 
 				<div className="container mx-auto px-6 py-8">
 					<div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-						{/* Left Column - Poster & Actions */}
+						{/* Left Column - Poster, Status, Actions, Links */}
 						<div className="lg:col-span-1 space-y-6">
-							<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden sticky top-8">
+							<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border overflow-hidden">
 								<div className="relative aspect-[2/3]">
 									<Image
 										src={getPosterUrl(movie.poster_path)}
@@ -419,164 +405,184 @@ export default function MovieDetailPage() {
 									)}
 
 									{/* Movie Details */}
-									<div className="space-y-2 text-sm">
-										<div className="flex justify-between items-center">
-											<span className="flex items-center gap-2 text-muted-foreground">
-												<Calendar className="w-4 h-4" />
+									<div className="grid grid-cols-3 gap-2">
+										<div className="rounded-lg bg-muted/50 p-3 space-y-1">
+											<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+												<Calendar className="w-3.5 h-3.5" />
 												Release Date
 											</span>
-											<span className="font-medium">
+											<p className="text-sm font-medium">
 												{movie.release_date
 													? new Date(
 															movie.release_date,
 														).toLocaleDateString()
 													: "Unknown"}
-											</span>
+											</p>
 										</div>
-										<div className="flex justify-between items-center">
-											<span className="flex items-center gap-2 text-muted-foreground">
-												<Clock className="w-4 h-4" />
+										<div className="rounded-lg bg-muted/50 p-3 space-y-1">
+											<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+												<Clock className="w-3.5 h-3.5" />
 												Runtime
 											</span>
-											<span className="font-medium">
+											<p className="text-sm font-medium">
 												{formatRuntime(movie.runtime)}
-											</span>
+											</p>
 										</div>
-										<div className="flex justify-between items-center">
-											<span className="flex items-center gap-2 text-muted-foreground">
-												<Star className="w-4 h-4" />
+										<div className="rounded-lg bg-muted/50 p-3 space-y-1">
+											<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+												<Star className="w-3.5 h-3.5" />
 												Rating
 											</span>
-											<span className="font-medium">
+											<p className="text-sm font-medium">
 												{movie.rating > 0
 													? `${movie.rating.toFixed(1)} / 10`
 													: "N/A"}
-												{movie.vote_count > 0 && (
-													<span className="text-xs text-muted-foreground ml-1">
-														(
-														{movie.vote_count.toLocaleString()}{" "}
-														votes)
-													</span>
-												)}
-											</span>
-										</div>
-									</div>
-
-									{/* Status & Monitoring */}
-									<div className="py-3 border-y border-border space-y-3">
-										<div className="flex justify-between items-center">
-											<span className="text-sm text-muted-foreground">
-												Status
-											</span>
-											{getStatusBadge(
-												movie.status,
-												movie.has_file,
+											</p>
+											{movie.vote_count > 0 && (
+												<p className="text-xs text-muted-foreground">
+													{movie.vote_count.toLocaleString()}{" "}
+													votes
+												</p>
 											)}
 										</div>
-										<div className="flex justify-between items-center">
-											<span className="text-sm text-muted-foreground">
-												Monitoring
-											</span>
-											<MonitoringOptionsDropdown
-												mediaType="movie"
-												mediaId={movie.id}
-												currentState={{
-													monitored: movie.monitored,
-													upgradeAllowed:
-														movie.upgrade_allowed,
-												}}
-												onUpdate={
-													handleMonitoringUpdate
-												}
-											/>
-										</div>
 									</div>
+								</div>
+							</div>
 
-									{/* Action Buttons */}
-									<div className="space-y-2">
-										<button
-											onClick={() =>
-												setShowInteractiveSearch(true)
-											}
-											className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
-										>
-											<Search className="w-5 h-5" />
-											Interactive Search
-										</button>
+							{/* Status & Monitoring */}
+							<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border px-6 py-2 divide-y divide-border">
+								<div className="flex justify-between items-center py-3">
+									<span className="text-sm text-muted-foreground">
+										Status
+									</span>
+									{getStatusBadge(
+										movie.status,
+										movie.has_file,
+									)}
+								</div>
+								<div className="flex justify-between items-center py-3">
+									<span className="text-sm text-muted-foreground">
+										Monitoring
+									</span>
+									<MonitoringOptionsDropdown
+										mediaType="movie"
+										mediaId={movie.id}
+										section="monitoring"
+										currentState={{
+											monitored: movie.monitored,
+											upgradeAllowed:
+												movie.upgrade_allowed,
+										}}
+										onUpdate={handleMonitoringUpdate}
+									/>
+								</div>
+								<div className="flex justify-between items-center py-3">
+									<span className="text-sm text-muted-foreground">
+										Quality Upgrades
+									</span>
+									<MonitoringOptionsDropdown
+										mediaType="movie"
+										mediaId={movie.id}
+										section="upgrades"
+										currentState={{
+											monitored: movie.monitored,
+											upgradeAllowed:
+												movie.upgrade_allowed,
+										}}
+										onUpdate={handleMonitoringUpdate}
+									/>
+								</div>
+							</div>
 
-										<button
-											onClick={() =>
-												searchDownloadMutation.mutate()
-											}
-											disabled={
-												searchDownloadMutation.isPending ||
-												movie.status === "downloading"
-											}
-											className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
-										>
-											<Download className="w-5 h-5" />
-											{searchDownloadMutation.isPending
-												? "Searching..."
-												: "Auto Search & Download"}
-										</button>
+							{/* Action Buttons */}
+							<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6 space-y-3">
+								<h4 className="text-sm text-muted-foreground">
+									Actions
+								</h4>
+								<button
+									onClick={() =>
+										setShowInteractiveSearch(true)
+									}
+									className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
+								>
+									<Search className="w-5 h-5" />
+									Interactive Search
+								</button>
 
-										<button
-											onClick={() =>
-												setShowManualImport(true)
-											}
-											className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer"
-										>
-											<Upload className="w-5 h-5" />
-											Manual Import
-										</button>
+								<button
+									onClick={() =>
+										searchDownloadMutation.mutate()
+									}
+									disabled={
+										searchDownloadMutation.isPending ||
+										movie.status === "downloading"
+									}
+									className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition font-medium"
+								>
+									<Download className="w-5 h-5" />
+									{searchDownloadMutation.isPending
+										? "Searching..."
+										: "Auto Search & Download"}
+								</button>
 
-										<div className="flex gap-2">
-											<button
-												onClick={() =>
-													refreshMetadataMutation.mutate()
-												}
-												disabled={
-													refreshMetadataMutation.isPending
-												}
-												className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-												title="Refresh metadata from TMDB"
-											>
-												<RefreshCw
-													className={`w-5 h-5 ${refreshMetadataMutation.isPending ? "animate-spin" : ""}`}
-												/>
-												Refresh
-											</button>
-											<button
-												onClick={() =>
-													rescanFilesMutation.mutate()
-												}
-												disabled={
-													rescanFilesMutation.isPending
-												}
-												className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-												title="Rescan files on disk"
-											>
-												<ScanLine
-													className={`w-5 h-5 ${rescanFilesMutation.isPending ? "animate-spin" : ""}`}
-												/>
-												Rescan
-											</button>
-										</div>
+								<div className="grid grid-cols-3 gap-2">
+									<button
+										onClick={() =>
+											setShowManualImport(true)
+										}
+										className="flex flex-col items-center justify-center gap-1.5 px-2 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition text-sm font-medium cursor-pointer"
+									>
+										<Upload className="w-5 h-5" />
+										Manual Import
+									</button>
+									<button
+										onClick={() =>
+											refreshMetadataMutation.mutate()
+										}
+										disabled={
+											refreshMetadataMutation.isPending
+										}
+										className="flex flex-col items-center justify-center gap-1.5 px-2 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+										title="Refresh metadata from TMDB"
+									>
+										<RefreshCw
+											className={`w-5 h-5 ${refreshMetadataMutation.isPending ? "animate-spin" : ""}`}
+										/>
+										Refresh
+									</button>
+									<button
+										onClick={() =>
+											rescanFilesMutation.mutate()
+										}
+										disabled={rescanFilesMutation.isPending}
+										className="flex flex-col items-center justify-center gap-1.5 px-2 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+										title="Rescan files on disk"
+									>
+										<ScanLine
+											className={`w-5 h-5 ${rescanFilesMutation.isPending ? "animate-spin" : ""}`}
+										/>
+										Rescan
+									</button>
+								</div>
 
-										<button
-											onClick={() =>
-												setShowDeleteModal(true)
-											}
-											className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition font-medium cursor-pointer"
-										>
-											<Trash2 className="w-5 h-5" />
-											Delete Movie
-										</button>
-									</div>
+								<div className="pt-3 border-t border-border">
+									<button
+										onClick={() => setShowDeleteModal(true)}
+										className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-destructive/50 text-destructive rounded-lg hover:bg-destructive/10 transition font-medium cursor-pointer"
+									>
+										<Trash2 className="w-4 h-4" />
+										Delete Movie
+									</button>
+								</div>
+							</div>
 
-									{/* Collection */}
+							{/* Collection & External Links */}
+							{(movie.collection_name ||
+								movie.tmdb_id ||
+								movie.imdb_id) && (
+								<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6 space-y-4">
 									{movie.collection_name && (
-										<div className="pt-4 border-t border-border">
+										<div>
 											<h4 className="text-sm font-medium text-muted-foreground mb-2">
 												Collection
 											</h4>
@@ -589,54 +595,55 @@ export default function MovieDetailPage() {
 										</div>
 									)}
 
-									{/* External Links */}
-									<div className="pt-4 border-t border-border">
-										<h4 className="text-sm font-medium text-muted-foreground mb-2">
-											External Links
-										</h4>
-										<div className="space-y-2">
-											{movie.tmdb_id && (
-												<a
-													href={`https://www.themoviedb.org/movie/${movie.tmdb_id}`}
-													target="_blank"
-													rel="noopener noreferrer"
-													className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
-												>
-													{/* eslint-disable-next-line @next/next/no-img-element --
-													     Third party brand icon at a fixed 16px from a host that is not in
-													     images.remotePatterns. Optimizing it would add a request for no gain. */}
-													<img
-														src="https://www.themoviedb.org/favicon.ico"
-														alt="TMDB"
-														className="w-4 h-4"
-													/>
-													View on TMDB
-													<ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
-												</a>
-											)}
-											{movie.imdb_id && (
-												<a
-													href={`https://www.imdb.com/title/${movie.imdb_id}`}
-													target="_blank"
-													rel="noopener noreferrer"
-													className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
-												>
-													{/* eslint-disable-next-line @next/next/no-img-element --
-													     Third party brand icon at a fixed 16px from a host that is not in
-													     images.remotePatterns. Optimizing it would add a request for no gain. */}
-													<img
-														src="https://www.imdb.com/favicon.ico"
-														alt="IMDb"
-														className="w-4 h-4"
-													/>
-													View on IMDb
-													<ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
-												</a>
-											)}
+									{(movie.tmdb_id || movie.imdb_id) && (
+										<div>
+											<h4 className="text-sm font-medium text-muted-foreground mb-2">
+												External Links
+											</h4>
+											<div className="space-y-2">
+												{movie.tmdb_id && (
+													<a
+														href={`https://www.themoviedb.org/movie/${movie.tmdb_id}`}
+														target="_blank"
+														rel="noopener noreferrer"
+														className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
+													>
+														{/* eslint-disable-next-line @next/next/no-img-element --
+									     Third party brand icon at a fixed 16px from a host that is not in
+									     images.remotePatterns. Optimizing it would add a request for no gain. */}
+														<img
+															src="https://www.themoviedb.org/favicon.ico"
+															alt="TMDB"
+															className="w-4 h-4"
+														/>
+														View on TMDB
+														<ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
+													</a>
+												)}
+												{movie.imdb_id && (
+													<a
+														href={`https://www.imdb.com/title/${movie.imdb_id}`}
+														target="_blank"
+														rel="noopener noreferrer"
+														className="flex items-center gap-2 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm cursor-pointer"
+													>
+														{/* eslint-disable-next-line @next/next/no-img-element --
+									     Third party brand icon at a fixed 16px from a host that is not in
+									     images.remotePatterns. Optimizing it would add a request for no gain. */}
+														<img
+															src="https://www.imdb.com/favicon.ico"
+															alt="IMDb"
+															className="w-4 h-4"
+														/>
+														View on IMDb
+														<ExternalLink className="w-3 h-3 text-muted-foreground ml-auto" />
+													</a>
+												)}
+											</div>
 										</div>
-									</div>
+									)}
 								</div>
-							</div>
+							)}
 						</div>
 
 						{/* Right Column - Details */}
@@ -673,11 +680,9 @@ export default function MovieDetailPage() {
 										mediaType="movie"
 										cast={credits.cast || []}
 										crew={credits.crew || []}
+										layout="grid"
 									/>
 								)}
-
-							{/* Tags */}
-							<TagsEditor mediaType="movie" mediaId={movie.id} />
 
 							{/* Download History */}
 							<DownloadHistoryPanel
@@ -685,46 +690,53 @@ export default function MovieDetailPage() {
 								mediaId={movie.id}
 							/>
 
-							{/* Production Companies */}
-							{movie.production_companies &&
-								Array.isArray(movie.production_companies) &&
-								movie.production_companies.length > 0 && (
-									<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6">
-										<h3 className="text-lg font-bold mb-4">
-											Production Companies
-										</h3>
-										<div className="flex flex-wrap gap-4">
-											{movie.production_companies.map(
-												(company: any) => (
-													<div
-														key={
-															company.id ||
-															company.name
-														}
-														className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg"
-													>
-														{company.logo_path ? (
-															// eslint-disable-next-line @next/next/no-img-element -- Studio logo sized with w-auto has no fixed aspect for next/image to reserve space with.
-															<img
-																src={getPosterUrl(
-																	company.logo_path,
-																	"w92",
-																)}
-																alt={
-																	company.name
-																}
-																className="h-6 w-auto object-contain"
-															/>
-														) : null}
-														<span className="text-sm font-medium">
-															{company.name}
-														</span>
-													</div>
-												),
-											)}
+							{/* Tags & Production Companies */}
+							<div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+								<TagsEditor
+									mediaType="movie"
+									mediaId={movie.id}
+								/>
+
+								{movie.production_companies &&
+									Array.isArray(movie.production_companies) &&
+									movie.production_companies.length > 0 && (
+										<div className="bg-card text-card-foreground rounded-lg shadow border-2 border-border p-6">
+											<h3 className="text-lg font-bold mb-4">
+												Production Companies
+											</h3>
+											<div className="flex flex-wrap gap-4">
+												{movie.production_companies.map(
+													(company: any) => (
+														<div
+															key={
+																company.id ||
+																company.name
+															}
+															className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg"
+														>
+															{company.logo_path ? (
+																// eslint-disable-next-line @next/next/no-img-element -- Studio logo sized with w-auto has no fixed aspect for next/image to reserve space with.
+																<img
+																	src={getPosterUrl(
+																		company.logo_path,
+																		"w92",
+																	)}
+																	alt={
+																		company.name
+																	}
+																	className="h-6 w-auto object-contain"
+																/>
+															) : null}
+															<span className="text-sm font-medium">
+																{company.name}
+															</span>
+														</div>
+													),
+												)}
+											</div>
 										</div>
-									</div>
-								)}
+									)}
+							</div>
 						</div>
 					</div>
 				</div>
@@ -736,7 +748,6 @@ export default function MovieDetailPage() {
 				onCancel={() => setShowDeleteModal(false)}
 				onConfirm={handleDeleteConfirm}
 				title={movie.title}
-				itemName="movie"
 				hasFiles={movie.has_file}
 			/>
 
@@ -746,6 +757,7 @@ export default function MovieDetailPage() {
 				mediaType="movie"
 				mediaId={movie.id}
 				mediaTitle={movie.title}
+				mediaPoster={movie.poster_path}
 				searchQuery={`${movie.title} ${movie.release_date ? new Date(movie.release_date).getFullYear() : ""}`}
 			/>
 

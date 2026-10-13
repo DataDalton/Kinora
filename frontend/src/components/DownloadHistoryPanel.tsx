@@ -119,7 +119,8 @@ export default function DownloadHistoryPanel({
 		<div className="bg-muted/30 rounded-lg border border-border">
 			<button
 				onClick={() => setIsExpanded(!isExpanded)}
-				className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition rounded-lg"
+				aria-expanded={isExpanded}
+				className="w-full flex items-center justify-between p-4 hover:bg-muted transition rounded-lg cursor-pointer"
 			>
 				<div className="flex items-center gap-3">
 					<History className="w-5 h-5 text-muted-foreground" />

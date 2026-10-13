@@ -407,6 +407,9 @@ class QBittorrentClient(BaseDownloadClient):
             "stalledUP": TorrentState.SEEDING,
             "pausedDL": TorrentState.PAUSED,
             "pausedUP": TorrentState.PAUSED,
+            # qBittorrent 5 reports paused torrents as stopped.
+            "stoppedDL": TorrentState.PAUSED,
+            "stoppedUP": TorrentState.PAUSED,
             "checkingDL": TorrentState.CHECKING,
             "checkingUP": TorrentState.CHECKING,
             "queuedDL": TorrentState.QUEUED,
