@@ -106,7 +106,13 @@ async def async_search_wanted_music():
                         search_stats=searchStats,
                     )
 
-                    await recordSearchAttempt(conn, "albums", album["id"], found=bool(torrent_hash))
+                    await recordSearchAttempt(
+                        conn,
+                        "albums",
+                        album["id"],
+                        found=bool(torrent_hash),
+                        indexer_outage=searchStats.get("all_indexers_failed", False),
+                    )
 
                     if torrent_hash:
                         # The engine records download_history (with re-addable source).

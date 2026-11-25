@@ -18,6 +18,26 @@ MEDIA_TABLES = {
 ACTIVE_DOWNLOAD_STATUSES = ("downloading", "pending", "processing")
 
 
+async def itemHasFile(conn: asyncpg.Connection, mediaType: str, mediaId: int) -> bool:
+    """
+    Whether an item has any file in the library. Shows track files per episode, and
+    anime per episode as well as on the anime row.
+    """
+    if mediaType == "show":
+        sql = "SELECT EXISTS (SELECT 1 FROM episodes WHERE show_id = $1 AND has_file)"
+    elif mediaType == "anime":
+        sql = (
+            "SELECT COALESCE((SELECT has_file FROM anime WHERE id = $1), FALSE) "
+            "OR EXISTS (SELECT 1 FROM anime_episodes WHERE anime_id = $1 AND has_file)"
+        )
+    else:
+        table = MEDIA_TABLES.get(mediaType)
+        if table is None:
+            return False
+        sql = f"SELECT COALESCE((SELECT has_file FROM {table} WHERE id = $1), FALSE)"
+    return bool(await conn.fetchval(sql, mediaId))
+
+
 async def releaseDownloadingStatus(conn: asyncpg.Connection, mediaType: str, mediaId: int) -> None:
     """
     Move an item out of 'downloading' once none of its downloads are active. It returns
@@ -37,15 +57,7 @@ async def releaseDownloadingStatus(conn: asyncpg.Connection, mediaType: str, med
     if stillActive:
         return
 
-    # Shows track files per episode rather than on the show row.
-    if table == "shows":
-        hasFile = await conn.fetchval(
-            "SELECT EXISTS (SELECT 1 FROM episodes WHERE show_id = $1 AND has_file)",
-            mediaId,
-        )
-    else:
-        hasFile = await conn.fetchval(f"SELECT has_file FROM {table} WHERE id = $1", mediaId)
-
+    hasFile = await itemHasFile(conn, mediaType, mediaId)
     await conn.execute(
         f"UPDATE {table} SET status = $2, updated_at = NOW() WHERE id = $1 AND status = 'downloading'",
         mediaId,

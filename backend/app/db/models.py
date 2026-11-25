@@ -108,6 +108,9 @@ movies = Table(
     Column("poster_path", String(500)),
     Column("backdrop_path", String(500)),
     Column("release_date", DateTime),
+    Column("digital_release_date", Date),
+    Column("physical_release_date", Date),
+    Column("theatrical_release_date", Date),
     Column("genres", JSONB),
     Column("rating", Float),
     Column("vote_count", Integer),
@@ -489,6 +492,10 @@ mediaProfiles = Table(
     Column("use_hardlinks", Boolean, default=True),
     Column("illegal_char_replacement", String(5), default="_"),
     Column("colon_replacement", String(5), default=" -"),
+    # Extra files (featurettes, subtitles, images, music companions) imported from a
+    # torrent. NULL never_import_extensions means the built-in default list.
+    Column("import_extra_files", Boolean, server_default="true", nullable=False),
+    Column("never_import_extensions", ARRAY(Text), nullable=True),
     # Torrent validation settings
     Column("validation_enabled", Boolean, default=True),
     Column("validation_mode", String(20), server_default="allowlist"),
@@ -608,6 +615,8 @@ downloadHistory = Table(
     Column("started_at", DateTime, server_default=func.now()),
     Column("completed_at", DateTime),
     Column("episode_id", Integer),
+    # Ids of every episode a show or anime download covers, read from the release name
+    Column("episode_ids", ARRAY(Integer)),
     Column("indexer_page_url", String(2000)),
     Column("torrent_url", String(2000)),
     Column("magnet_link", Text),
@@ -621,6 +630,7 @@ downloadHistory = Table(
     Index("idx_download_history_media", "media_id", "media_type"),
     Index("idx_download_history_hash", "torrent_hash", unique=True),
     Index("idx_download_history_status", "status"),
+    Index("idx_download_history_episode_ids", "episode_ids", postgresql_using="gin"),
 )
 
 # Blocklist table
@@ -633,8 +643,13 @@ blocklist = Table(
     Column("release_title", String(1000), nullable=False),
     Column("reason", String(500)),
     Column("blocked_at", DateTime, server_default=func.now(), nullable=False),
+    # info_hash identifies one exact torrent. scope 'item' applies to this media item only,
+    # 'all' applies to every item and is used for torrents that failed validation.
+    Column("info_hash", String(64)),
+    Column("scope", String(10), server_default="item", nullable=False),
     Index("idx_blocklist_media", "media_type", "media_id"),
     Index("idx_blocklist_title", "release_title"),
+    Index("idx_blocklist_info_hash", "info_hash"),
 )
 
 # Per-file media metadata (one row per physical file, populated from ffprobe)
@@ -926,4 +941,48 @@ mediaRequests = Table(
     Index("idx_media_requests_status", "status"),
     Index("idx_media_requests_media_type", "media_type"),
     Index("idx_media_requests_external", "media_type", "external_id"),
+)
+
+# Web Push subscriptions, one row per browser per user
+pushSubscriptions = Table(
+    "push_subscriptions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("endpoint", Text, unique=True, nullable=False),
+    Column("p256dh", String(255), nullable=False),
+    Column("auth", String(255), nullable=False),
+    Column("label", String(255)),
+    Column("user_agent", Text),
+    Column("enabled", Boolean, default=True, nullable=False),
+    Column("created_at", DateTime, server_default=func.now(), nullable=False),
+    Column("last_used_at", DateTime),
+    Index("idx_push_subscriptions_user", "user_id"),
+)
+
+# User-defined indexers (UNIT3D, Gazelle, Torznab, passkey RSS feeds, Kinora definitions)
+customIndexers = Table(
+    "custom_indexers",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", String(100), nullable=False, unique=True),
+    Column("kind", String(20), nullable=False),
+    Column("base_url", String(500), nullable=False),
+    Column("settings", JSONB, server_default="{}", nullable=False),
+    Column("credentials", Text),  # Fernet-encrypted JSON object
+    Column("definition", JSONB),
+    Column("media_types", ARRAY(Text), server_default="{}", nullable=False),
+    Column("enable_search", Boolean, server_default="true", nullable=False),
+    Column("enable_rss", Boolean, server_default="false", nullable=False),
+    Column("trust_tier", String(16), server_default="open", nullable=False),
+    Column("is_private", Boolean, server_default="true", nullable=False),
+    Column("min_ratio", Float),
+    Column("min_seed_minutes", Integer),
+    Column("requests_per_minute", Integer),
+    Column("min_interval_seconds", Float, server_default="2", nullable=False),
+    Column("last_test_at", DateTime),
+    Column("last_test_ok", Boolean),
+    Column("last_test_message", Text),
+    Column("created_at", DateTime, server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime, server_default=func.now(), nullable=False),
 )

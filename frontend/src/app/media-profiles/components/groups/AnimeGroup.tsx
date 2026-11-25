@@ -16,10 +16,7 @@ import {
 	HDR_FORMATS,
 	ANIME_PRESETS,
 } from "../constants";
-
-const INDEXERS_BY_TYPE = {
-	anime: ["Nyaa"],
-};
+import { useIndexerOptions } from "../useIndexerOptions";
 
 const LANGUAGES = ISO6391.getAllCodes().map((code) => ({
 	code,
@@ -131,6 +128,7 @@ export default function AnimeGroup({
 	setFormData,
 	activeTab,
 }: AnimeGroupProps) {
+	const animeIndexerOptions = useIndexerOptions("anime");
 	const [animeAudioLanguageSearch, setAnimeAudioLanguageSearch] =
 		useState("");
 	const [animeSubtitleLanguageSearch, setAnimeSubtitleLanguageSearch] =
@@ -205,7 +203,7 @@ export default function AnimeGroup({
 							Indexers for anime searches
 						</p>
 						<div className="flex flex-wrap gap-2 p-3 bg-muted/50 rounded-lg border border-border">
-							{INDEXERS_BY_TYPE.anime.map((indexer) => {
+							{animeIndexerOptions.map((indexer) => {
 								const index =
 									formData.anime_indexers.indexOf(indexer);
 								const isSelected = index !== -1;

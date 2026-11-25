@@ -25,6 +25,25 @@ SHARED_SESSION_ID = "kinora-shared"
 SESSION_PREFIX = "kinora-"
 
 
+def _site_key(url: Optional[str]) -> Optional[str]:
+    """The registrable part of a URL's host, such as ext.to for www.ext.to, used to key clearances."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "") if url else ""
+    parts = host.lower().split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else (host or None)
+
+
+def _proxy_payload() -> Dict[str, Any]:
+    """
+    FlareSolverr's proxy option for INDEXER_PROXY_URL. A session takes its proxy when it is
+    created, and a request without a session takes it per request.
+    """
+    from app.core.config import settings
+
+    return {"proxy": {"url": settings.INDEXER_PROXY_URL}} if settings.INDEXER_PROXY_URL else {}
+
+
 class FlareSolverrBypass(BaseCloudflareBypass):
     """
     FlareSolverr implementation for bypassing Cloudflare protection.
@@ -41,6 +60,9 @@ class FlareSolverrBypass(BaseCloudflareBypass):
         # fetch follow-up pages with a plain impersonating HTTP client instead of the
         # browser (verified to pass 1337x when backend and FlareSolverr share an egress IP).
         self.clearance_cookies: Dict[str, str] = {}
+        # The same cookies kept per site, since a clearance only works for the site that
+        # issued it and several indexers share this one solver.
+        self.clearance_by_site: Dict[str, Dict[str, str]] = {}
         self.user_agent: Optional[str] = None
         # Guards session creation against concurrent callers. Rebuilt whenever the running
         # loop changes, because Celery tasks run on a loop separate from the FastAPI one
@@ -56,13 +78,16 @@ class FlareSolverrBypass(BaseCloudflareBypass):
             self._session_lock_loop = loop
         return self._session_lock
 
-    def _capture_clearance(self, data: Dict[str, Any]) -> None:
-        """Store the cf_clearance cookies and user-agent from a FlareSolverr solution."""
+    def _capture_clearance(self, data: Dict[str, Any], url: Optional[str] = None) -> None:
+        """Store the cf_clearance cookies and user-agent from a FlareSolverr solution, per site."""
         solution = data.get("solution") or {}
         cookies = solution.get("cookies") or []
         parsed = {c["name"]: c["value"] for c in cookies if c.get("name") and c.get("value")}
         if parsed:
             self.clearance_cookies = parsed
+            site = _site_key(solution.get("url") or url)
+            if site:
+                self.clearance_by_site[site] = parsed
         user_agent = solution.get("userAgent")
         if user_agent:
             self.user_agent = user_agent
@@ -101,6 +126,7 @@ class FlareSolverrBypass(BaseCloudflareBypass):
                 "cmd": "sessions.create",
                 "session": new_session_id,
                 "session_ttl_minutes": self.session_ttl_minutes,
+                **_proxy_payload(),
             },
             timeout=30.0,
         )
@@ -112,6 +138,10 @@ class FlareSolverrBypass(BaseCloudflareBypass):
 
         logger.info(f"Created FlareSolverr session: {new_session_id}")
         return new_session_id
+
+    def clearance_for(self, url: str) -> Dict[str, str]:
+        """The clearance cookies captured for the site a URL belongs to, or an empty dict."""
+        return self.clearance_by_site.get(_site_key(url) or "", {})
 
     async def destroy_session(self, session_id: Optional[str] = None) -> bool:
         """
@@ -187,6 +217,8 @@ class FlareSolverrBypass(BaseCloudflareBypass):
 
         if disable_media:
             payload["disableMedia"] = True
+        if not use_session:
+            payload.update(_proxy_payload())
 
         return await self._send(payload, use_session, max_timeout)
 
@@ -217,6 +249,8 @@ class FlareSolverrBypass(BaseCloudflareBypass):
 
         if disable_media:
             payload["disableMedia"] = True
+        if not use_session:
+            payload.update(_proxy_payload())
 
         return await self._send(payload, use_session, max_timeout)
 
@@ -245,7 +279,7 @@ class FlareSolverrBypass(BaseCloudflareBypass):
             data = response.json()
 
             if data.get("status") == "ok":
-                self._capture_clearance(data)
+                self._capture_clearance(data, payload.get("url"))
                 return data
 
             message = str(data.get("message") or "")

@@ -1,8 +1,8 @@
-import json
 import base64
 import hashlib
+import time
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import date, datetime
 from cryptography.fernet import Fernet
 
 from app.core.config import settings
@@ -10,6 +10,19 @@ from app.core.cache import cacheGet, cacheSet, CACHE_TTL_SHORT, CACHE_TTL_LONG
 from app.db import get_pool
 from app.core.http_client import http_get
 from app.services import metadata_cache
+
+# TMDB release_dates type codes.
+RELEASE_TYPE_THEATRICAL_LIMITED = 2
+RELEASE_TYPE_THEATRICAL = 3
+RELEASE_TYPE_DIGITAL = 4
+RELEASE_TYPE_PHYSICAL = 5
+
+# Region used for release dates when app_settings has no release_region value, and the
+# first fallback when the configured region has no date of a given type.
+DEFAULT_RELEASE_REGION = "US"
+
+# Seconds the release_region setting is kept in memory before it is read again.
+RELEASE_REGION_CACHE_SECONDS = 300
 
 
 def getEncryptionKey() -> bytes:
@@ -37,6 +50,8 @@ class TMDBService:
 
     def __init__(self):
         self.api_key = None
+        self.releaseRegion = DEFAULT_RELEASE_REGION
+        self.releaseRegionReadAt = 0.0
 
     async def _get_api_key(self) -> str:
         """
@@ -69,6 +84,41 @@ class TMDBService:
             "TMDB_API_KEY is required. Configure it in Settings page or set TMDB_API_KEY environment variable. "
             "Official Docker images have this embedded."
         )
+
+    async def getReleaseRegion(self) -> str:
+        """
+        ISO 3166-1 country code whose release dates are stored on movies. Read from the
+        release_region app setting, falling back to DEFAULT_RELEASE_REGION.
+        """
+        if time.monotonic() - self.releaseRegionReadAt < RELEASE_REGION_CACHE_SECONDS:
+            return self.releaseRegion
+        region = DEFAULT_RELEASE_REGION
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                value = await conn.fetchval("SELECT value FROM app_settings WHERE key = 'release_region'")
+                if isinstance(value, str) and value.strip():
+                    region = value.strip().upper()
+        except Exception as e:
+            print(f"Error reading release_region setting, using {DEFAULT_RELEASE_REGION}: {e}")
+        self.releaseRegion = region
+        self.releaseRegionReadAt = time.monotonic()
+        return region
+
+    def invalidateReleaseRegion(self) -> None:
+        """Force the next getReleaseRegion call to read the setting again."""
+        self.releaseRegionReadAt = 0.0
+
+    async def getCountries(self) -> List[Dict[str, str]]:
+        """Countries TMDB has release dates for, as code and English name, sorted by name."""
+        data = await self._request("configuration/countries", {}, ttl=CACHE_TTL_LONG)
+        rows = data if isinstance(data, list) else []
+        countries = [
+            {"code": row["iso_3166_1"].upper(), "name": row.get("english_name") or row["iso_3166_1"]}
+            for row in rows
+            if isinstance(row, dict) and row.get("iso_3166_1")
+        ]
+        return sorted(countries, key=lambda country: country["name"])
 
     def _adaptive_ttl(self, endpoint: str, data: Dict[str, Any], default_ttl: int) -> int:
         """
@@ -142,8 +192,9 @@ class TMDBService:
         """
         Get detailed movie information
         """
+        await self.getReleaseRegion()
         return await self._request(
-            f"movie/{tmdb_id}", {"append_to_response": "credits,recommendations"}, ttl=CACHE_TTL_SHORT
+            f"movie/{tmdb_id}", {"append_to_response": "credits,recommendations,release_dates"}, ttl=CACHE_TTL_SHORT
         )
 
     async def search_tv(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -275,12 +326,55 @@ class TMDBService:
             return []
         return [g.get("name") for g in genres if g.get("name")]
 
+    def parseReleaseDates(self, tmdb_data: Dict[str, Any], region: Optional[str] = None) -> Dict[str, Optional[date]]:
+        """
+        Digital, physical and theatrical dates from a movie's release_dates block. Each type
+        takes the earliest date in the region, then in DEFAULT_RELEASE_REGION, then the
+        earliest in any country. Theatrical falls back to a limited theatrical release.
+        """
+        region = (region or self.releaseRegion or DEFAULT_RELEASE_REGION).upper()
+        datesByCountry: Dict[str, Dict[int, date]] = {}
+        for countryEntry in (tmdb_data.get("release_dates") or {}).get("results") or []:
+            country = (countryEntry.get("iso_3166_1") or "").upper()
+            typeDates = datesByCountry.setdefault(country, {})
+            for release in countryEntry.get("release_dates") or []:
+                releaseType = release.get("type")
+                releaseDay = self._parse_release_day(release.get("release_date"))
+                if releaseType is None or releaseDay is None:
+                    continue
+                if releaseType not in typeDates or releaseDay < typeDates[releaseType]:
+                    typeDates[releaseType] = releaseDay
+
+        def pickDate(releaseType: int) -> Optional[date]:
+            for country in (region, DEFAULT_RELEASE_REGION):
+                found = datesByCountry.get(country, {}).get(releaseType)
+                if found:
+                    return found
+            anyCountry = [d[releaseType] for d in datesByCountry.values() if releaseType in d]
+            return min(anyCountry) if anyCountry else None
+
+        return {
+            "digital_release_date": pickDate(RELEASE_TYPE_DIGITAL),
+            "physical_release_date": pickDate(RELEASE_TYPE_PHYSICAL),
+            "theatrical_release_date": pickDate(RELEASE_TYPE_THEATRICAL) or pickDate(RELEASE_TYPE_THEATRICAL_LIMITED),
+        }
+
+    def _parse_release_day(self, value: Optional[str]) -> Optional[date]:
+        """Calendar day of a release_dates timestamp such as 2024-03-01T00:00:00.000Z."""
+        if not value or len(value) < 10:
+            return None
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+
     def parse_movie_data(self, tmdb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse TMDB movie data into our database format.
         Returns native Python types for JSONB fields (asyncpg handles serialization).
+        Release dates by type are included only when the payload carries release_dates.
         """
-        return {
+        parsed = {
             "title": tmdb_data.get("title"),
             "original_title": tmdb_data.get("original_title"),
             "overview": tmdb_data.get("overview"),
@@ -295,6 +389,8 @@ class TMDBService:
             "imdb_id": tmdb_data.get("imdb_id") or tmdb_data.get("external_ids", {}).get("imdb_id"),
             "runtime": tmdb_data.get("runtime"),
             "tagline": tmdb_data.get("tagline"),
+            # TMDB's release status (Released, In Production). Kinora's own state stays in status.
+            "metadata_status": tmdb_data.get("status"),
             "production_companies": tmdb_data.get("production_companies", []),
             "production_countries": tmdb_data.get("production_countries", []),
             "spoken_languages": tmdb_data.get("spoken_languages", []),
@@ -309,6 +405,9 @@ class TMDBService:
                 else None
             ),
         }
+        if "release_dates" in tmdb_data:
+            parsed.update(self.parseReleaseDates(tmdb_data))
+        return parsed
 
     def parse_tv_data(self, tmdb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -337,6 +436,8 @@ class TMDBService:
             "first_air_date": self._parse_date(tmdb_data.get("first_air_date")),
             "last_air_date": self._parse_date(tmdb_data.get("last_air_date")),
             "in_production": tmdb_data.get("in_production", False),
+            # TMDB's airing status (Returning Series, Ended). Kinora's own state stays in status.
+            "metadata_status": tmdb_data.get("status"),
         }
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:

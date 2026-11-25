@@ -6,8 +6,15 @@ import math
 
 from app.services.indexers.base import TorrentRelease
 from app.services.quality_definitions import QualityHierarchy
+from app.services.release_language import MULTI_LANGUAGE, detectLanguage, languageAllowed
 
 logger = logging.getLogger(__name__)
+
+# Language priority points. The first profile language earns the maximum, each later
+# position earns one step less, and no listed language drops below the floor.
+LANGUAGE_SCORE_MAX = 30
+LANGUAGE_SCORE_STEP = 10
+LANGUAGE_SCORE_FLOOR = 5
 
 
 @dataclass
@@ -93,6 +100,11 @@ class MediaProfile:
     show_allowed_extensions: Optional[List[str]] = None
     anime_allowed_extensions: Optional[List[str]] = None
     music_allowed_extensions: Optional[List[str]] = None
+    # Extra files imported from a torrent. None for never_import_extensions means the default list.
+    import_extra_files: bool = True
+    never_import_extensions: Optional[List[str]] = None
+    # Which releases the profile may download: trusted, balanced or open (see release_trust).
+    safety_template: str = "open"
     # Seeding cascade overrides (None = inherit global download-client default)
     seed_ratio_limit: Optional[float] = None
     seed_time_limit: Optional[int] = None
@@ -248,7 +260,11 @@ class MediaProfile:
         return None
 
     def get_size_limits_for_type(self, media_type: str) -> tuple[Optional[int], Optional[int]]:
-        """Get min/max size limits for specific media type."""
+        """
+        Min and max release size in bytes for a media type. The profile stores these in
+        MB (1024-based, as the profile editor enters them) and releases carry bytes, so
+        the stored values are converted here for every comparison.
+        """
         type_map = {
             "movie": ("movie_min_size", "movie_max_size"),
             "show": ("show_min_size", "show_max_size"),
@@ -256,9 +272,12 @@ class MediaProfile:
         }
         attrs = type_map.get(media_type)
         if attrs:
-            min_size = getattr(self, attrs[0], None)
-            max_size = getattr(self, attrs[1], None)
-            return (min_size, max_size)
+            min_mb = getattr(self, attrs[0], None)
+            max_mb = getattr(self, attrs[1], None)
+            return (
+                min_mb * 1024 * 1024 if min_mb else None,
+                max_mb * 1024 * 1024 if max_mb else None,
+            )
         return (None, None)
 
 
@@ -352,6 +371,9 @@ class MediaProfileService:
         # Edition score (0-10 points)
         edition_score = self._score_edition(release, profile, media_type)
         score += edition_score
+
+        # Language priority score (earlier in the profile's language list scores higher)
+        score += self._score_language(release, profile)
 
         # Weighted scoring based on profile preferences
         if profile.search_sort_preference == "weighted":
@@ -473,10 +495,10 @@ class MediaProfileService:
             if edition and edition not in editions:
                 return False
 
-        # Language must be in list (if specified)
+        # Language must be in list (if specified). Multi releases pass when the list allows several languages.
         if profile.languages:
             language = release.language or self._extract_language(release.title)
-            if language and language not in profile.languages:
+            if not languageAllowed(language, profile.languages):
                 return False
 
         # Size constraints
@@ -491,14 +513,19 @@ class MediaProfileService:
         if release.seeders < minSeeds:
             return False
 
-        # Uploader must be in list (if specified)
+        # Uploader must be in the list (if specified), compared as whole names ignoring case,
+        # so "QxR" never matches lookalikes such as "QxR-fake". A release with no uploader
+        # (Nyaa lists none) does not pass an uploader filter.
         if profile.uploaders:
-            if not any(uploader.lower() in release.uploader.lower() for uploader in profile.uploaders):
+            allowed_uploaders = {u.strip().lower() for u in profile.uploaders if u and u.strip()}
+            if (release.uploader or "").strip().lower() not in allowed_uploaders:
                 return False
 
-        # Release group must be in list (if specified)
-        if profile.release_groups and release.release_group:
-            if not any(group.lower() in release.release_group.lower() for group in profile.release_groups):
+        # Release group must be in the list (if specified), compared the same way. A release
+        # whose group cannot be read does not pass a group filter.
+        if profile.release_groups:
+            allowed_groups = {g.strip().lower() for g in profile.release_groups if g and g.strip()}
+            if (release.release_group or "").strip().lower() not in allowed_groups:
                 return False
 
         # Regex filters (must match all patterns)
@@ -757,15 +784,17 @@ class MediaProfileService:
         return None
 
     def _extract_source(self, title: str) -> Optional[str]:
-        """Extract source from title"""
-        title_upper = title.upper()
+        """Extract source from title. Theater recordings and screeners are matched first, as whole words."""
+        from app.services.indexers.base import detect_theater_source
 
+        title_upper = title.upper()
+        theater = detect_theater_source(title_upper)
+        if theater:
+            return theater
         if "REMUX" in title_upper:
             return "REMUX"
-        elif "DVDSCR" in title_upper or "DVD-SCR" in title_upper:
+        elif "DVD-SCR" in title_upper:
             return "DVDSCR"
-        elif "SCREENER" in title_upper:
-            return "SCREENER"
         elif "BLURAY" in title_upper or "BLU-RAY" in title_upper or "BDRIP" in title_upper:
             return "BluRay"
         elif "WEB-DL" in title_upper or "WEBDL" in title_upper:
@@ -778,10 +807,6 @@ class MediaProfileService:
             return "HDTV"
         elif "SDTV" in title_upper:
             return "SDTV"
-        elif "TELESYNC" in title_upper or "TS" in title_upper:
-            return "TELESYNC"
-        elif "CAM" in title_upper:
-            return "CAM"
 
         return None
 
@@ -881,40 +906,27 @@ class MediaProfileService:
         return None
 
     def _extract_language(self, title: str) -> Optional[str]:
-        """Extract language from title"""
-        title_upper = title.upper()
+        """Extract the audio language from the tag area of a release name."""
+        return detectLanguage(title)
 
-        # Common language codes in releases
-        language_patterns = {
-            "MULTI": "multi",
-            "ENGLISH": "en",
-            "SPANISH": "es",
-            "FRENCH": "fr",
-            "GERMAN": "de",
-            "ITALIAN": "it",
-            "JAPANESE": "ja",
-            "KOREAN": "ko",
-            "CHINESE": "zh",
-            "PORTUGUESE": "pt",
-            "RUSSIAN": "ru",
-            "HINDI": "hi",
-            "ARABIC": "ar",
-            "DUTCH": "nl",
-            "POLISH": "pl",
-            "TURKISH": "tr",
-        }
+    def _score_language(self, release: TorrentRelease, profile: MediaProfile) -> float:
+        """
+        Score a release by where its language sits in the profile's language list.
 
-        for key, code in language_patterns.items():
-            if key in title_upper:
-                return code
-
-        # Check for language codes in brackets or tags
-        lang_match = re.search(r"\[([A-Z]{2})\]", title_upper)
-        if lang_match:
-            return lang_match.group(1).lower()
-
-        # Default to English if no language detected
-        return "en"
+        The first language earns the most points and each later one earns fewer. A
+        multi release scores as the second choice, since the tag does not say which
+        languages it carries. Returns 0 when the profile has no language list.
+        """
+        if not profile.languages:
+            return 0.0
+        language = release.language or self._extract_language(release.title)
+        if language == MULTI_LANGUAGE and MULTI_LANGUAGE not in profile.languages:
+            position = 1
+        elif language in profile.languages:
+            position = profile.languages.index(language)
+        else:
+            return 0.0
+        return float(max(LANGUAGE_SCORE_FLOOR, LANGUAGE_SCORE_MAX - position * LANGUAGE_SCORE_STEP))
 
     def _score_resolution(
         self, release: TorrentRelease, profile: MediaProfile, media_type: Optional[str] = None

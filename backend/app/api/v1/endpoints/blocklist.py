@@ -11,7 +11,7 @@ from app.schemas.blocklist import (
     BlocklistCheck,
     BlocklistCheckResult,
 )
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_permission
 from app.schemas.user import User
 
 router = APIRouter()
@@ -67,8 +67,28 @@ async def get_blocklist(
     query += f" ORDER BY blocked_at DESC LIMIT ${param_count} OFFSET ${param_count + 1}"
     params.extend([limit, skip])
 
-    rows = await conn.fetch(query, *params)
-    return [BlocklistEntry(**dict(row)) for row in rows]
+    entries = [dict(row) for row in await conn.fetch(query, *params)]
+    await _attach_media_titles(conn, entries)
+    return [BlocklistEntry(**entry) for entry in entries]
+
+
+_TITLE_TABLES = {"movie": "movies", "show": "shows", "anime": "anime", "album": "albums"}
+
+
+async def _attach_media_titles(conn: asyncpg.Connection, entries: List[dict]) -> None:
+    """Add each entry's library item title, with one query per media type in the page."""
+    idsByType: dict = {}
+    for entry in entries:
+        if entry.get("media_type") in _TITLE_TABLES and entry.get("media_id") is not None:
+            idsByType.setdefault(entry["media_type"], set()).add(entry["media_id"])
+    titles = {}
+    for mediaType, ids in idsByType.items():
+        rows = await conn.fetch(
+            f"SELECT id, title FROM {_TITLE_TABLES[mediaType]} WHERE id = ANY($1::int[])", list(ids)
+        )
+        titles.update({(mediaType, row["id"]): row["title"] for row in rows})
+    for entry in entries:
+        entry["media_title"] = titles.get((entry.get("media_type"), entry.get("media_id")))
 
 
 @router.get("/count", response_model=dict)
@@ -143,7 +163,7 @@ async def get_blocklist_entry(
 @router.post("/", response_model=BlocklistEntry, status_code=status.HTTP_201_CREATED)
 async def add_to_blocklist(
     blocklist_data: BlocklistCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.downloads")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -190,7 +210,7 @@ async def add_to_blocklist(
 @router.post("/release", response_model=dict)
 async def blocklist_release(
     body: BlocklistReleaseRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.downloads")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -239,7 +259,7 @@ async def blocklist_release(
 @router.post("/bulk", response_model=dict)
 async def bulk_add_to_blocklist(
     bulk_data: BulkBlocklistCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.downloads")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -310,7 +330,7 @@ async def check_blocklist(
 @router.delete("/{blocklist_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_from_blocklist(
     blocklist_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.downloads")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -331,7 +351,7 @@ async def remove_from_blocklist(
 async def clear_media_blocklist(
     media_type: str,
     media_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.downloads")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -355,7 +375,7 @@ async def clear_media_blocklist(
 @router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_all_blocklist(
     media_type: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.downloads")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """

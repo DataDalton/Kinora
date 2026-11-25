@@ -1,8 +1,8 @@
 """
 In-app notification service.
 
-Persists notifications to Postgres and pushes them to connected clients over the
-WebSocket. Producers: auto-recovery, VPN kill-switch, validation failures, and
+Persists notifications to Postgres, pushes them to connected clients over the
+WebSocket, and queues Web Push delivery to installed browsers. Producers: auto-recovery, VPN kill-switch, validation failures, and
 port-forward drift.
 """
 
@@ -86,4 +86,26 @@ async def create_notification(
     except Exception as e:
         logger.debug(f"Failed to push notification: {e}")
 
+    await _queueWebPush(notification)
+
     return notification
+
+
+async def _queueWebPush(notification: Dict[str, Any]) -> None:
+    """
+    Hand the notification to the Web Push worker task. Skipped when no device has push
+    enabled, so instances without subscriptions never enqueue anything.
+    """
+    try:
+        from app.services.web_push import hasEnabledSubscriptions
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            if not await hasEnabledSubscriptions(conn):
+                return
+
+        from app.tasks.push_delivery import deliverPushNotification
+
+        deliverPushNotification.delay(notification)
+    except Exception as e:
+        logger.debug(f"Failed to queue Web Push for notification {notification.get('id')}. {e}")

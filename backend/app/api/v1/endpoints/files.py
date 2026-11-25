@@ -15,11 +15,15 @@ from app.schemas.files import (
     DeleteFilesRequest,
     FileOperationResult,
 )
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_media_permission
 from app.schemas.user import User
 from app.services import media_files
 from app.services import music_quality
+from app.services import rename_plan
+from app.services import jellyfin
 from app.services.quality_definitions import QualityHierarchy
+from app.schemas.bulk import RenameApplyRequest, RenameApplyResult, RenamePreviewResponse
+from app.api.v1.endpoints.bulk import applyRenameEntries, previewResponse
 
 router = APIRouter()
 
@@ -222,12 +226,51 @@ async def get_media_files(
     )
 
 
+@router.post("/{media_type}/{media_id}/rename/preview", response_model=RenamePreviewResponse)
+async def rename_file_preview(
+    media_type: str,
+    media_id: int,
+    request: RenameFileRequest,
+    current_user: User = Depends(require_media_permission("manage")),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Show where a manual rename puts the file, using the same target as the rename itself. Changes nothing.
+    """
+    table_name = validate_media_type(media_type)
+
+    row = await conn.fetchrow(
+        f"SELECT * FROM {table_name} WHERE id = $1",
+        media_id,
+    )
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{media_type.capitalize()} not found",
+        )
+
+    entry = rename_plan.RenameEntry(
+        mediaType=media_type,
+        itemId=media_id,
+        itemTitle=rename_plan.itemTitle(media_type, dict(row)),
+        oldPath=request.file_path,
+        newPath=rename_plan.planManualRename(request.file_path, request.new_name),
+    )
+    if not os.path.exists(request.file_path):
+        entry.status = rename_plan.STATUS_ERROR
+        entry.message = "File not found on disk"
+    else:
+        rename_plan.classifyEntries([entry])
+    return previewResponse([entry])
+
+
 @router.post("/{media_type}/{media_id}/rename", response_model=FileOperationResult)
 async def rename_file(
     media_type: str,
     media_id: int,
     request: RenameFileRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_media_permission("manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -252,11 +295,17 @@ async def rename_file(
             detail="File not found",
         )
 
-    directory = os.path.dirname(request.file_path)
-    extension = os.path.splitext(request.file_path)[1]
-    new_path = os.path.join(directory, request.new_name + extension)
+    new_path = rename_plan.planManualRename(request.file_path, request.new_name)
 
-    if os.path.exists(new_path):
+    if request.expectedNewPath is not None and rename_plan.pathKey(request.expectedNewPath) != rename_plan.pathKey(
+        new_path
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The target differs from the previewed path. Preview the rename again.",
+        )
+
+    if os.path.exists(new_path) and not rename_plan.isSameFile(request.file_path, new_path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A file with that name already exists",
@@ -264,6 +313,8 @@ async def rename_file(
 
     try:
         os.rename(request.file_path, new_path)
+        jellyfin.queueLibraryUpdate([request.file_path], jellyfin.UPDATE_DELETED)
+        jellyfin.queueLibraryUpdate([new_path], jellyfin.UPDATE_CREATED)
 
         if row.get("file_path") == request.file_path:
             await conn.execute(
@@ -285,16 +336,8 @@ async def rename_file(
         )
 
 
-@router.post("/{media_type}/{media_id}/auto-rename", response_model=FileOperationResult)
-async def auto_rename_files(
-    media_type: str,
-    media_id: int,
-    current_user: User = Depends(get_current_user),
-    conn: asyncpg.Connection = Depends(get_db),
-):
-    """
-    Automatically rename files using media profile naming format
-    """
+async def _fetch_item_with_file(conn, media_type: str, media_id: int):
+    """Load an item row, raising 404 when it is missing and 400 when it has no file on disk."""
     table_name = validate_media_type(media_type)
 
     row = await conn.fetchrow(
@@ -314,13 +357,43 @@ async def auto_rename_files(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No file associated with this media item",
         )
+    return row
 
-    return FileOperationResult(
-        success=True,
-        message="Auto-rename completed",
-        old_path=file_path,
-        new_path=file_path,
-    )
+
+@router.post("/{media_type}/{media_id}/auto-rename/preview", response_model=RenamePreviewResponse)
+async def auto_rename_preview(
+    media_type: str,
+    media_id: int,
+    current_user: User = Depends(require_media_permission("manage")),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Show where the media profile naming format puts each file of one item. Changes nothing.
+    """
+    row = await _fetch_item_with_file(conn, media_type, media_id)
+    plans = await rename_plan.buildPreview(conn, {media_type: [row]})
+    return previewResponse([entry for plan in plans for entry in plan.entries])
+
+
+@router.post("/{media_type}/{media_id}/auto-rename", response_model=RenameApplyResult)
+async def auto_rename_files(
+    media_type: str,
+    media_id: int,
+    request: RenameApplyRequest,
+    current_user: User = Depends(require_media_permission("manage")),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Rename one item's files using the media profile naming format, applying only the
+    previewed entries whose paths still match.
+    """
+    await _fetch_item_with_file(conn, media_type, media_id)
+    if any(entry.mediaType != media_type or entry.itemId != media_id for entry in request.entries):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Every entry must belong to this item",
+        )
+    return await applyRenameEntries(conn, request.entries)
 
 
 @router.post("/{media_type}/{media_id}/manual-import", response_model=FileOperationResult)
@@ -328,7 +401,7 @@ async def manual_import(
     media_type: str,
     media_id: int,
     request: ManualImportRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_media_permission("manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -383,7 +456,7 @@ async def manual_import(
 async def rescan_files(
     media_type: str,
     media_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_media_permission("manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -429,7 +502,7 @@ async def delete_media(
     media_type: str,
     media_id: int,
     request: DeleteFilesRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_media_permission("manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -465,6 +538,9 @@ async def delete_media(
                 detail=f"Failed to delete files: {str(e)}",
             )
 
+    if files_deleted:
+        jellyfin.queueLibraryUpdate([file_path], jellyfin.UPDATE_DELETED)
+
     await conn.execute(f"DELETE FROM {table_name} WHERE id = $1", media_id)
     await media_files.delete_for_item(conn, media_type, media_id)
 
@@ -484,7 +560,7 @@ async def delete_version(
     media_type: str,
     media_id: int,
     file_path: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_media_permission("manage")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -514,6 +590,7 @@ async def delete_version(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to delete file: {str(e)}",
             )
+        jellyfin.queueLibraryUpdate([file_path], jellyfin.UPDATE_DELETED)
 
     await media_files.delete_one(conn, file_path)
 

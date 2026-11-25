@@ -15,6 +15,12 @@ import RootFoldersSection from "@/components/settings/RootFoldersSection";
 import FolderHealthSection from "@/components/settings/FolderHealthSection";
 import SystemStatusSection from "@/components/settings/SystemStatusSection";
 import DatabaseBackupSection from "@/components/settings/DatabaseBackupSection";
+import BlocklistSection from "@/components/settings/BlocklistSection";
+import QbittorrentLoginCard from "@/components/settings/QbittorrentLoginCard";
+import TrustedUploadersSection from "@/components/settings/TrustedUploadersSection";
+import IndexersSection from "@/components/settings/indexers/IndexersSection";
+import JellyfinSection from "@/components/settings/JellyfinSection";
+import ReleaseRegionSetting from "@/components/settings/ReleaseRegionSetting";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 import {
@@ -243,6 +249,10 @@ type SettingsSection =
 	| "folder-health"
 	| "system"
 	| "system-status"
+	| "blocklist"
+	| "trusted-uploaders"
+	| "indexers"
+	| "jellyfin"
 	| "database";
 
 // Reads the API error detail, which is a string or a list of validation errors.
@@ -951,6 +961,38 @@ export default function SettingsPage() {
 					name: "System Status",
 					count: 0,
 				},
+				...(hasPermission("system.downloads")
+					? [
+							{
+								id: "blocklist" as SettingsSection,
+								name: "Blocklist",
+								count: 0,
+							},
+						]
+					: []),
+				...(hasPermission("system.settings")
+					? [
+							{
+								id: "trusted-uploaders" as SettingsSection,
+								name: "Trusted Uploaders",
+								count: 0,
+							},
+							{
+								id: "indexers" as SettingsSection,
+								name: "Indexers",
+								count: 0,
+							},
+						]
+					: []),
+				...(hasPermission("system.admin")
+					? [
+							{
+								id: "jellyfin" as SettingsSection,
+								name: "Jellyfin",
+								count: 0,
+							},
+						]
+					: []),
 			],
 		},
 		{
@@ -1421,6 +1463,7 @@ export default function SettingsPage() {
 							/>
 							<div className="p-8">
 								<div className="max-w-6xl mx-auto">
+									<QbittorrentLoginCard />
 									{downloadClients &&
 									downloadClients.length > 0 ? (
 										<div className="space-y-4">
@@ -1825,6 +1868,9 @@ export default function SettingsPage() {
 							/>
 							<div className="p-8">
 								<div className="max-w-6xl mx-auto">
+									{hasPermission("system.settings") && (
+										<ReleaseRegionSetting />
+									)}
 									{settingsGroups?.find(
 										(g) => g.category === "system",
 									) && (
@@ -1869,6 +1915,20 @@ export default function SettingsPage() {
 					{selectedSection === "system-status" && (
 						<SystemStatusSection />
 					)}
+
+					{/* Blocklist Section */}
+					{selectedSection === "blocklist" && <BlocklistSection />}
+
+					{/* Trusted Uploaders Section */}
+					{selectedSection === "trusted-uploaders" && (
+						<TrustedUploadersSection />
+					)}
+
+					{/* Indexers Section */}
+					{selectedSection === "indexers" && <IndexersSection />}
+
+					{/* Jellyfin Section */}
+					{selectedSection === "jellyfin" && <JellyfinSection />}
 
 					{/* Database & Backup Section */}
 					{selectedSection === "database" && (

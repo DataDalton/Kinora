@@ -505,6 +505,8 @@ class AnilistService:
             "source": anilist_data.get("source"),
             "studios": studios,
             "is_adult": anilist_data.get("isAdult", False),
+            # AniList's airing status (RELEASING, FINISHED). Kinora's own state stays in status.
+            "metadata_status": anilist_data.get("status"),
         }
 
     def _parse_anilist_date(self, date_obj: Optional[Dict[str, int]]) -> Optional[datetime]:

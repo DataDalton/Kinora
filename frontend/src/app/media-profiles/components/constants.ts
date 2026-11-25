@@ -1,5 +1,64 @@
 import { MediaProfileFormData } from "./types";
 
+// Executables, scripts and shortcuts. The backend never imports these, whatever the
+// profile's never-import list holds, so they are shown as fixed entries.
+export const FIXED_NEVER_IMPORT_EXTENSIONS = [
+	".exe",
+	".bat",
+	".cmd",
+	".sh",
+	".msi",
+	".dll",
+	".scr",
+	".com",
+	".ps1",
+	".vbs",
+	".vbe",
+	".js",
+	".jse",
+	".wsf",
+	".jar",
+	".pif",
+	".hta",
+	".lnk",
+	".url",
+	".reg",
+	".cpl",
+	".msc",
+	".appx",
+	".apk",
+	".app",
+	".dmg",
+	".pkg",
+	".deb",
+	".rpm",
+];
+
+// Skipped by default and editable per profile. .nfo is included because media servers
+// read it as item metadata, and a torrent's .nfo could replace the correct title and ids.
+export const DEFAULT_NEVER_IMPORT_EXTENSIONS = [
+	".rar",
+	".zip",
+	".7z",
+	".tar",
+	".gz",
+	".bz2",
+	".xz",
+	".iso",
+	".img",
+	".bin",
+	".torrent",
+	".nfo",
+	".txt",
+	".sfv",
+	".md5",
+	".sha1",
+	".sha256",
+	".par2",
+	".html",
+	".htm",
+];
+
 // Naming format defaults - single source of truth
 export const DEFAULT_NAMING = {
 	movie: {
@@ -12,7 +71,7 @@ export const DEFAULT_NAMING = {
 	},
 	anime: {
 		folder: "{Anime Title} ({Release Year}) [anilistid-{AnilistId}]",
-		file: "{Movie CleanTitle} ({Release Year}) [tmdbid-{TmdbId}] - {Edition Tags} {[Quality Full]}{[MediaInfo AudioCodec} {MediaInfo AudioChannels]}{MediaInfo AudioLanguages}{[MediaInfo VideoDynamicRangeType]}[{MediaInfo VideoCodec }{MediaInfo VideoBitDepth}bit]{-Release Group}",
+		file: "{Anime Title} - S{Season:00}E{Episode:00} - {Episode Title} {[Quality Full]}{[MediaInfo AudioCodec} {MediaInfo AudioChannels]}{[MediaInfo AudioLanguages]}[{MediaInfo VideoCodec} {MediaInfo VideoBitDepth}bit]{-Release Group}",
 	},
 	music: {
 		artistFolder: "{artist}",
@@ -78,7 +137,7 @@ export const ANIME_PRESETS = [
 	{
 		name: "Detailed (10bit)",
 		folder: "{Anime Title} ({Release Year}) [anilistid-{AnilistId}]",
-		file: "{Anime Title} ({Release Year}) - [{Quality Full}][{MediaInfo VideoCodec} {MediaInfo VideoBitDepth}bit][{MediaInfo AudioCodec} {MediaInfo AudioChannels}][{MediaInfo AudioLanguages}]{-Release Group}",
+		file: "{Anime Title} ({Release Year}) - S{Season:00}E{Episode:00} - [{Quality Full}][{MediaInfo VideoCodec} {MediaInfo VideoBitDepth}bit][{MediaInfo AudioCodec} {MediaInfo AudioChannels}][{MediaInfo AudioLanguages}]{-Release Group}",
 	},
 ];
 
@@ -278,13 +337,17 @@ export const DEFAULT_MUSIC_QUALITY_TIERS = [
 	"mp3_256",
 ];
 
-// Indexers by media type
+// Indexers by media type, in the priority order a new profile uses. A new profile selects
+// all of them. The safety template, not this list, decides which releases are allowed.
 export const INDEXERS_BY_TYPE = {
-	movies: ["1337x", "YTS"],
-	shows: ["1337x"],
-	anime: ["Nyaa"],
-	music: ["1337x"],
+	movies: ["1337x", "YTS", "ext.to"],
+	shows: ["1337x", "ext.to"],
+	anime: ["Nyaa", "ext.to"],
+	music: ["1337x", "ext.to"],
 };
+
+// Resolutions a new profile accepts for video, in preference order.
+export const DEFAULT_RESOLUTIONS = ["1080p", "720p"];
 
 // Default form data factory function
 export const createDefaultFormData = (
@@ -292,7 +355,7 @@ export const createDefaultFormData = (
 ): MediaProfileFormData => ({
 	name: "",
 	// Per-media-type quality: Movies
-	movie_resolutions: [],
+	movie_resolutions: [...DEFAULT_RESOLUTIONS],
 	movie_codecs: [],
 	movie_sources: [],
 	movie_audio_codecs: [],
@@ -302,7 +365,7 @@ export const createDefaultFormData = (
 	movie_min_size: null,
 	movie_max_size: null,
 	// Per-media-type quality: TV Shows
-	show_resolutions: [],
+	show_resolutions: [...DEFAULT_RESOLUTIONS],
 	show_codecs: [],
 	show_sources: [],
 	show_audio_codecs: [],
@@ -311,7 +374,7 @@ export const createDefaultFormData = (
 	show_min_size: null,
 	show_max_size: null,
 	// Per-media-type quality: Anime
-	anime_resolutions: [],
+	anime_resolutions: [...DEFAULT_RESOLUTIONS],
 	anime_codecs: [],
 	anime_sources: [],
 	anime_audio_codecs: [],
@@ -325,10 +388,10 @@ export const createDefaultFormData = (
 	upgrade_allowed: true,
 	upgrade_replace_policy: "keep_old",
 	// Indexers per media type
-	movie_indexers: [],
-	show_indexers: [],
-	anime_indexers: [],
-	music_indexers: [],
+	movie_indexers: [...INDEXERS_BY_TYPE.movies],
+	show_indexers: [...INDEXERS_BY_TYPE.shows],
+	anime_indexers: [...INDEXERS_BY_TYPE.anime],
+	music_indexers: [...INDEXERS_BY_TYPE.music],
 	// Search settings
 	search_timeout: 30,
 	max_retries: 3,
@@ -348,6 +411,9 @@ export const createDefaultFormData = (
 	use_hardlinks: true,
 	illegal_char_replacement: "_",
 	colon_replacement: " -",
+	import_extra_files: true,
+	safety_template: "trusted",
+	never_import_extensions: [...DEFAULT_NEVER_IMPORT_EXTENSIONS],
 	// Naming formats
 	movie_naming_format: DEFAULT_NAMING.movie.file,
 	movie_folder_format: DEFAULT_NAMING.movie.folder,

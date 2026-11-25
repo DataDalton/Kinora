@@ -172,6 +172,10 @@ def transcode_media_task(self, job_id: int):
                     # Keep both files
                     final_path = output_path
 
+                from app.services.jellyfin import queueLibraryUpdate, UPDATE_MODIFIED
+
+                queueLibraryUpdate([final_path], UPDATE_MODIFIED)
+
                 # Update job to completed
                 await conn.execute(
                     """

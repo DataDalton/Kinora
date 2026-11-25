@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from app.services.indexers.base import BaseIndexer, TorrentRelease
 from app.services.cloudflare.flaresolverr import flaresolverr
 from app.core.config import settings
-from app.core.http_client import http_get
+from app.core.http_client import indexer_get
 
 
 def _load_chrome_targets() -> Dict[int, str]:
@@ -81,14 +81,9 @@ class LeetxIndexer(BaseIndexer):
     """
 
     name = "1337x"
+    # Only the official domain is used. Lookalike domains are often parked or run by third
+    # parties, and a page that merely mentions 1337x is no proof it is the real site.
     base_url = "https://1337x.to"
-    alternative_urls = [
-        "https://1337x.st",
-        "https://1337x.is",
-        "https://x1337x.ws",
-        "https://x1337x.eu",
-        "https://x1337x.se",
-    ]
     requires_cloudflare_bypass = True
     categories = {
         "movies": "Movies",
@@ -124,7 +119,7 @@ class LeetxIndexer(BaseIndexer):
             except Exception as e:
                 raise Exception(f"Failed to bypass Cloudflare for {url}: {str(e)}")
         else:
-            response = await http_get(url, timeout=settings.INDEXER_REQUEST_TIMEOUT)
+            response = await indexer_get(url, timeout=settings.INDEXER_REQUEST_TIMEOUT)
             response.raise_for_status()
             return response.text
 
@@ -134,7 +129,7 @@ class LeetxIndexer(BaseIndexer):
         Returns HTML on success, or None when there is no clearance yet or the response
         looks like a Cloudflare challenge, in which case the caller does a full solve.
         """
-        cookies = getattr(self.bypass, "clearance_cookies", None)
+        cookies = self.bypass.clearance_for(url) if hasattr(self.bypass, "clearance_for") else None
         user_agent = getattr(self.bypass, "user_agent", None)
         if not cookies or not user_agent:
             return None
@@ -147,7 +142,7 @@ class LeetxIndexer(BaseIndexer):
             return None
 
         try:
-            from app.core.http_client import get_http_client
+            from app.core.http_client import get_http_client, indexer_request_kwargs
 
             client = await get_http_client()
             headers = {
@@ -159,9 +154,11 @@ class LeetxIndexer(BaseIndexer):
                 url,
                 headers=headers,
                 cookies=cookies,
-                impersonate=_impersonate_for_ua(user_agent),
-                timeout=15,
-                allow_redirects=True,
+                **indexer_request_kwargs(
+                    impersonate=_impersonate_for_ua(user_agent),
+                    timeout=15,
+                    allow_redirects=True,
+                ),
             )
             markers = ("just a moment", "cf-chl", "challenge-platform", "checking your browser")
             if response.status_code != 200 or any(
@@ -261,6 +258,7 @@ class LeetxIndexer(BaseIndexer):
                 upload_date=upload_date,
                 uploader=uploader,
                 indexer=self.name,
+                origin_sites=["1337x"],
                 category=category,
                 audio_format=music_info.get("audio_format"),
                 audio_bitrate=music_info.get("audio_bitrate"),
@@ -289,6 +287,7 @@ class LeetxIndexer(BaseIndexer):
                 upload_date=upload_date,
                 uploader=uploader,
                 indexer=self.name,
+                origin_sites=["1337x"],
                 category=category,
                 quality=quality_info.get("quality"),
                 codec=quality_info.get("codec"),
@@ -409,21 +408,7 @@ class LeetxIndexer(BaseIndexer):
             html = await self._fetch_html(self.current_url)
             return "1337x" in html.lower()
         except Exception:
-            return await self._try_alternative_url()
-
-    async def _try_alternative_url(self) -> bool:
-        """
-        Try alternative URLs if main URL is down
-        """
-        for alt_url in self.alternative_urls:
-            try:
-                html = await self._fetch_html(alt_url)
-                if "1337x" in html.lower():
-                    self.current_url = alt_url
-                    return True
-            except Exception:
-                continue
-        return False
+            return False
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """

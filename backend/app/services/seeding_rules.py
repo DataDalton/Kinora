@@ -25,7 +25,12 @@ from app.db import get_pool
 from app.core.config import settings
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.download_clients.base import TorrentState
-from app.services.seeding import get_global_seed_defaults
+from app.services.seeding import (
+    SEED_HOLD_TAG,
+    get_global_seed_defaults,
+    hold_share_limits,
+    resolve_share_limits,
+)
 from app.services.notifications import (
     create_notification,
     SEVERITY_ERROR,
@@ -81,6 +86,7 @@ class SeedingRulesEngine:
             return {"status": "skipped", "reason": "qBittorrent not configured"}
 
         defaults = await get_global_seed_defaults()
+        self._defaults = defaults
         automation = defaults.get("automation", {})
 
         # VPN kill switch and forwarded-port sync run first, before per-torrent rules.
@@ -387,6 +393,15 @@ class SeedingRulesEngine:
 
         is_complete = torrent.progress >= 1.0 or torrent.state == TorrentState.SEEDING
 
+        # Share limit hold. While the indexer's minimum is unmet, qBittorrent's own limits
+        # stay unlimited so it cannot pause or remove the torrent early. Once the minimum
+        # is met, or the indexer no longer has one, the normal limits apply again.
+        held = SEED_HOLD_TAG in tags
+        if hr and not hr_met and not held:
+            await hold_share_limits(client, torrent.hash)
+        elif held and (not hr or hr_met):
+            await self._release_seed_hold(conn, client, torrent, ctx)
+
         # ---- Downloading torrents: auto-recovery + disk-aware pause ----
         if not is_complete:
             auto_recovery = (
@@ -461,6 +476,35 @@ class SeedingRulesEngine:
             await client.resume_torrent(torrent.hash)
             await client.remove_tags(torrent.hash, [AUTOPAUSE_TAG])
             actions["resumed"] += 1
+
+    async def _release_seed_hold(self, conn, client, torrent, ctx) -> None:
+        """Apply the profile or global share limits a seed hold kept off, and remove the hold tag."""
+        from types import SimpleNamespace
+
+        profile = None
+        media_type = (ctx or {}).get("media_type")
+        table = _MEDIA_TABLES.get(media_type or "")
+        if table and (ctx or {}).get("media_id"):
+            row = await conn.fetchrow(
+                f"""
+                SELECT mp.seed_ratio_limit, mp.seed_time_limit, mp.inactive_seed_time_limit
+                FROM {table} m
+                JOIN media_profiles mp ON m.media_profile_id = mp.id
+                WHERE m.id = $1
+                """,
+                ctx["media_id"],
+            )
+            if row:
+                profile = SimpleNamespace(**dict(row))
+        ratio, seeding_time, inactive = resolve_share_limits(getattr(self, "_defaults", {}) or {}, profile)
+        await client.set_share_limits(
+            torrent.hash,
+            ratio_limit=ratio,
+            seeding_time_limit=seeding_time,
+            inactive_seeding_time_limit=inactive,
+        )
+        await client.remove_tags(torrent.hash, [SEED_HOLD_TAG])
+        logger.info(f"Seeding minimum met for {torrent.hash[:8]}, normal share limits applied")
 
     async def _handle_stall(self, conn, client, torrent, ctx, automation, state, now_dt) -> bool:
         """

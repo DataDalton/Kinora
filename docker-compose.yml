@@ -33,6 +33,13 @@ x-celery-env: &celery_env
   DOWNLOADS_ROOT: /kinora/torrents
   TORRENTS_ROOT: /kinora/torrents
   TMDB_API_KEY: ${TMDB_API_KEY:-}
+  # Indexer searches and FlareSolverr browsing go through gluetun's HTTP proxy, so they
+  # leave through the VPN instead of the host's connection. Empty sends them directly.
+  INDEXER_PROXY_URL: ${INDEXER_PROXY_URL-http://gluetun:8888}
+
+# Runs every backend container as this user, the same one that owns /kinora (see the
+# bootstrap), instead of root.
+x-app-user: &app_user "${PUID:-1000}:${PGID:-1000}"
 
 # Published backend image, shared by the API and every Celery service. Replace latest with a
 # release such as 1.2.0 to pin a version. docker-compose.dev.yml swaps this for a local build.
@@ -177,6 +184,7 @@ services:
   backend:
     image: *backend_image
     container_name: kinora-backend
+    user: *app_user
     environment:
       APP_NAME: Kinora
       APP_VERSION: 1.0.0
@@ -213,6 +221,8 @@ services:
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       FLARESOLVERR_URL: http://flaresolverr:8191
       CLOUDFLARE_BYPASS_METHOD: flaresolverr
+      # See the celery env block above.
+      INDEXER_PROXY_URL: ${INDEXER_PROXY_URL-http://gluetun:8888}
       # Auto-register the bundled qBittorrent on first boot so setup is not required.
       # qBittorrent shares gluetun's netns, so it is reached at gluetun:8080.
       QBITTORRENT_AUTOCONFIG: "true"
@@ -236,7 +246,8 @@ services:
       SUBTITLE_LANGUAGES: en
     volumes:
       - *kinora_storage
-      - kinora-secrets:/secrets
+      # Read-only. The bootstrap writes every secret, the app only reads them.
+      - kinora-secrets:/secrets:ro
     # No published port. The backend is reached through the Caddy proxy on the internal
     # network. Publish 8000 here only for direct API debugging.
     depends_on:
@@ -261,6 +272,7 @@ services:
   celery-worker:
     image: *backend_image
     container_name: kinora-celery-worker
+    user: *app_user
     # Pool sizes itself between the bounds below rather than Celery's default of one
     # process per core. -Q celery leaves the transcode queue to its own service.
     command: >
@@ -272,7 +284,7 @@ services:
       FLARESOLVERR_URL: http://flaresolverr:8191
     volumes:
       - *kinora_storage
-      - kinora-secrets:/secrets
+      - kinora-secrets:/secrets:ro
     depends_on: *celery_depends
     networks:
       - kinora-network
@@ -284,6 +296,7 @@ services:
   celery-transcode:
     image: *backend_image
     container_name: kinora-celery-transcode
+    user: *app_user
     command: >
       uv run celery -A app.tasks.celery_app worker --loglevel=info
       -Q transcode
@@ -291,7 +304,7 @@ services:
     environment: *celery_env
     volumes:
       - *kinora_storage
-      - kinora-secrets:/secrets
+      - kinora-secrets:/secrets:ro
     depends_on: *celery_depends
     networks:
       - kinora-network
@@ -300,10 +313,12 @@ services:
   celery-beat:
     image: *backend_image
     container_name: kinora-celery-beat
-    command: uv run celery -A app.tasks.celery_app beat --loglevel=info
+    user: *app_user
+    # The schedule file goes to /tmp, since the app user cannot write to /app.
+    command: uv run celery -A app.tasks.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     environment: *celery_env
     volumes:
-      - kinora-secrets:/secrets
+      - kinora-secrets:/secrets:ro
     depends_on: *celery_depends
     networks:
       - kinora-network
@@ -432,6 +447,12 @@ services:
       # Control server bound inside the netns; reached by the backend at http://gluetun:8000
       HTTP_CONTROL_SERVER_ADDRESS: ":8000"
       HTTP_CONTROL_SERVER_LOG: "off"
+      # HTTP proxy the backend and FlareSolverr send indexer traffic through, reached at
+      # http://gluetun:8888 on the internal network. It only forwards while the VPN is up.
+      HTTPPROXY: "on"
+      HTTPPROXY_LISTENING_ADDRESS: ":8888"
+      HTTPPROXY_STEALTH: "on"
+      HTTPPROXY_LOG: "off"
       # LAN ranges allowed to reach the published qBittorrent WebUI through the tunnel container
       FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:-192.168.0.0/16,10.0.0.0/8,172.16.0.0/12}
     volumes:
@@ -518,6 +539,27 @@ configs:
         echo "bootstrap: generated gluetun control-server API key"
       fi
 
+      # Application signing keys (generate once). The app containers run as an
+      # unprivileged user with this volume read-only, so the keys are created here. An
+      # existing install already has them from when the backend created them itself.
+      for KEYNAME in .secret_key .jwt_secret_key; do
+        if [ ! -f "$$SECRETS_DIR/$$KEYNAME" ]; then
+          gen 43 > "$$SECRETS_DIR/$$KEYNAME"
+          echo "bootstrap: generated $$KEYNAME"
+        fi
+      done
+
+      # Password the backend sets on the bundled qBittorrent WebUI in place of the seeded
+      # one (generate once).
+      if [ ! -f "$$SECRETS_DIR/qbittorrent_password" ]; then
+        gen 32 > "$$SECRETS_DIR/qbittorrent_password"
+        echo "bootstrap: generated qBittorrent WebUI password"
+      fi
+
+      # The app user reads these files, so every secret is readable inside the volume,
+      # which only Kinora's own containers mount.
+      chmod 0644 "$$SECRETS_DIR"/* "$$SECRETS_DIR"/.secret_key "$$SECRETS_DIR"/.jwt_secret_key 2>/dev/null || true
+
       # PostgreSQL password (generate once). A fresh database (empty data volume) gets a strong
       # random password. An already-initialized database keeps the historical default password,
       # so upgrading an existing install never causes a password mismatch. Postgres, PgBouncer,
@@ -559,10 +601,11 @@ configs:
       # qBittorrent config (seed once, never overwrite an existing one). Sets a known WebUI
       # login (admin / adminadmin) so qBittorrent does not generate a random temporary
       # password and reset the WebUI section on first run, accepts the legal notice so the
-      # WebUI starts unattended, binds the WebUI on 8080, and whitelists the internal Docker
-      # subnets. The backend connects with these credentials. The WebUI is localhost-bound, so
-      # change this password from the qBittorrent UI if you want. A quoted heredoc keeps the
-      # backslashes in the setting keys and the password hash literal.
+      # WebUI starts unattended, and binds the WebUI on 8080. Every client has to log in,
+      # cross-site requests are refused, and only the WebUI's real host names are accepted.
+      # On first boot the backend logs in with the seeded login and replaces the password
+      # with the generated one above, shown under Settings, Download Clients. A quoted
+      # heredoc keeps the backslashes in the setting keys and the password hash literal.
       QBT_DIR=/qbittorrent-config/qBittorrent
       if [ -d /qbittorrent-config ] && [ ! -f "$$QBT_DIR/qBittorrent.conf" ]; then
         mkdir -p "$$QBT_DIR"
@@ -575,11 +618,11 @@ configs:
       WebUI\Port=8080
       WebUI\Username=admin
       WebUI\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVBHS5iD5rllja3anrbYVjt8YnfUnP07XFR7B79MPClEuI0AbfzhoUf1Ja7ijzS/YR4Tz2KJw==)"
-      WebUI\AuthSubnetWhitelistEnabled=true
-      WebUI\AuthSubnetWhitelist=10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
-      WebUI\HostHeaderValidation=false
-      WebUI\CSRFProtection=false
-      WebUI\LocalHostAuth=false
+      WebUI\AuthSubnetWhitelistEnabled=false
+      WebUI\HostHeaderValidation=true
+      WebUI\ServerDomains=localhost;127.0.0.1;[::1];gluetun
+      WebUI\CSRFProtection=true
+      WebUI\LocalHostAuth=true
 
       [BitTorrent]
       Session\DefaultSavePath=/kinora/torrents

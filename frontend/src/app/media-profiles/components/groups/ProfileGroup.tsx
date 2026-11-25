@@ -135,7 +135,7 @@ export default function ProfileGroup({
 						</div>
 						<p className="text-xs text-muted-foreground mt-1">
 							{formData.upgrade_replace_policy === "delete_old"
-								? "Delete the previous file after importing the upgrade"
+								? "Delete the previous file and its subtitles after importing the upgrade. Only files inside the item's own library folder are deleted, never anything in the download folder"
 								: formData.upgrade_replace_policy ===
 									  "keep_versions"
 									? "Keep every quality version in the media folder (Jellyfin-style)"

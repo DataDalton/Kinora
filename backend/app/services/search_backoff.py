@@ -21,9 +21,9 @@ RECENT_RELEASE_RETRY_HOURS = 4
 MAX_COUNTED_ATTEMPTS = 8
 
 
-def eligibilityClause(alias: str, release_date_column: str | None = None) -> str:
+def backoffHoursSql(alias: str, release_date_column: str | None = None) -> str:
     """
-    SQL condition selecting rows due for another search. release_date_column
+    SQL expression for the hours a row waits after its last search. release_date_column
     enables the fast retry window for recent releases and is skipped for tables
     without a date column (anime stores only a season year).
     """
@@ -38,28 +38,50 @@ def eligibilityClause(alias: str, release_date_column: str | None = None) -> str
         """
     else:
         hours = f"LEAST(POWER(2, LEAST({alias}.search_attempts, {MAX_COUNTED_ATTEMPTS}))::int, {MAX_BACKOFF_HOURS})"
+    return hours
 
+
+def eligibilityClause(alias: str, release_date_column: str | None = None) -> str:
+    """
+    SQL condition selecting rows due for another search. release_date_column
+    enables the fast retry window for recent releases and is skipped for tables
+    without a date column (anime stores only a season year).
+    """
+    hours = backoffHoursSql(alias, release_date_column)
     return f"""(
         {alias}.last_search_at IS NULL
         OR {alias}.last_search_at < NOW() - (({hours}) * INTERVAL '1 hour')
     )"""
 
 
-async def recordSearchAttempt(conn, table: str, media_id: int, found: bool) -> None:
+def nextEligibleSql(alias: str, release_date_column: str | None = None) -> str:
+    """
+    SQL expression for the time a row becomes due for another search under the same
+    backoff as eligibilityClause. NULL when the row has never been searched, which
+    means it is due on the next run.
+    """
+    hours = backoffHoursSql(alias, release_date_column)
+    return f"({alias}.last_search_at + (({hours}) * INTERVAL '1 hour'))"
+
+
+async def recordSearchAttempt(conn, table: str, media_id: int, found: bool, indexer_outage: bool = False) -> None:
     """
     Stamp an item after a search. A successful search resets the attempt counter,
-    an empty one advances the backoff. Best effort, never raises.
+    an empty one advances the backoff. When every indexer failed (indexer_outage), the
+    empty result says nothing about the item, so the counter is left as it was and the
+    item is retried at its current interval. Best effort, never raises.
     """
     try:
         await conn.execute(
             f"""
             UPDATE {table}
             SET last_search_at = NOW(),
-                search_attempts = CASE WHEN $2 THEN 0 ELSE search_attempts + 1 END
+                search_attempts = CASE WHEN $2 THEN 0 WHEN $3 THEN search_attempts ELSE search_attempts + 1 END
             WHERE id = $1
             """,
             media_id,
             found,
+            indexer_outage,
         )
     except Exception as e:
         print(f"Failed to record search attempt for {table} {media_id}: {e}")

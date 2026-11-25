@@ -18,6 +18,7 @@ import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import NotificationPreferences from "@/components/NotificationPreferences";
+import PushNotificationSettings from "@/components/PushNotificationSettings";
 
 type ProfileSection = "account" | "security" | "notifications";
 
@@ -421,7 +422,10 @@ function ProfileContent() {
 					)}
 
 					{selectedSection === "notifications" && (
-						<NotificationPreferences />
+						<div className="space-y-6">
+							<NotificationPreferences />
+							<PushNotificationSettings />
+						</div>
 					)}
 				</div>
 			</div>

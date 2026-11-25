@@ -17,6 +17,7 @@ from typing import List, Optional
 
 from app.db import get_pool
 from app.services.indexers.base import TorrentRelease
+from app.services.release_language import detectLanguage
 
 # Columns written on insert, in the order used by _releaseToRow.
 _INSERT_COLUMNS = [
@@ -56,6 +57,8 @@ _INSERT_COLUMNS = [
     "artist",
     "album",
     "year",
+    "uploader_badge",
+    "origin_sites",
 ]
 
 _UPSERT_SQL = f"""
@@ -73,6 +76,11 @@ _UPSERT_SQL = f"""
         upload_date = COALESCE(EXCLUDED.upload_date, releases.upload_date),
         uploader = COALESCE(EXCLUDED.uploader, releases.uploader),
         category = COALESCE(EXCLUDED.category, releases.category),
+        uploader_badge = COALESCE(EXCLUDED.uploader_badge, releases.uploader_badge),
+        origin_sites = CASE
+            WHEN EXCLUDED.origin_sites IS NULL OR cardinality(EXCLUDED.origin_sites) = 0 THEN releases.origin_sites
+            ELSE EXCLUDED.origin_sites
+        END,
         last_seen_at = NOW()
 """
 
@@ -143,6 +151,8 @@ def _releaseToRow(release: TorrentRelease) -> tuple:
         release.artist[:500] if release.artist else None,
         release.album[:500] if release.album else None,
         release.year,
+        release.uploader_badge,
+        list(release.origin_sites or []),
     )
 
 
@@ -169,7 +179,8 @@ def _rowToRelease(row) -> TorrentRelease:
         audio_channels=row["audio_channels"],
         hdr=row["hdr"],
         edition=row["edition"],
-        language=row["language"],
+        # Detected again from the name so rows stored by an earlier detector match fresh results
+        language=detectLanguage(row["title"]) if row["title"] else row["language"],
         release_group=row["release_group"],
         is_proper=row["is_proper"],
         is_repack=row["is_repack"],
@@ -183,6 +194,8 @@ def _rowToRelease(row) -> TorrentRelease:
         artist=row["artist"],
         album=row["album"],
         year=row["year"],
+        uploader_badge=row.get("uploader_badge"),
+        origin_sites=list(row.get("origin_sites") or []),
     )
 
 
@@ -214,6 +227,26 @@ async def upsertReleases(releases: List[TorrentRelease]) -> int:
     except Exception as e:
         print(f"Release index write failed ({len(rows)} rows): {e}")
         return 0
+
+
+async def addOriginSites(indexer: str, detailUrl: str, sites: List[str]) -> None:
+    """
+    Store the full site list read from a release's detail page on its index rows, so later
+    searches judge the release by every site it is on. Best effort, never raises.
+    """
+    if not detailUrl or not sites:
+        return
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE releases SET origin_sites = $3 WHERE indexer = $1 AND detail_url = $2",
+                indexer,
+                detailUrl,
+                list(sites),
+            )
+    except Exception as e:
+        print(f"Could not store the sites for {detailUrl}: {e}")
 
 
 def _mediaTypeFilter(media_type: Optional[str]):

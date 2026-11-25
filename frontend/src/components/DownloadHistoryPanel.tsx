@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import BlocklistActions from "./BlocklistActions";
+import ImportFailedActions from "./ImportFailedActions";
+import TrustBadge from "./TrustBadge";
 import {
 	History,
 	ChevronDown,
@@ -37,6 +39,9 @@ interface DownloadHistoryEntry {
 	grab_mode?: string;
 	started_at: string;
 	completed_at: string | null;
+	error_message?: string | null;
+	trust_category?: string | null;
+	safety_template?: string | null;
 }
 
 interface DownloadHistoryPanelProps {
@@ -70,6 +75,7 @@ const getStatusIcon = (status: string) => {
 		case "completed":
 			return <CheckCircle className="w-4 h-4 text-green-500" />;
 		case "failed":
+		case "import_failed":
 			return <XCircle className="w-4 h-4 text-destructive" />;
 		case "downloading":
 			return <Download className="w-4 h-4 text-blue-500 animate-pulse" />;
@@ -86,6 +92,8 @@ const getStatusLabel = (status: string): string => {
 			return "Completed";
 		case "failed":
 			return "Failed";
+		case "import_failed":
+			return "Import failed";
 		case "downloading":
 			return "Downloading";
 		case "processing":
@@ -197,6 +205,14 @@ export default function DownloadHistoryPanel({
 												<span className="flex items-center gap-1">
 													{entry.indexer}
 												</span>
+												<TrustBadge
+													trustCategory={
+														entry.trust_category
+													}
+													safetyTemplate={
+														entry.safety_template
+													}
+												/>
 												<span className="flex items-center gap-1">
 													<Calendar className="w-3 h-3" />
 													{formatDate(
@@ -238,8 +254,27 @@ export default function DownloadHistoryPanel({
 											</div>
 										</div>
 									)}
-									{entry.status === "failed" && (
-										<div className="mt-3 flex justify-end">
+									{entry.status === "import_failed" &&
+										entry.error_message && (
+											<p className="text-xs text-destructive mt-3">
+												{entry.error_message}
+											</p>
+										)}
+									{(entry.status === "failed" ||
+										entry.status === "import_failed") && (
+										<div className="mt-3 flex justify-end gap-2">
+											{entry.status ===
+												"import_failed" && (
+												<ImportFailedActions
+													historyId={entry.id}
+													mediaType={entry.media_type}
+													mediaId={entry.media_id}
+													releaseTitle={
+														entry.torrent_title
+													}
+													showItemLink={false}
+												/>
+											)}
 											<BlocklistActions
 												mediaType={entry.media_type}
 												mediaId={entry.media_id}

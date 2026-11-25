@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/toast/ToastProvider";
+import { usePermissions } from "@/contexts/PermissionContext";
 import DeleteFileModal from "@/components/DeleteFileModal";
 import {
 	HardDrive,
@@ -86,6 +87,17 @@ export default function FileQualityInfo({
 	const [fileToDelete, setFileToDelete] = useState<FileInfo | null>(null);
 	const queryClient = useQueryClient();
 	const toast = useToast();
+	const { canManage } = usePermissions();
+	// Rescanning and deleting files need the manage permission for the media type.
+	const canManageFiles = canManage(
+		mediaType === "movie"
+			? "movies"
+			: mediaType === "show"
+				? "shows"
+				: mediaType === "anime"
+					? "anime"
+					: "music",
+	);
 
 	const rescanMutation = useMutation({
 		mutationFn: async () => {
@@ -151,16 +163,18 @@ export default function FileQualityInfo({
 						<HardDrive className="w-5 h-5 text-muted-foreground" />
 						<span className="font-medium">File Information</span>
 					</div>
-					<button
-						onClick={() => rescanMutation.mutate()}
-						disabled={rescanMutation.isPending}
-						className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border hover:bg-accent rounded-lg transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-					>
-						<RefreshCw
-							className={`w-4 h-4 ${rescanMutation.isPending ? "animate-spin" : ""}`}
-						/>
-						Rescan
-					</button>
+					{canManageFiles && (
+						<button
+							onClick={() => rescanMutation.mutate()}
+							disabled={rescanMutation.isPending}
+							className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border hover:bg-accent rounded-lg transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+							<RefreshCw
+								className={`w-4 h-4 ${rescanMutation.isPending ? "animate-spin" : ""}`}
+							/>
+							Rescan
+						</button>
+					)}
 				</div>
 				<div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
 					<FileVideo className="w-10 h-10 mb-2 opacity-50" />
@@ -190,16 +204,18 @@ export default function FileQualityInfo({
 						</span>
 					)}
 				</div>
-				<button
-					onClick={() => rescanMutation.mutate()}
-					disabled={rescanMutation.isPending}
-					className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border hover:bg-accent rounded-lg transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-				>
-					<RefreshCw
-						className={`w-4 h-4 ${rescanMutation.isPending ? "animate-spin" : ""}`}
-					/>
-					Rescan
-				</button>
+				{canManageFiles && (
+					<button
+						onClick={() => rescanMutation.mutate()}
+						disabled={rescanMutation.isPending}
+						className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border hover:bg-accent rounded-lg transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+					>
+						<RefreshCw
+							className={`w-4 h-4 ${rescanMutation.isPending ? "animate-spin" : ""}`}
+						/>
+						Rescan
+					</button>
+				)}
 			</div>
 
 			{qualityCutoff && (
@@ -365,14 +381,18 @@ export default function FileQualityInfo({
 									</div>
 								</div>
 								<div className="shrink-0">
-									<button
-										onClick={() => setFileToDelete(file)}
-										className="p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded transition cursor-pointer"
-										title="Delete this version"
-										aria-label="Delete this version"
-									>
-										<Trash2 className="w-4 h-4" />
-									</button>
+									{canManageFiles && (
+										<button
+											onClick={() =>
+												setFileToDelete(file)
+											}
+											className="p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded transition cursor-pointer"
+											title="Delete this version"
+											aria-label="Delete this version"
+										>
+											<Trash2 className="w-4 h-4" />
+										</button>
+									)}
 								</div>
 							</div>
 						</div>

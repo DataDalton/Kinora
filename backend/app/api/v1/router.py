@@ -29,6 +29,10 @@ from app.api.v1.endpoints import (
     downloads,
     notifications,
     admin_data,
+    trusted_uploaders,
+    push,
+    calendar,
+    indexers,
 )
 
 api_router = APIRouter()
@@ -43,6 +47,7 @@ api_router.include_router(shows.router, prefix="/shows", tags=["shows"])
 api_router.include_router(anime.router, prefix="/anime", tags=["anime"])
 api_router.include_router(music.router, prefix="/music", tags=["music"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
+api_router.include_router(trusted_uploaders.router, prefix="/trusted-uploaders", tags=["trusted-uploaders"])
 api_router.include_router(discover.router, prefix="/discover", tags=["discover"])
 api_router.include_router(webtransport.router, prefix="/ws", tags=["real-time"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
@@ -62,3 +67,6 @@ api_router.include_router(system_status.router, prefix="/system/status", tags=["
 api_router.include_router(downloads.router, prefix="/downloads", tags=["downloads"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(admin_data.router, prefix="/admin", tags=["admin-data"])
+api_router.include_router(push.router, prefix="/push", tags=["push"])
+api_router.include_router(calendar.router, prefix="/calendar", tags=["calendar"])
+api_router.include_router(indexers.router, prefix="/indexers", tags=["indexers"])

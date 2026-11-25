@@ -4,7 +4,7 @@ from pydantic import BaseModel, field_validator
 import asyncpg
 
 from app.db import get_db
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_permission
 from app.services import naming_tokens
 
 try:
@@ -29,6 +29,29 @@ def validate_language_code(code: str) -> bool:
 router = APIRouter()
 
 
+def _check_safety_template(value) -> None:
+    """Reject a safety template other than trusted, balanced or open."""
+    from app.services.release_trust import TEMPLATES
+
+    if value is not None and value not in TEMPLATES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"safety_template must be one of {', '.join(TEMPLATES)}",
+        )
+
+
+# Indexers a new profile searches per media type, in priority order. ext.to is included
+# because the safety template, not the indexer list, decides which releases are allowed.
+DEFAULT_PROFILE_INDEXERS = {
+    "movie": ["1337x", "YTS", "ext.to"],
+    "show": ["1337x", "ext.to"],
+    "anime": ["Nyaa", "ext.to"],
+    "music": ["1337x", "ext.to"],
+}
+# Resolutions a new profile accepts for video, in preference order.
+DEFAULT_PROFILE_RESOLUTIONS = ["1080p", "720p"]
+
+
 class MediaProfileCreate(BaseModel):
     """
     Create media profile
@@ -41,7 +64,7 @@ class MediaProfileCreate(BaseModel):
 
     name: str
     # Per-media-type quality: Movies
-    movie_resolutions: Optional[List[str]] = []
+    movie_resolutions: Optional[List[str]] = DEFAULT_PROFILE_RESOLUTIONS
     movie_codecs: Optional[List[str]] = []
     movie_sources: Optional[List[str]] = []
     movie_audio_codecs: Optional[List[str]] = []
@@ -51,7 +74,7 @@ class MediaProfileCreate(BaseModel):
     movie_min_size: Optional[int] = None
     movie_max_size: Optional[int] = None
     # Per-media-type quality: TV Shows
-    show_resolutions: Optional[List[str]] = []
+    show_resolutions: Optional[List[str]] = DEFAULT_PROFILE_RESOLUTIONS
     show_codecs: Optional[List[str]] = []
     show_sources: Optional[List[str]] = []
     show_audio_codecs: Optional[List[str]] = []
@@ -60,7 +83,7 @@ class MediaProfileCreate(BaseModel):
     show_min_size: Optional[int] = None
     show_max_size: Optional[int] = None
     # Per-media-type quality: Anime
-    anime_resolutions: Optional[List[str]] = []
+    anime_resolutions: Optional[List[str]] = DEFAULT_PROFILE_RESOLUTIONS
     anime_codecs: Optional[List[str]] = []
     anime_sources: Optional[List[str]] = []
     anime_audio_codecs: Optional[List[str]] = []
@@ -99,10 +122,10 @@ class MediaProfileCreate(BaseModel):
     anime_audio_language: Optional[str] = "ja"
     anime_subtitle_language: Optional[str] = "en"
     # Indexers per media type
-    movie_indexers: Optional[List[str]] = []
-    show_indexers: Optional[List[str]] = []
-    anime_indexers: Optional[List[str]] = []
-    music_indexers: Optional[List[str]] = []
+    movie_indexers: Optional[List[str]] = DEFAULT_PROFILE_INDEXERS["movie"]
+    show_indexers: Optional[List[str]] = DEFAULT_PROFILE_INDEXERS["show"]
+    anime_indexers: Optional[List[str]] = DEFAULT_PROFILE_INDEXERS["anime"]
+    music_indexers: Optional[List[str]] = DEFAULT_PROFILE_INDEXERS["music"]
     # Music settings
     music_artist_folder_format: Optional[str] = "{artist}"
     music_album_folder_format: Optional[str] = "{album} ({year})"
@@ -127,6 +150,11 @@ class MediaProfileCreate(BaseModel):
     use_hardlinks: Optional[bool] = True
     illegal_char_replacement: Optional[str] = "_"
     colon_replacement: Optional[str] = " -"
+    # Extra files imported from a torrent. None for never_import_extensions means the default list.
+    import_extra_files: Optional[bool] = True
+    never_import_extensions: Optional[List[str]] = None
+    # trusted, balanced or open. New profiles start on trusted.
+    safety_template: Optional[str] = "trusted"
     # Torrent validation settings
     validation_enabled: Optional[bool] = True
     validation_mode: Optional[str] = "allowlist"
@@ -275,6 +303,9 @@ class MediaProfileUpdate(BaseModel):
     use_hardlinks: Optional[bool] = None
     illegal_char_replacement: Optional[str] = None
     colon_replacement: Optional[str] = None
+    import_extra_files: Optional[bool] = None
+    never_import_extensions: Optional[List[str]] = None
+    safety_template: Optional[str] = None
     # Torrent validation settings
     validation_enabled: Optional[bool] = None
     validation_mode: Optional[str] = None
@@ -392,6 +423,9 @@ class MediaProfileResponse(BaseModel):
     use_hardlinks: Optional[bool]
     illegal_char_replacement: Optional[str]
     colon_replacement: Optional[str]
+    import_extra_files: Optional[bool] = True
+    never_import_extensions: Optional[List[str]] = None
+    safety_template: Optional[str] = "open"
     # Torrent validation settings
     validation_enabled: Optional[bool]
     validation_mode: Optional[str]
@@ -486,7 +520,7 @@ async def get_media_profile(
 @router.post("/", response_model=MediaProfileResponse, status_code=status.HTTP_201_CREATED)
 async def create_media_profile(
     profile: MediaProfileCreate,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -500,8 +534,14 @@ async def create_media_profile(
             detail=f"Media profile with name '{profile.name}' already exists",
         )
 
+    return await insertMediaProfile(conn, profile)
+
+
+async def insertMediaProfile(conn: asyncpg.Connection, profile: MediaProfileCreate) -> dict:
+    """Insert a profile and return the stored row. Shared by the create endpoint and the setup wizard."""
     # Build the INSERT from the model so column changes need no positional bookkeeping.
     data = profile.model_dump()
+    _check_safety_template(data.get("safety_template"))
     columns = list(data.keys())
     placeholders = ", ".join(f"${i}" for i in range(1, len(columns) + 1))
     row = await conn.fetchrow(
@@ -512,7 +552,6 @@ async def create_media_profile(
         """,
         *[data[col] for col in columns],
     )
-
     return dict(row)
 
 
@@ -520,7 +559,7 @@ async def create_media_profile(
 async def update_media_profile(
     profile_id: int,
     profile: MediaProfileUpdate,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
@@ -545,8 +584,10 @@ async def update_media_profile(
         "seed_time_limit",
         "inactive_seed_time_limit",
         "auto_recovery",
+        "never_import_extensions",
     }
 
+    _check_safety_template(profile.model_dump(exclude_unset=True).get("safety_template"))
     for field, value in profile.model_dump(exclude_unset=True).items():
         if value is not None or field in nullable_fields:
             update_fields.append(f"{field} = ${param_count}")
@@ -573,7 +614,7 @@ async def update_media_profile(
 @router.delete("/{profile_id}")
 async def delete_media_profile(
     profile_id: int,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """

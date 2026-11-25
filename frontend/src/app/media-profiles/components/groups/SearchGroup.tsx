@@ -2,6 +2,7 @@
 
 import { MediaProfileFormData } from "../types";
 import { SearchTab } from "../types";
+import SafetyTemplateTab from "../shared/SafetyTemplateTab";
 
 interface SearchGroupProps {
 	formData: MediaProfileFormData;
@@ -302,7 +303,8 @@ export default function SearchGroup({
 							placeholder="e.g., YIFY, RARBG (comma separated)"
 						/>
 						<p className="text-xs text-muted-foreground mt-1">
-							Only include releases from these uploaders
+							Only include releases from these uploaders. Exact
+							names, comma separated
 						</p>
 					</div>
 
@@ -323,7 +325,8 @@ export default function SearchGroup({
 							placeholder="e.g., SPARKS, EVO (comma separated)"
 						/>
 						<p className="text-xs text-muted-foreground mt-1">
-							Only include releases from these groups
+							Only include releases from these groups. Exact
+							names, comma separated
 						</p>
 					</div>
 				</div>
@@ -349,6 +352,12 @@ export default function SearchGroup({
 					</p>
 				</div>
 			</div>
+		);
+	}
+
+	if (activeTab === "trust") {
+		return (
+			<SafetyTemplateTab formData={formData} setFormData={setFormData} />
 		);
 	}
 

@@ -73,9 +73,16 @@ class Settings(BaseSettings):
     QBITTORRENT_AUTOCONFIG: bool = False
     QBITTORRENT_HOST: str = "gluetun"
     QBITTORRENT_PORT: int = 8080
-    # Credentials the bundled qBittorrent is seeded with (see the bootstrap script).
+    # Credentials the bundled qBittorrent is seeded with (see the bootstrap script). On
+    # first boot the backend replaces the seeded password with the random one in the
+    # secrets volume (qbittorrent_password), so the seeded value only ever opens a fresh
+    # qBittorrent.
     QBITTORRENT_USERNAME: str = "admin"
     QBITTORRENT_PASSWORD: str = "adminadmin"
+    # HTTP proxy that indexer searches and FlareSolverr browsing go through. The Docker
+    # compose points it at gluetun's proxy, so searches leave through the VPN rather than
+    # the host's own connection. Empty sends them directly.
+    INDEXER_PROXY_URL: Optional[str] = None
     # Gluetun control server URL. The bundled qBittorrent shares gluetun's network
     # namespace, so the auto-configured client points its VPN safety checks here.
     GLUETUN_URL: str = "http://gluetun:8000"

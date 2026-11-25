@@ -7,6 +7,7 @@ import { PermissionProvider } from "@/contexts/PermissionContext";
 import { RealtimeProvider } from "@/contexts/RealtimeContext";
 import { ToastProvider } from "@/components/toast/ToastProvider";
 import Navigation from "@/components/Navigation";
+import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 
 // The login and register routes escape this margin with their own layout, so
 // no route check is needed here. Reading the pathname would pull the page
@@ -26,6 +27,7 @@ function MainContent({ children }: { children: ReactNode }) {
 export function ClientLayout({ children }: { children: ReactNode }) {
 	return (
 		<ThemeProvider>
+			<ServiceWorkerRegistrar />
 			<PermissionProvider>
 				{/* Outside RealtimeProvider so server notifications can raise toasts. */}
 				<ToastProvider>

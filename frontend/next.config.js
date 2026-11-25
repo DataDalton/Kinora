@@ -58,6 +58,26 @@ const nextConfig = {
 		// dangerouslyAllowLocalIP defaults to false for security
 	},
 
+	// The service worker must be revalidated on every load so an updated push handler
+	// replaces the installed one instead of waiting on the HTTP cache.
+	async headers() {
+		return [
+			{
+				source: "/sw.js",
+				headers: [
+					{
+						key: "Content-Type",
+						value: "application/javascript; charset=utf-8",
+					},
+					{
+						key: "Cache-Control",
+						value: "no-cache, no-store, must-revalidate",
+					},
+				],
+			},
+		];
+	},
+
 	async rewrites() {
 		const apiUrl =
 			process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";

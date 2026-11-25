@@ -46,6 +46,8 @@ class RenameFileRequest(BaseModel):
 
     file_path: str
     new_name: str = Field(..., min_length=1, max_length=500)
+    # Target shown by the preview. When set, the rename is refused if the target computed now differs.
+    expectedNewPath: Optional[str] = None
 
 
 class ManualImportRequest(BaseModel):

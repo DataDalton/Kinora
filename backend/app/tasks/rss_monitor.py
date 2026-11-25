@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 from app.tasks.celery_app import celery_app, runAsync
 from app.db import get_pool
+from app.services import download_episodes
 from app.services.automation.search_engine import search_engine, _resolve_grab_folder
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services import music_quality
@@ -74,9 +75,25 @@ async def _add_release_for_media(
     to qBittorrent with the paired root folder, record download history, and start
     validation. Returns the torrent hash or None.
     """
+    # The profile's safety template gates RSS downloads exactly as it gates searches.
+    from app.services import release_trust
+
+    allowed, reason = release_trust.isAllowed(release, getattr(profile, "safety_template", "open"))
+    if not allowed:
+        print(f"RSS: skipping {release.title}. {reason}")
+        return None
+
     # Resolve the magnet on demand (deferred during the feed scan for speed).
     await search_engine.resolve_download_source(release)
     if not (release.magnet or release.torrent_url):
+        return None
+
+    # A torrent that failed validation before is never added again.
+    from app.services import hash_blocklist
+
+    infoHash = release.info_hash or hash_blocklist.infoHashFromSource(release.magnet)
+    if await hash_blocklist.isHashBlocked(conn, infoHash, media_type, media_id):
+        print(f"RSS: skipping blocklisted torrent {release.title}")
         return None
 
     client = await get_qbittorrent_client()
@@ -126,6 +143,7 @@ async def _add_release_for_media(
         root_folder_id,
         "qbittorrent",
     )
+    await download_episodes.recordCoveredEpisodes(conn, torrent_hash, media_type, media_id, release.title)
 
     await validate_and_resume_torrent(
         torrent_hash=torrent_hash,
@@ -152,6 +170,11 @@ async def async_monitor_rss_feeds():
 
         if not releases:
             return {"status": "success", "releases_found": 0, "grabbed": 0}
+
+        # Trust categories for the safety template check before each download.
+        from app.services import release_trust
+
+        releases = await release_trust.annotate(releases)
 
         grabbed_count = 0
         pool = await get_pool()
@@ -274,12 +297,24 @@ async def async_monitor_rss_feeds():
         )
 
 
+def _profileUsesIndexer(profile, mediaType: str, release) -> bool:
+    """
+    Check that the profile's indexer list for a media type includes the indexer a feed
+    release came from. An empty list means the profile uses every indexer.
+    """
+    selected = profile.get_indexers_for_type(mediaType)
+    return not selected or release.indexer in selected
+
+
 async def check_and_grab_movie(conn, release, movie, profile):
     """
     Check if a release matches a wanted movie and download it.
     profile is the resolved MediaProfile for the movie's media_profile_id.
     """
     if not profile:
+        return False
+
+    if not _profileUsesIndexer(profile, "movie", release):
         return False
 
     if not _title_matches(release.title, movie["title"]):
@@ -290,6 +325,17 @@ async def check_and_grab_movie(conn, release, movie, profile):
         year = movie["release_date"].year
         if str(year) not in release.title:
             return False
+
+    # The same item check the search uses, so RSS and search accept the same releases.
+    from app.services import release_matching
+
+    target = release_matching.MatchTarget(
+        kind="movie",
+        titles=[t for t in (movie["title"], movie.get("original_title")) if t],
+        year=movie["release_date"].year if movie["release_date"] else None,
+    )
+    if not release_matching.releaseMatches(release.title, target):
+        return False
 
     # Score the release with movie-specific settings
     score = media_profile_service.score_release(release, profile, media_type="movie")
@@ -334,6 +380,9 @@ async def check_and_grab_show(conn, release, show, profile):
     profile is the resolved MediaProfile for the show's media_profile_id.
     """
     if not profile:
+        return False
+
+    if not _profileUsesIndexer(profile, "show", release):
         return False
 
     if not _title_matches(release.title, show["title"]):
@@ -390,6 +439,9 @@ async def check_and_download_anime(conn, release, anime, profile):
     if not profile:
         return False
 
+    if not _profileUsesIndexer(profile, "anime", release):
+        return False
+
     if not _title_matches(release.title, anime["title"]):
         return False
 
@@ -444,6 +496,9 @@ async def check_and_download_album(conn, release, album, profile):
     release's parsed quality tier to be allowed by the profile.
     """
     if not profile:
+        return False
+
+    if not _profileUsesIndexer(profile, "music", release):
         return False
 
     artistName = album.get("artist_name") or ""

@@ -27,6 +27,51 @@ SEED_ACTION_MAP = {
     "remove_delete": 3,
 }
 
+# Tag on torrents whose share limits are held at unlimited until the indexer's minimum
+# ratio and seed time are met. The seeding rules engine restores the normal limits then.
+SEED_HOLD_TAG = "kinora-seed-hold"
+
+
+async def indexer_minimum_for(torrent_hash: str) -> Optional[Dict[str, Any]]:
+    """
+    The enabled per-indexer seeding minimum of the indexer a torrent was downloaded from,
+    or None when that indexer has no minimum.
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT r.min_ratio, r.min_seed_minutes
+                FROM download_history h
+                JOIN indexer_seed_rules r ON lower(r.indexer) = lower(h.indexer)
+                WHERE h.torrent_hash = $1 AND r.enabled = TRUE
+                  AND (r.min_ratio > 0 OR r.min_seed_minutes > 0)
+                LIMIT 1
+                """,
+                torrent_hash,
+            )
+    except Exception as e:
+        logger.debug(f"Could not read the indexer seeding minimum for {torrent_hash[:8]}: {e}")
+        return None
+    return dict(row) if row else None
+
+
+async def hold_share_limits(client: "QBittorrentClient", torrent_hash: str) -> None:
+    """
+    Set a torrent's share limits to unlimited and tag it, so neither qBittorrent's own
+    limits nor the global seed action can pause or remove it before the indexer's
+    minimum is met. qBittorrent acts on whichever limit is reached first, so a minimum
+    that needs both a ratio and a seed time cannot be expressed as qBittorrent limits.
+    """
+    await client.set_share_limits(
+        torrent_hash,
+        ratio_limit=-2,
+        seeding_time_limit=-2,
+        inactive_seeding_time_limit=-2,
+    )
+    await client.set_tags(torrent_hash, [SEED_HOLD_TAG])
+
 
 async def get_global_seed_defaults() -> Dict[str, Any]:
     """
@@ -131,6 +176,13 @@ async def apply_seeding_limits(
                 await client.set_preferences({"max_ratio_act": act_value})
             except Exception as e:
                 logger.debug(f"Could not set max_ratio_act: {e}")
+
+        # A torrent from an indexer with a seeding minimum keeps unlimited share limits
+        # until the minimum is met. The seeding rules engine then applies the limits below.
+        if await indexer_minimum_for(torrent_hash) is not None:
+            await hold_share_limits(client, torrent_hash)
+            logger.info(f"Holding share limits for {torrent_hash[:8]} until the indexer's seeding minimum is met")
+            return
 
         ratio, seeding_time, inactive = resolve_share_limits(defaults, profile)
 

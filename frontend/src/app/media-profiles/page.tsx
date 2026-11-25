@@ -6,6 +6,9 @@ import { api } from "@/lib/api";
 import ISO6391 from "iso-639-1";
 import PageHeader from "@/components/PageHeader";
 import ConfirmModal from "@/components/ConfirmModal";
+import RenamePreviewModal, {
+	type RenamePreviewScope,
+} from "@/components/RenamePreviewModal";
 import {
 	MediaProfileFormData,
 	NavigationGroup,
@@ -20,7 +23,10 @@ import {
 	FileOutputGroup,
 } from "./components";
 import { ClipboardList } from "lucide-react";
-import { MUSIC_TIER_LABELS } from "./components/constants";
+import {
+	DEFAULT_NEVER_IMPORT_EXTENSIONS,
+	MUSIC_TIER_LABELS,
+} from "./components/constants";
 
 interface MediaProfile {
 	id: number;
@@ -102,6 +108,9 @@ interface MediaProfile {
 	use_hardlinks?: boolean;
 	illegal_char_replacement?: string;
 	colon_replacement?: string;
+	import_extra_files?: boolean;
+	never_import_extensions?: string[] | null;
+	safety_template?: string;
 	// Torrent validation settings
 	validation_enabled?: boolean;
 	validation_mode?: string;
@@ -116,6 +125,40 @@ interface MediaProfile {
 	inactive_seed_time_limit?: number | null;
 	seed_then_cleanup?: boolean;
 	auto_recovery?: boolean | null;
+}
+
+// Profile fields that decide file and folder names, per media type the rename preview covers.
+const NAMING_FIELDS_BY_TYPE: Record<string, (keyof MediaProfileFormData)[]> = {
+	movie: ["movie_naming_format", "movie_folder_format"],
+	show: ["show_naming_format", "show_folder_format"],
+	anime: ["anime_naming_format", "anime_folder_format"],
+	album: [
+		"music_artist_folder_format",
+		"music_album_folder_format",
+		"music_track_naming_format",
+		"music_multi_disc_format",
+	],
+};
+const SHARED_NAMING_FIELDS: (keyof MediaProfileFormData)[] = [
+	"illegal_char_replacement",
+	"colon_replacement",
+];
+
+// Media types whose naming changed between the stored profile and the saved form. Blank
+// stored values compare as the form defaults, matching how the editor fills them in.
+function namingChangedTypes(
+	before: MediaProfile,
+	after: MediaProfileFormData,
+): string[] {
+	const defaults = createDefaultFormData(before.languages?.[0] || "en");
+	const stored = before as unknown as Record<string, unknown>;
+	const differs = (fieldName: keyof MediaProfileFormData) =>
+		String(stored[fieldName] || defaults[fieldName] || "") !==
+		String(after[fieldName] || "");
+	const sharedChanged = SHARED_NAMING_FIELDS.some(differs);
+	return Object.entries(NAMING_FIELDS_BY_TYPE)
+		.filter(([, fields]) => sharedChanged || fields.some(differs))
+		.map(([mediaType]) => mediaType);
 }
 
 const LANGUAGES = ISO6391.getAllCodes().map((code) => ({
@@ -138,6 +181,15 @@ export default function MediaProfilesPage() {
 		message: string;
 		onConfirm: () => void;
 	}>({ isOpen: false, title: "", message: "", onConfirm: () => {} });
+	// Set after a save that changed naming. It offers a rename preview and renames nothing itself.
+	const [namingChange, setNamingChange] = useState<{
+		profileId: number;
+		profileName: string;
+		mediaTypes: string[];
+	} | null>(null);
+	const [renameScope, setRenameScope] = useState<RenamePreviewScope | null>(
+		null,
+	);
 
 	const getDefaultLanguage = () => {
 		if (typeof window === "undefined") return "en";
@@ -253,6 +305,9 @@ export default function MediaProfilesPage() {
 				use_hardlinks: data.use_hardlinks,
 				illegal_char_replacement: data.illegal_char_replacement,
 				colon_replacement: data.colon_replacement,
+				import_extra_files: data.import_extra_files,
+				safety_template: data.safety_template,
+				never_import_extensions: data.never_import_extensions,
 				// Torrent validation settings
 				validation_enabled: data.validation_enabled,
 				validation_mode: data.validation_mode,
@@ -374,6 +429,9 @@ export default function MediaProfilesPage() {
 				use_hardlinks: data.use_hardlinks,
 				illegal_char_replacement: data.illegal_char_replacement,
 				colon_replacement: data.colon_replacement,
+				import_extra_files: data.import_extra_files,
+				safety_template: data.safety_template,
+				never_import_extensions: data.never_import_extensions,
 				// Torrent validation settings
 				validation_enabled: data.validation_enabled,
 				validation_mode: data.validation_mode,
@@ -392,9 +450,22 @@ export default function MediaProfilesPage() {
 			});
 			return response.data;
 		},
-		onSuccess: () => {
+		onSuccess: (_data, variables) => {
+			const before = (profiles as MediaProfile[] | undefined)?.find(
+				(profile) => profile.id === variables.id,
+			);
+			const changedTypes = before
+				? namingChangedTypes(before, variables.data)
+				: [];
 			queryClient.invalidateQueries({ queryKey: ["media-profiles"] });
 			resetForm();
+			if (changedTypes.length > 0) {
+				setNamingChange({
+					profileId: variables.id,
+					profileName: variables.data.name,
+					mediaTypes: changedTypes,
+				});
+			}
 		},
 	});
 
@@ -539,6 +610,14 @@ export default function MediaProfilesPage() {
 			use_hardlinks: profile.use_hardlinks ?? true,
 			illegal_char_replacement: profile.illegal_char_replacement || "_",
 			colon_replacement: profile.colon_replacement || " -",
+			import_extra_files: profile.import_extra_files ?? true,
+			// Profiles saved before templates existed behave as open.
+			safety_template:
+				(profile.safety_template as "trusted" | "balanced" | "open") ??
+				"open",
+			never_import_extensions: profile.never_import_extensions ?? [
+				...DEFAULT_NEVER_IMPORT_EXTENSIONS,
+			],
 			// Torrent validation settings
 			validation_enabled: profile.validation_enabled ?? true,
 			validation_mode:
@@ -906,6 +985,18 @@ export default function MediaProfilesPage() {
 			});
 		}
 
+		// Safety template. Profiles saved before templates existed behave as open.
+		const templateNames: Record<string, string> = {
+			trusted: "Trusted",
+			balanced: "Balanced",
+			open: "Open",
+		};
+		const templateName = templateNames[profile.safety_template || "open"];
+		summaryItems.push({
+			label: "Safety Template",
+			value: templateName || profile.safety_template || "Open",
+		});
+
 		return summaryItems;
 	};
 
@@ -1145,6 +1236,46 @@ export default function MediaProfilesPage() {
 						onConfirm: () => {},
 					})
 				}
+			/>
+
+			<ConfirmModal
+				isOpen={namingChange !== null}
+				title="Naming format changed"
+				message={`The naming format of "${namingChange?.profileName ?? ""}" changed. Existing files keep their current names. Preview how files using this profile would be renamed?`}
+				confirmText="Preview renames"
+				cancelText="Not now"
+				variant="info"
+				onConfirm={() => {
+					if (namingChange) {
+						setRenameScope({
+							previewEndpoint: "/bulk/rename-all/preview",
+							previewBody: {
+								media_profile_id: namingChange.profileId,
+								media_types: namingChange.mediaTypes,
+							},
+							applyEndpoint: "/bulk/rename-all",
+						});
+					}
+					setNamingChange(null);
+				}}
+				onCancel={() => setNamingChange(null)}
+			/>
+
+			<RenamePreviewModal
+				isOpen={renameScope !== null}
+				title="Rename Files Using This Profile"
+				scope={renameScope}
+				onClose={() => setRenameScope(null)}
+				onApplied={(result) => {
+					const mediaTypes = new Set(
+						result.entries.map((entry) => entry.mediaType),
+					);
+					mediaTypes.forEach((mediaType) =>
+						queryClient.invalidateQueries({
+							queryKey: [mediaType],
+						}),
+					);
+				}}
 			/>
 		</div>
 	);

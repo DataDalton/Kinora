@@ -6,6 +6,7 @@ import os
 import shutil
 import json
 
+from app.services.jellyfin import queueLibraryUpdate, UPDATE_DELETED
 from app.db import get_db
 from app.db.repositories import ShowRepository, SeasonRepository, EpisodeRepository
 from app.api.v1.endpoints.auth import get_current_user, require_permission
@@ -317,6 +318,8 @@ async def delete_show_with_files(
                 filesDeleted.append(folderPath)
             except Exception as e:
                 errors.append(f"Failed to delete {folderPath}: {str(e)}")
+
+    queueLibraryUpdate(filesDeleted, UPDATE_DELETED)
 
     # Delete episodes and seasons first (cascading), then use repo for relations
     await conn.execute("DELETE FROM episodes WHERE show_id = $1", show_id)

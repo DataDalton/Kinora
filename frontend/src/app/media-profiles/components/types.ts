@@ -70,6 +70,11 @@ export interface MediaProfileFormData {
 	use_hardlinks: boolean;
 	illegal_char_replacement: string;
 	colon_replacement: string;
+	// Extra files imported with the main media
+	import_extra_files: boolean;
+	never_import_extensions: string[];
+	// Which releases the profile may download
+	safety_template: SafetyTemplate;
 	// Naming formats
 	movie_naming_format: string;
 	movie_folder_format: string;
@@ -130,7 +135,8 @@ export type MoviesTab = "indexers" | "quality" | "naming";
 export type TVShowsTab = "indexers" | "quality" | "naming" | "options";
 export type AnimeTab = "indexers" | "quality" | "naming" | "options";
 export type MusicTab = "indexers" | "quality" | "naming";
-export type SearchTab = "sorting" | "filters" | "timing";
+export type SearchTab = "sorting" | "filters" | "trust" | "timing";
+export type SafetyTemplate = "trusted" | "balanced" | "open";
 export type FileOutputTab = "files";
 
 export interface NavigationItem {

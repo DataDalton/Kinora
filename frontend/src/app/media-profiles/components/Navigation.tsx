@@ -100,6 +100,7 @@ const navigationStructure: NavigationItem[] = [
 		tabs: [
 			{ id: "sorting", label: "Sorting" },
 			{ id: "filters", label: "Filters" },
+			{ id: "trust", label: "Trust" },
 			{ id: "timing", label: "Timing" },
 		],
 	},

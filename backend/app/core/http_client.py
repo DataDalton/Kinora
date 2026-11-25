@@ -115,6 +115,29 @@ async def close_http_client():
         _client = None
 
 
+def _indexer_kwargs(kwargs: dict) -> dict:
+    """
+    Route a request through INDEXER_PROXY_URL when one is set. HTTP/3 runs over UDP and
+    cannot pass through an HTTP proxy, so proxied requests use HTTP/2.
+    """
+    from app.core.config import settings
+
+    if settings.INDEXER_PROXY_URL:
+        kwargs.setdefault("proxy", settings.INDEXER_PROXY_URL)
+        kwargs["http_version"] = "v2"
+    return kwargs
+
+
+async def indexer_get(url: str, **kwargs: Any) -> Response:
+    """GET for indexer sites, through the indexer proxy when one is configured."""
+    return await http_get(url, **_indexer_kwargs(kwargs))
+
+
+def indexer_request_kwargs(**kwargs: Any) -> dict:
+    """Request options for code that calls the shared client directly, with the indexer proxy applied."""
+    return _indexer_kwargs(kwargs)
+
+
 @retryWithBackoff
 async def http_get(url: str, **kwargs: Any) -> Response:
     """HTTP GET with HTTP/3 priority and automatic retry."""

@@ -4,9 +4,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException, s
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 import asyncpg
-from app.schemas.movie import MovieSearch
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, check_media_permission
 from app.schemas.user import User
+from app.services import download_episodes
 from app.db import get_db, get_pool
 from app.services.metadata.tmdb import tmdb_service
 from app.services.metadata.anilist import anilist_service
@@ -15,8 +15,12 @@ from app.services.automation.search_engine import search_engine
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.media_profile import MediaProfile
 from app.services.torrent_validator import validate_and_resume_torrent
+from app.services import hash_blocklist
+from app.services import release_trust
+from app.services.indexers.extto import extto_indexer
+from app.services.indexers import search_context
+from app.services.indexers.custom import registry as custom_indexers
 from app.services.folder_selector import folderSelector
-from app.services.folder_health import folderHealthMonitor
 from app.services.quality_definitions import (
     Resolution,
     Source,
@@ -42,6 +46,9 @@ class InteractiveSearchRequest(BaseModel):
     # indexer. The modal fires this first for instant results while the live sweep
     # runs as a second request.
     local_only: bool = False
+    # Profile whose safety template marks which results it allows. Falls back to the
+    # media item's profile, then to allowing everything.
+    profile_id: Optional[int] = None
 
 
 class DownloadReleaseRequest(BaseModel):
@@ -58,6 +65,13 @@ class DownloadReleaseRequest(BaseModel):
     seeders: Optional[int] = None
     root_folder_id: Optional[int] = None  # Override folder selection
     keep_monitoring: Optional[bool] = None  # explicit satisfied/monitoring override
+    # Trust details from the search result, recorded in download history.
+    uploader: Optional[str] = None
+    trust_category: Optional[str] = None
+    origin_sites: Optional[List[str]] = None
+    # Set when the user confirmed downloading a release the profile's template does not
+    # allow. The confirmation is logged with the user's name.
+    confirmed_outside_template: bool = False
 
 
 _MANUAL_GRAB_TABLE = {"movie": "movies", "show": "shows", "anime": "anime", "album": "albums", "music": "albums"}
@@ -614,11 +628,16 @@ async def get_search_options(
 
     # Get available indexers from the search engine based on media type
     if media_type == "anime":
-        available_indexers = [idx.name for idx in search_engine.anime_indexers]
+        available_indexers = [idx.name for idx in search_engine.anime_indexers] + [extto_indexer.name]
     elif media_type == "album":
-        available_indexers = [idx.name for idx in search_engine.music_indexers]
+        available_indexers = [idx.name for idx in search_engine.music_indexers] + [extto_indexer.name]
+    elif media_type in ("show", "episode"):
+        available_indexers = [idx.name for idx in search_engine.show_indexers] + [extto_indexer.name]
     else:
-        available_indexers = [idx.name for idx in search_engine.general_indexers]
+        available_indexers = [idx.name for idx in search_engine.general_indexers] + [extto_indexer.name]
+    # User-defined indexers enabled for search that cover this media type.
+    await custom_indexers.ensureLoaded()
+    available_indexers += [idx.name for idx in custom_indexers.searchIndexers(search_context.scopeFor(media_type))]
 
     # Get the media item and its profile
     media_profile = None
@@ -681,8 +700,8 @@ async def get_search_options(
     }
 
 
-def _format_interactive_release(release, from_cache: bool = False) -> Dict[str, Any]:
-    """Convert a TorrentRelease into the interactive search response shape."""
+def _format_interactive_release(release, from_cache: bool = False, template: Optional[str] = None) -> Dict[str, Any]:
+    """Convert a TorrentRelease into the interactive search response shape, with its trust details."""
     upload_date_str = ""
     if release.upload_date:
         upload_date_str = release.upload_date.isoformat()
@@ -690,6 +709,7 @@ def _format_interactive_release(release, from_cache: bool = False) -> Dict[str, 
     last_seen_at = ""
     if isinstance(release.raw_data, dict):
         last_seen_at = release.raw_data.get("last_seen_at") or ""
+    allowed, reason = release_trust.isAllowed(release, template)
 
     return {
         "title": release.title,
@@ -707,6 +727,12 @@ def _format_interactive_release(release, from_cache: bool = False) -> Dict[str, 
         "uploader": release.uploader or "",
         "from_cache": from_cache,
         "last_seen_at": last_seen_at,
+        "uploader_badge": release.uploader_badge,
+        "origin_sites": list(release.origin_sites or []),
+        "trust_category": release.trust_category,
+        "trust_label": release_trust.CATEGORY_LABELS.get(release.trust_category, "Unverified"),
+        "allowed_by_template": allowed,
+        "template_reason": reason,
     }
 
 
@@ -725,6 +751,7 @@ async def interactive_search(
 
     indexer_status = []
     all_releases = []
+    template = await _template_for_search(data.profile_id, data.media_type, data.media_id)
 
     # The quality filter is a text token for the live keyword sweep, but a
     # structured column filter for the local index, where ingest parsing already
@@ -743,7 +770,8 @@ async def interactive_search(
         if data.indexers:
             allowed_indexers = set(data.indexers)
             local_releases = [r for r in local_releases if r.indexer in allowed_indexers]
-        local_results = [_format_interactive_release(r, from_cache=True) for r in local_releases]
+        local_releases = await release_trust.annotate(local_releases)
+        local_results = [_format_interactive_release(r, from_cache=True, template=template) for r in local_releases]
         local_results.sort(key=lambda x: x["seeders"], reverse=True)
         return {
             "results": local_results,
@@ -760,6 +788,8 @@ async def interactive_search(
     for idx in search_engine.music_indexers:
         if idx.name not in indexer_map:
             indexer_map[idx.name] = (idx, "music")
+    # ext.to is searched only when chosen, for every media type.
+    indexer_map[extto_indexer.name] = (extto_indexer, "music" if data.media_type in ("music", "album") else None)
 
     # Determine default indexers based on media type
     if data.media_type == "anime":
@@ -769,8 +799,17 @@ async def interactive_search(
         # Set music category for music indexers
         for idx in search_engine.music_indexers:
             indexer_map[idx.name] = (idx, "music")
+    elif data.media_type in ("show", "episode"):
+        default_indexers = [idx.name for idx in search_engine.show_indexers]
     else:
         default_indexers = [idx.name for idx in search_engine.general_indexers]
+
+    # User-defined indexers enabled for search that cover this media type are searched
+    # by default, like the built-in indexers of that type.
+    await custom_indexers.ensureLoaded()
+    for idx in custom_indexers.searchIndexers(search_context.scopeFor(data.media_type)):
+        indexer_map[idx.name] = (idx, "music" if data.media_type in ("music", "album") else None)
+        default_indexers.append(idx.name)
 
     # Use selected indexers if provided, otherwise use defaults for media type
     selected_indexers = data.indexers if data.indexers else default_indexers
@@ -779,12 +818,22 @@ async def interactive_search(
     valid_indexers = [i for i in selected_indexers if i in indexer_map]
 
     # Search all selected indexers concurrently. Results stay live (no cache), the
-    # total wait is the slowest indexer instead of the sum of all of them.
+    # total wait is the slowest indexer instead of the sum of all of them. The item's
+    # ids go to indexers that search by id.
     search_tasks = [
         indexer_map[indexer_name][0].search(search_query, indexer_map[indexer_name][1], limit=50)
         for indexer_name in valid_indexers
     ]
-    search_outcomes = await asyncio.gather(*search_tasks, return_exceptions=True)
+    from app.services import release_matching
+
+    itemContext = await search_context.forItem(None, data.media_type, data.media_id)
+    season, episode = release_matching.seasonEpisodeFromQuery(data.query)
+    if season is not None:
+        itemContext.season = season
+        itemContext.episode = episode
+        itemContext.singleEpisode = episode is not None
+    with search_context.using(itemContext):
+        search_outcomes = await asyncio.gather(*search_tasks, return_exceptions=True)
 
     for indexer_name, outcome in zip(valid_indexers, search_outcomes):
         if isinstance(outcome, Exception):
@@ -817,15 +866,8 @@ async def interactive_search(
             }
         )
 
-    # Deduplicate by info_hash
-    seen_hashes = set()
-    unique_releases = []
-    for release in all_releases:
-        if release.info_hash and release.info_hash in seen_hashes:
-            continue
-        if release.info_hash:
-            seen_hashes.add(release.info_hash)
-        unique_releases.append(release)
+    # Merge copies of one torrent found through several indexers and set trust.
+    unique_releases = await release_trust.annotate(all_releases)
 
     # Persist the live sweep into the local index.
     await release_index.upsertReleases(unique_releases)
@@ -840,10 +882,12 @@ async def interactive_search(
     if data.indexers:
         allowed_indexers = set(data.indexers)
         local_releases = [r for r in local_releases if r.indexer in allowed_indexers]
-    index_extras = [r for r in local_releases if release_index.dedupeKey(r) not in live_keys]
+    index_extras = await release_trust.annotate(
+        [r for r in local_releases if release_index.dedupeKey(r) not in live_keys]
+    )
 
-    results = [_format_interactive_release(r, from_cache=False) for r in unique_releases]
-    results.extend(_format_interactive_release(r, from_cache=True) for r in index_extras)
+    results = [_format_interactive_release(r, from_cache=False, template=template) for r in unique_releases]
+    results.extend(_format_interactive_release(r, from_cache=True, template=template) for r in index_extras)
 
     # Sort by seeders descending
     results.sort(key=lambda x: x["seeders"], reverse=True)
@@ -852,6 +896,87 @@ async def interactive_search(
         "results": results,
         "indexers": indexer_status,
         "source": "live",
+        "safety_template": template,
+    }
+
+
+async def _template_for_search(profile_id: Optional[int], media_type: Optional[str], media_id: Optional[int]):
+    """The safety template of the chosen profile, or of the media item's profile, or None."""
+    from app.db import get_pool
+
+    table = {"movie": "movies", "show": "shows", "anime": "anime", "album": "albums", "music": "albums"}.get(
+        media_type or ""
+    )
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            if profile_id:
+                return await conn.fetchval("SELECT safety_template FROM media_profiles WHERE id = $1", profile_id)
+            if table and media_id:
+                return await conn.fetchval(
+                    f"SELECT mp.safety_template FROM {table} m JOIN media_profiles mp ON mp.id = m.media_profile_id "
+                    f"WHERE m.id = $1",
+                    media_id,
+                )
+    except Exception as e:
+        print(f"Could not read the safety template for search: {e}")
+    return None
+
+
+class SiteCheckRequest(BaseModel):
+    """An ext.to search result to read every listed site for."""
+
+    indexer: str
+    indexer_page_url: str
+    title: Optional[str] = None
+    uploader: Optional[str] = None
+    uploader_badge: Optional[str] = None
+    origin_sites: List[str] = []
+    profile_id: Optional[int] = None
+    media_type: Optional[str] = None
+    media_id: Optional[int] = None
+
+
+@router.post("/check-sites")
+async def check_release_sites(
+    data: SiteCheckRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Read every site an ext.to release is listed on from its detail page, and whether the
+    profile's safety template allows the release with that list. A search result names
+    only the first site, so a release outside Balanced can turn out to be allowed. Only
+    ext.to detail pages are read. Requires the same download permission as downloading
+    the release, such as movies.download.
+    """
+    from app.services import release_index
+    from app.services.indexers.base import TorrentRelease
+
+    check_media_permission(current_user, data.media_type, "download")
+    if data.indexer != extto_indexer.name or not data.indexer_page_url.startswith(extto_indexer.base_url + "/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only ext.to releases list more sites")
+    release = TorrentRelease(
+        title=data.title or "",
+        indexer=extto_indexer.name,
+        detail_url=data.indexer_page_url,
+        uploader=data.uploader,
+        uploader_badge=data.uploader_badge,
+        origin_sites=list(data.origin_sites),
+    )
+    await release_trust.annotate([release])
+    try:
+        await extto_indexer.refresh_sites(release)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not read the ext.to page: {e}")
+    await release_index.addOriginSites(release.indexer, release.detail_url, release.origin_sites)
+    template = await _template_for_search(data.profile_id, data.media_type, data.media_id)
+    allowed, reason = release_trust.isAllowed(release, template)
+    return {
+        "origin_sites": list(release.origin_sites),
+        "trust_category": release.trust_category,
+        "trust_label": release_trust.CATEGORY_LABELS.get(release.trust_category, "Unverified"),
+        "allowed_by_template": allowed,
+        "template_reason": reason,
     }
 
 
@@ -862,8 +987,10 @@ async def download_release(
 ):
     """
     Download a selected release from search results.
-    Selects appropriate root folder and sends to qBittorrent.
+    Selects appropriate root folder and sends to qBittorrent. Requires the download
+    permission for the release's media type, such as movies.download.
     """
+    check_media_permission(current_user, data.media_type, "download")
     try:
         # Get torrent source (prefer .torrent URL, fallback to magnet)
         torrent_source = data.torrent_url or data.magnet_link
@@ -976,6 +1103,14 @@ async def download_release(
             except Exception as preflightError:
                 print(f"Free-space preflight skipped: {preflightError}")
 
+            if await hash_blocklist.isHashBlocked(
+                conn, hash_blocklist.infoHashFromSource(data.magnet_link), data.media_type, data.media_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This torrent is blocklisted because it failed validation before",
+                )
+
             # Add torrent paused with validating tag
             baseTags = ["kinora", "validating"]
             if data.indexer:
@@ -1008,9 +1143,13 @@ async def download_release(
                 INSERT INTO download_history (
                     torrent_hash, media_type, media_id, episode_id, root_folder_id,
                     torrent_title, indexer, quality, size, magnet_link, torrent_url,
-                    info_hash, indexer_page_url, grab_mode, status, created_at
+                    info_hash, indexer_page_url, grab_mode, status, created_at,
+                    uploader, trust_category, safety_template, origin_sites
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'manual', 'downloading', NOW())
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'manual', 'downloading', NOW(),
+                    $14, $15, $16, $17
+                )
                 ON CONFLICT (torrent_hash) DO UPDATE SET
                     root_folder_id = $5,
                     torrent_title = EXCLUDED.torrent_title,
@@ -1019,6 +1158,10 @@ async def download_release(
                     info_hash = COALESCE(EXCLUDED.info_hash, download_history.info_hash),
                     indexer_page_url = COALESCE(EXCLUDED.indexer_page_url, download_history.indexer_page_url),
                     grab_mode = 'manual',
+                    uploader = EXCLUDED.uploader,
+                    trust_category = EXCLUDED.trust_category,
+                    safety_template = EXCLUDED.safety_template,
+                    origin_sites = EXCLUDED.origin_sites,
                     updated_at = NOW()
                 """,
                 torrentHash,
@@ -1034,50 +1177,45 @@ async def download_release(
                 data.torrent_url,
                 torrentHash,
                 data.indexer_page_url,
+                data.uploader,
+                data.trust_category,
+                getattr(profile, "safety_template", None) if profile else None,
+                data.origin_sites or [],
             )
+            await download_episodes.recordCoveredEpisodes(
+                conn, torrentHash, data.media_type, data.media_id, torrentTitle, data.episode_id
+            )
+            if data.confirmed_outside_template:
+                print(
+                    f"Manual download outside the safety template confirmed by "
+                    f"{getattr(current_user, 'username', 'unknown user')}: {torrentTitle}"
+                )
 
             # Fix double-grab: mark the item as downloading so the background searcher
             # does not grab it again. Also set the satisfied/keep-monitoring default from
             # whether the grabbed release meets the profile.
             meetsProfile, monitoringMode = await _apply_manual_grab_state(conn, data, profile)
 
-        # Trigger validation immediately after adding
-        if profile:
-            validationResult = await validate_and_resume_torrent(
-                torrent_hash=torrentHash,
-                client=client,
-                profile=profile,
-                media_type=data.media_type,
-            )
-            return {
-                "success": True,
-                "hash": torrentHash,
-                "root_folder_id": folder["id"],
-                "root_folder_name": folder["name"],
-                "download_path": folder["download_path"],
-                "meets_profile": meetsProfile,
-                "monitoring_mode": (
-                    "satisfied" if monitoringMode is False else ("monitoring" if monitoringMode else None)
-                ),
-                "message": f"Download queued to '{folder['name']}': {validationResult.message}",
-            }
-        else:
-            # No profile found, resume without validation
-            await client.remove_tags(torrentHash, ["validating"])
-            await client.set_tags(torrentHash, ["validated"])
-            await client.resume_torrent(torrentHash)
-            return {
-                "success": True,
-                "hash": torrentHash,
-                "root_folder_id": folder["id"],
-                "root_folder_name": folder["name"],
-                "download_path": folder["download_path"],
-                "meets_profile": meetsProfile,
-                "monitoring_mode": (
-                    "satisfied" if monitoringMode is False else ("monitoring" if monitoringMode else None)
-                ),
-                "message": f"Download started to '{folder['name']}' (no profile for validation)",
-            }
+        # Validate immediately after adding. An item with no profile is checked with the
+        # built-in default rules, so no manual download skips validation.
+        validationResult = await validate_and_resume_torrent(
+            torrent_hash=torrentHash,
+            client=client,
+            profile=profile,
+            media_type=data.media_type,
+        )
+        return {
+            "success": True,
+            "hash": torrentHash,
+            "root_folder_id": folder["id"],
+            "root_folder_name": folder["name"],
+            "download_path": folder["download_path"],
+            "meets_profile": meetsProfile,
+            "monitoring_mode": (
+                "satisfied" if monitoringMode is False else ("monitoring" if monitoringMode else None)
+            ),
+            "message": f"Download queued to '{folder['name']}': {validationResult.message}",
+        }
 
     except HTTPException:
         raise

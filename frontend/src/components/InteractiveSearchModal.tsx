@@ -17,8 +17,10 @@ import {
 	ChevronDown,
 	User,
 	ShieldCheck,
+	ShieldAlert,
 } from "lucide-react";
 import { useToast } from "@/components/toast/ToastProvider";
+import { usePermissions } from "@/contexts/PermissionContext";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { getValidationPreview } from "@/lib/api/downloads";
 
@@ -40,6 +42,14 @@ interface TorrentResult {
 	from_cache?: boolean;
 	// When the index last confirmed this release on its indexer (ISO timestamp).
 	last_seen_at?: string;
+	// Trust details from the backend. trust_category is null for unverified uploaders.
+	uploader_badge?: string | null;
+	origin_sites?: string[];
+	trust_category?: string | null;
+	trust_label?: string;
+	// False when the profile's safety template does not allow the release.
+	allowed_by_template?: boolean;
+	template_reason?: string | null;
 }
 
 interface IndexerStatus {
@@ -193,6 +203,17 @@ export default function InteractiveSearchModal({
 }: InteractiveSearchModalProps) {
 	const queryClient = useQueryClient();
 	const toast = useToast();
+	const { canDownload } = usePermissions();
+	// Downloading a release needs the download permission for its media type.
+	const canDownloadHere = canDownload(
+		mediaType === "movie"
+			? "movies"
+			: mediaType === "show"
+				? "shows"
+				: mediaType === "anime"
+					? "anime"
+					: "music",
+	);
 	const toastMedia = { poster: mediaPoster, name: mediaTitle };
 	// Resolved library-item id. Starts from the prop and is filled in by ensureMediaId on
 	// the first grab when the item is added lazily.
@@ -226,6 +247,18 @@ export default function InteractiveSearchModal({
 	const [pendingChoice, setPendingChoice] = useState<
 		"satisfied" | "monitoring"
 	>("monitoring");
+	// Set once the user ticks the box to download a release the template does not allow.
+	const [outsideTemplateConfirmed, setOutsideTemplateConfirmed] =
+		useState(false);
+	// Full site lists read from ext.to detail pages, keyed by detail page URL. A search
+	// result names only the first site, so these replace the result's trust details.
+	const [siteChecks, setSiteChecks] = useState<
+		Record<string, Partial<TorrentResult>>
+	>({});
+	// Detail page URL of the release whose sites are being read, if any.
+	const [checkingSitesFor, setCheckingSitesFor] = useState<string | null>(
+		null,
+	);
 	// Instant results from the local release index, shown while the live indexer
 	// sweep is still running. Replaced by the live response when it lands.
 	const [localResults, setLocalResults] = useState<TorrentResult[] | null>(
@@ -369,6 +402,7 @@ export default function InteractiveSearchModal({
 				episode_id: episodeId,
 				indexers: selectedIndexers.length > 0 ? selectedIndexers : null,
 				quality: selectedQuality !== "all" ? selectedQuality : null,
+				profile_id: profileId ?? null,
 			});
 			const data = response.data as SearchResponse;
 			if (data.indexers) {
@@ -413,6 +447,11 @@ export default function InteractiveSearchModal({
 				// Chosen before the grab: TRUE keeps monitoring for upgrades, FALSE marks the item
 				// satisfied. Undefined lets the backend decide from the profile score.
 				keep_monitoring: keepMonitoring,
+				uploader: result.uploader || null,
+				trust_category: result.trust_category ?? null,
+				origin_sites: result.origin_sites ?? [],
+				confirmed_outside_template:
+					result.allowed_by_template === false,
 			});
 			return response.data;
 		},
@@ -542,6 +581,7 @@ export default function InteractiveSearchModal({
 			indexers: selectedIndexers.length > 0 ? selectedIndexers : null,
 			quality: selectedQuality !== "all" ? selectedQuality : null,
 			local_only: true,
+			profile_id: profileId ?? null,
 		})
 			.then((response) => {
 				if (seq !== localSearchSeq.current) return;
@@ -601,7 +641,15 @@ export default function InteractiveSearchModal({
 	const showingLocalWhileLive =
 		!searchResults && !!localResults && isFetching;
 	const processedResults = activeResults
-		? sortResults(filterResults(activeResults))
+		? sortResults(
+				filterResults(
+					activeResults.map((r) =>
+						siteChecks[r.indexer_page_url]
+							? { ...r, ...siteChecks[r.indexer_page_url] }
+							: r,
+					),
+				),
+			)
 		: [];
 	// A pasted magnet / .torrent URL shows as the only result; otherwise show indexer results.
 	const displayResults = manualRelease ? [manualRelease] : processedResults;
@@ -611,11 +659,53 @@ export default function InteractiveSearchModal({
 		mediaType,
 	);
 
+	// Read every site an ext.to release is listed on. When the full list puts it inside
+	// the template, the row and the open confirmation update and no override is needed.
+	const checkReleaseSites = async (result: TorrentResult) => {
+		const pageUrl = result.indexer_page_url;
+		setCheckingSitesFor(pageUrl);
+		try {
+			const response = await api.post("/search/check-sites", {
+				indexer: result.indexer,
+				indexer_page_url: pageUrl,
+				title: result.title,
+				uploader: result.uploader || null,
+				uploader_badge: result.uploader_badge ?? null,
+				origin_sites: result.origin_sites ?? [],
+				profile_id: profileId ?? null,
+				media_type: mediaType,
+				media_id: effectiveMediaId,
+			});
+			const update = response.data as Partial<TorrentResult>;
+			setSiteChecks((prev) => ({ ...prev, [pageUrl]: update }));
+			setPendingGrab((prev) =>
+				prev && prev.indexer_page_url === pageUrl
+					? { ...prev, ...update }
+					: prev,
+			);
+		} catch {
+			// The release keeps its search result details and the override stays available.
+		} finally {
+			setCheckingSitesFor((current) =>
+				current === pageUrl ? null : current,
+			);
+		}
+	};
+
 	// Start a grab: confirm the satisfied/keep-monitoring choice first where it applies.
 	const startGrab = (result: TorrentResult) => {
-		if (monitoringApplies) {
+		if (monitoringApplies || result.allowed_by_template === false) {
 			setPendingChoice("monitoring");
+			setOutsideTemplateConfirmed(false);
 			setPendingGrab(result);
+			if (
+				result.allowed_by_template === false &&
+				result.indexer === "ext.to" &&
+				result.indexer_page_url &&
+				!siteChecks[result.indexer_page_url]
+			) {
+				void checkReleaseSites(result);
+			}
 		} else {
 			downloadMutation.mutate({ result });
 		}
@@ -1065,7 +1155,11 @@ export default function InteractiveSearchModal({
 							{displayResults.map((result, index) => (
 								<div
 									key={index}
-									className="bg-muted/50 rounded-lg p-4 border border-border hover:border-primary/50 transition"
+									className={`bg-muted/50 rounded-lg p-4 border border-border hover:border-primary/50 transition ${
+										result.allowed_by_template === false
+											? "opacity-60"
+											: ""
+									}`}
 								>
 									<div className="flex items-start justify-between gap-4">
 										<div className="flex-1 min-w-0">
@@ -1118,9 +1212,54 @@ export default function InteractiveSearchModal({
 													{result.indexer}
 												</span>
 												{result.uploader && (
-													<span className="flex items-center gap-1">
-														<User className="w-3.5 h-3.5" />
+													<span
+														className={`flex items-center gap-1 ${
+															result.trust_category
+																? "text-green-500"
+																: ""
+														}`}
+														title={
+															result.trust_label ||
+															"Unverified"
+														}
+													>
+														{result.trust_category ? (
+															<ShieldCheck className="w-3.5 h-3.5" />
+														) : (
+															<User className="w-3.5 h-3.5" />
+														)}
 														{result.uploader}
+													</span>
+												)}
+												{!result.uploader &&
+													result.trust_category && (
+														<span
+															className="flex items-center gap-1 text-green-500"
+															title={
+																result.trust_label
+															}
+														>
+															<ShieldCheck className="w-3.5 h-3.5" />
+															{result.trust_label}
+														</span>
+													)}
+												{(
+													result.origin_sites || []
+												).map((site) => (
+													<span
+														key={site}
+														className="px-2 py-0.5 bg-muted rounded"
+														title="Listed on this site"
+													>
+														{site}
+													</span>
+												))}
+												{result.allowed_by_template ===
+													false && (
+													<span className="flex items-center gap-1 text-destructive">
+														<ShieldAlert className="w-3.5 h-3.5" />
+														{result.template_reason ||
+															"Not allowed by this profile's template"}
 													</span>
 												)}
 												{result.from_cache && (
@@ -1143,10 +1282,15 @@ export default function InteractiveSearchModal({
 													startGrab(result)
 												}
 												disabled={
-													downloadMutation.isPending
+													downloadMutation.isPending ||
+													!canDownloadHere
 												}
 												className="p-2 bg-green-600 text-white rounded-lg hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-												title="Download"
+												title={
+													canDownloadHere
+														? "Download"
+														: "Downloading needs the download permission for this media type"
+												}
 											>
 												{downloadMutation.isPending ? (
 													<Loader2 className="w-4 h-4 animate-spin" />
@@ -1204,6 +1348,41 @@ export default function InteractiveSearchModal({
 						>
 							{pendingGrab.title}
 						</p>
+						{pendingGrab.allowed_by_template === false && (
+							<div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm">
+								<p className="flex items-center gap-2 font-medium text-destructive mb-1">
+									<ShieldAlert className="w-4 h-4" />
+									Outside this profile&apos;s safety template
+								</p>
+								<p className="text-xs text-muted-foreground mb-2">
+									{pendingGrab.template_reason ||
+										"The profile's template does not allow this release."}{" "}
+									The torrent is still validated before it
+									downloads, and your choice is logged.
+								</p>
+								{checkingSitesFor ===
+									pendingGrab.indexer_page_url && (
+									<p className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+										<Loader2 className="w-3.5 h-3.5 animate-spin" />
+										Checking every site this release is
+										listed on
+									</p>
+								)}
+								<label className="flex items-center gap-2 text-xs cursor-pointer">
+									<input
+										type="checkbox"
+										checked={outsideTemplateConfirmed}
+										onChange={(e) =>
+											setOutsideTemplateConfirmed(
+												e.target.checked,
+											)
+										}
+										className="cursor-pointer"
+									/>
+									Download anyway
+								</label>
+							</div>
+						)}
 						<div className="space-y-2 mb-5">
 							<label className="flex items-start gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/50">
 								<input
@@ -1264,7 +1443,14 @@ export default function InteractiveSearchModal({
 										keepMonitoring,
 									});
 								}}
-								disabled={downloadMutation.isPending}
+								disabled={
+									downloadMutation.isPending ||
+									checkingSitesFor ===
+										pendingGrab.indexer_page_url ||
+									(pendingGrab.allowed_by_template ===
+										false &&
+										!outsideTemplateConfirmed)
+								}
 								className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition cursor-pointer disabled:opacity-50 flex items-center gap-2"
 							>
 								{downloadMutation.isPending ? (

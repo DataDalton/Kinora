@@ -6,12 +6,12 @@ import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { X, Check } from "lucide-react";
 import { MediaProfileFormData, MusicTab } from "../types";
 import {
-	INDEXERS_BY_TYPE,
 	MUSIC_PRESETS,
 	MUSIC_QUALITY_GROUPS,
 	MUSIC_QUALITY_TIERS_HIGH_TO_LOW,
 	MUSIC_TIER_LABELS,
 } from "../constants";
+import { useIndexerOptions } from "../useIndexerOptions";
 
 const MUSIC_TOKENS = [
 	{ token: "{artist}", description: "Artist name", example: "Pink Floyd" },
@@ -62,6 +62,7 @@ export default function MusicGroup({
 	setFormData,
 	activeTab,
 }: MusicGroupProps) {
+	const musicIndexerOptions = useIndexerOptions("music");
 	const [showBuilder, setShowBuilder] = useState(false);
 	const [activeField, setActiveField] = useState<FieldType>("track");
 	const builderBackdropProps = useModalDismiss({
@@ -135,7 +136,7 @@ export default function MusicGroup({
 					Indexers for music searches
 				</p>
 				<div className="flex flex-wrap gap-2 p-3 bg-muted/50 rounded-lg border border-border">
-					{INDEXERS_BY_TYPE.music.map((indexer) => {
+					{musicIndexerOptions.map((indexer) => {
 						const index = formData.music_indexers.indexOf(indexer);
 						const isSelected = index !== -1;
 						return (

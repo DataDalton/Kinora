@@ -5,6 +5,7 @@ import asyncpg
 import os
 import shutil
 
+from app.services.jellyfin import queueLibraryUpdate, UPDATE_DELETED
 from app.db import get_db
 from app.db.repositories import MovieRepository
 from app.schemas.movie import Movie, MovieCreate, MovieUpdate
@@ -267,6 +268,8 @@ async def delete_movie_with_files(
                 filesDeleted.append(filePath)
         except Exception as e:
             errors.append(f"Failed to delete {filePath}: {str(e)}")
+
+    queueLibraryUpdate(filesDeleted, UPDATE_DELETED)
 
     await repo.deleteWithRelations(movie_id)
 

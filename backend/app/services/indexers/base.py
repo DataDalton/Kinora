@@ -1,7 +1,30 @@
+import re
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+
+from app.services.release_language import detectLanguage
+
+_CAM_TOKENS = {"CAM", "CAMRIP", "HDCAM", "CAMHD"}
+_TELESYNC_TOKENS = {"TS", "HDTS", "TELESYNC", "TSRIP", "PDVD", "PREDVD", "TC", "HDTC", "TELECINE"}
+_SCREENER_TOKENS = {"DVDSCR", "SCREENER", "SCR", "BDSCR", "WEBSCR"}
+
+
+def detect_theater_source(title: Optional[str]) -> Optional[str]:
+    """
+    CAM, TELESYNC, DVDSCR or SCREENER when the title marks a theater recording or
+    screener, matched as whole words so DTS, SHORTS or CAMERON never count. Checked
+    before any other source, so Movie.2024.CAM.BluRay is a CAM.
+    """
+    tokens = set(re.split(r"[^A-Z0-9]+", (title or "").upper()))
+    if tokens & _CAM_TOKENS:
+        return "CAM"
+    if tokens & _TELESYNC_TOKENS:
+        return "TELESYNC"
+    if tokens & _SCREENER_TOKENS:
+        return "DVDSCR" if "DVDSCR" in tokens else "SCREENER"
+    return None
 
 
 @dataclass
@@ -45,6 +68,14 @@ class TorrentRelease:
     artist: Optional[str] = None
     album: Optional[str] = None
     year: Optional[int] = None
+    # Trust signals. uploader_badge is set by the indexer that shows one: ext_verified for
+    # ext.to's Trusted Uploader badge, nyaa_trusted or nyaa_remake for Nyaa's row colors.
+    # origin_sites lists every site the torrent is known to be listed on, such as 1337x
+    # or tpb. trust_category is filled in by release_trust after duplicate copies of the
+    # same torrent are merged.
+    uploader_badge: Optional[str] = None
+    origin_sites: List[str] = field(default_factory=list)
+    trust_category: Optional[str] = None
     raw_data: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -79,7 +110,6 @@ class BaseIndexer(ABC):
 
     name: str = ""
     base_url: str = ""
-    alternative_urls: List[str] = []
     requires_cloudflare_bypass: bool = False
     categories: Dict[str, str] = {}
 
@@ -167,9 +197,12 @@ class BaseIndexer(ABC):
             codec = "VP9"
 
         # Source (REMUX, BLURAY, WEB-DL, WEBRIP, DVD, HDTV, SDTV, DVDSCR, SCREENER, TELESYNC, CAM)
-        # Check most specific patterns first to avoid false matches
-        source = None
-        if "REMUX" in title_upper:
+        # Theater recordings are checked first and as whole words, so a title such as
+        # Movie.2024.CAM.BluRay is labeled CAM and words like DTS or CAMERON never match.
+        source = detect_theater_source(title_upper)
+        if source is not None:
+            pass  # A theater recording keeps that label whatever else the title says.
+        elif "REMUX" in title_upper:
             source = "REMUX"
         elif "BLURAY" in title_upper or "BLU-RAY" in title_upper or "BDRIP" in title_upper or "BRRip" in title_upper:
             source = "BLURAY"
@@ -177,20 +210,14 @@ class BaseIndexer(ABC):
             source = "WEB-DL"
         elif "WEBRIP" in title_upper or "WEB-RIP" in title_upper or "WEB.RIP" in title_upper:
             source = "WEBRIP"
-        elif "DVDSCR" in title_upper or "DVD-SCR" in title_upper or "DVDSCREENER" in title_upper:
+        elif "DVD-SCR" in title_upper or "DVDSCREENER" in title_upper:
             source = "DVDSCR"
         elif "DVDRIP" in title_upper or "DVD-RIP" in title_upper:
             source = "DVD"
-        elif "SCREENER" in title_upper or ("SCR" in title_upper and "DVD" not in title_upper):
-            source = "SCREENER"
-        elif "TELESYNC" in title_upper or ("TS" in title_upper and "ATMOS" not in title_upper):
-            source = "TELESYNC"
         elif "HDTV" in title_upper:
             source = "HDTV"
         elif "SDTV" in title_upper:
             source = "SDTV"
-        elif "CAM" in title_upper or "CAMRIP" in title_upper:
-            source = "CAM"
         elif "DVD" in title_upper:
             source = "DVD"
 
@@ -262,40 +289,8 @@ class BaseIndexer(ABC):
         elif "THEATRICAL" in title_upper:
             edition = "Theatrical"
 
-        # Language (default to English if not specified)
-        language = None
-        language_patterns = {
-            "MULTI": "multi",
-            "ENGLISH": "en",
-            "SPANISH": "es",
-            "FRENCH": "fr",
-            "GERMAN": "de",
-            "ITALIAN": "it",
-            "JAPANESE": "ja",
-            "KOREAN": "ko",
-            "CHINESE": "zh",
-            "PORTUGUESE": "pt",
-            "RUSSIAN": "ru",
-            "HINDI": "hi",
-            "ARABIC": "ar",
-            "DUTCH": "nl",
-            "POLISH": "pl",
-            "TURKISH": "tr",
-        }
-        for key, code in language_patterns.items():
-            if key in title_upper:
-                language = code
-                break
-
-        # Check for language codes in brackets
-        if not language:
-            lang_match = re.search(r"\[([A-Z]{2})\]", title_upper)
-            if lang_match:
-                language = lang_match.group(1).lower()
-
-        # Default to English
-        if not language:
-            language = "en"
+        # Language from the tag area after the media title, English when untagged
+        language = detectLanguage(title)
 
         # Release group (usually at the end in brackets or after dash)
         release_group = None

@@ -151,6 +151,48 @@ def require_permission(permission: str):
     return dependency
 
 
+# Permission prefix for each media type a route or request can name.
+_MEDIA_PERMISSION_PREFIX = {
+    "movie": "movies",
+    "movies": "movies",
+    "show": "shows",
+    "shows": "shows",
+    "episode": "shows",
+    "anime": "anime",
+    "album": "music",
+    "music": "music",
+    "track": "music",
+    "artist": "music",
+}
+
+
+def check_media_permission(current_user, media_type: Optional[str], action: str) -> None:
+    """
+    Raise 403 unless the user holds the action permission for the media type, such as
+    movies.manage or music.download. An unknown media type needs system.admin.
+    """
+    prefix = _MEDIA_PERMISSION_PREFIX.get((media_type or "").lower())
+    required = f"{prefix}.{action}" if prefix else "system.admin"
+    if required not in (getattr(current_user, "permissions", None) or []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission '{required}' required",
+        )
+
+
+def require_media_permission(action: str):
+    """Dependency for routes with a media_type path parameter, checking {type}.{action}."""
+
+    async def dependency(
+        media_type: str,
+        current_user: UserWithPermissions = Depends(get_current_user),
+    ) -> UserWithPermissions:
+        check_media_permission(current_user, media_type, action)
+        return current_user
+
+    return dependency
+
+
 def require_any_permission(*permissions: str):
     """Factory function requiring any one of multiple permissions."""
 

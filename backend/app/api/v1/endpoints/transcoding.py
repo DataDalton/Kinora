@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from app.db import get_db
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_permission
 from app.schemas.user import User
 from app.schemas.transcoding import (
     TranscodingProfileCreate,
@@ -31,20 +31,18 @@ async def get_hardware_devices(
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Get available hardware acceleration devices"""
-    rows = await conn.fetch(
-        """
+    rows = await conn.fetch("""
         SELECT * FROM hardware_accel_devices
         WHERE is_available = true
         ORDER BY device_type, device_index
-        """
-    )
+        """)
     return [dict(row) for row in rows]
 
 
 @router.post("/hardware/detect")
 async def detect_hardware_devices(
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
 ):
     """Detect and save hardware acceleration devices"""
 
@@ -75,9 +73,7 @@ async def get_transcoding_profile(
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Get transcoding profile by ID"""
-    row = await conn.fetchrow(
-        "SELECT * FROM transcoding_profiles WHERE id = $1", profile_id
-    )
+    row = await conn.fetchrow("SELECT * FROM transcoding_profiles WHERE id = $1", profile_id)
 
     if not row:
         raise HTTPException(
@@ -95,13 +91,11 @@ async def get_transcoding_profile(
 )
 async def create_transcoding_profile(
     profile: TranscodingProfileCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Create a new transcoding profile"""
-    existing = await conn.fetchrow(
-        "SELECT id FROM transcoding_profiles WHERE name = $1", profile.name
-    )
+    existing = await conn.fetchrow("SELECT id FROM transcoding_profiles WHERE name = $1", profile.name)
 
     if existing:
         raise HTTPException(
@@ -145,13 +139,11 @@ async def create_transcoding_profile(
 async def update_transcoding_profile(
     profile_id: int,
     profile: TranscodingProfileUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Update transcoding profile"""
-    existing = await conn.fetchrow(
-        "SELECT * FROM transcoding_profiles WHERE id = $1", profile_id
-    )
+    existing = await conn.fetchrow("SELECT * FROM transcoding_profiles WHERE id = $1", profile_id)
 
     if not existing:
         raise HTTPException(
@@ -191,13 +183,11 @@ async def update_transcoding_profile(
 @router.delete("/profiles/{profile_id}")
 async def delete_transcoding_profile(
     profile_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Delete transcoding profile"""
-    in_use = await conn.fetchval(
-        "SELECT COUNT(*) FROM transcoding_jobs WHERE profile_id = $1", profile_id
-    )
+    in_use = await conn.fetchval("SELECT COUNT(*) FROM transcoding_jobs WHERE profile_id = $1", profile_id)
 
     if in_use > 0:
         raise HTTPException(
@@ -205,9 +195,7 @@ async def delete_transcoding_profile(
             detail=f"Cannot delete profile. It is being used by {in_use} job(s)",
         )
 
-    result = await conn.execute(
-        "DELETE FROM transcoding_profiles WHERE id = $1", profile_id
-    )
+    result = await conn.execute("DELETE FROM transcoding_profiles WHERE id = $1", profile_id)
 
     if result == "DELETE 0":
         raise HTTPException(
@@ -281,7 +269,7 @@ async def get_transcoding_job(
 )
 async def create_transcoding_job(
     job: TranscodingJobCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Create a new transcoding job"""
@@ -294,9 +282,7 @@ async def create_transcoding_job(
         )
 
     # Get profile
-    profile_row = await conn.fetchrow(
-        "SELECT * FROM transcoding_profiles WHERE id = $1", job.profile_id
-    )
+    profile_row = await conn.fetchrow("SELECT * FROM transcoding_profiles WHERE id = $1", job.profile_id)
 
     if not profile_row:
         raise HTTPException(
@@ -312,9 +298,7 @@ async def create_transcoding_job(
         table_map = {"movie": "movies", "show": "shows", "anime": "anime"}
         table = table_map.get(job.media_type)
         if table:
-            media_row = await conn.fetchrow(
-                f"SELECT title FROM {table} WHERE id = $1", job.media_id
-            )
+            media_row = await conn.fetchrow(f"SELECT title FROM {table} WHERE id = $1", job.media_id)
             if media_row:
                 media_title = media_row["title"]
 
@@ -415,7 +399,7 @@ async def create_transcoding_job(
 @router.delete("/jobs/{job_id}")
 async def cancel_transcoding_job(
     job_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Cancel a transcoding job"""
@@ -477,13 +461,11 @@ async def get_transcoding_rules(
 )
 async def create_transcoding_rule(
     rule: TranscodingRuleCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Create a new transcoding rule"""
-    existing = await conn.fetchrow(
-        "SELECT id FROM transcoding_rules WHERE name = $1", rule.name
-    )
+    existing = await conn.fetchrow("SELECT id FROM transcoding_rules WHERE name = $1", rule.name)
 
     if existing:
         raise HTTPException(
@@ -518,13 +500,11 @@ async def create_transcoding_rule(
 async def update_transcoding_rule(
     rule_id: int,
     rule: TranscodingRuleUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Update transcoding rule"""
-    existing = await conn.fetchrow(
-        "SELECT * FROM transcoding_rules WHERE id = $1", rule_id
-    )
+    existing = await conn.fetchrow("SELECT * FROM transcoding_rules WHERE id = $1", rule_id)
 
     if not existing:
         raise HTTPException(
@@ -564,13 +544,11 @@ async def update_transcoding_rule(
 @router.delete("/rules/{rule_id}")
 async def delete_transcoding_rule(
     rule_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """Delete transcoding rule"""
-    result = await conn.execute(
-        "DELETE FROM transcoding_rules WHERE id = $1", rule_id
-    )
+    result = await conn.execute("DELETE FROM transcoding_rules WHERE id = $1", rule_id)
 
     if result == "DELETE 0":
         raise HTTPException(
@@ -581,13 +559,27 @@ async def delete_transcoding_rule(
     return {"message": "Transcoding rule deleted successfully"}
 
 
+def _frame_rate(value) -> Optional[float]:
+    """ffprobe's frame rate fraction, such as 24000/1001, as a number. Anything else gives None."""
+    from fractions import Fraction
+
+    try:
+        rate = Fraction(str(value))
+        return float(rate) if rate.denominator else None
+    except ValueError, ZeroDivisionError:
+        return None
+
+
 # Media Info Endpoint
 @router.get("/media-info")
 async def get_media_info(
     file_path: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("system.settings")),
 ):
-    """Get media file information using ffprobe"""
+    """
+    Get media file information using ffprobe. It reads any path on the server, so it
+    needs the system settings permission.
+    """
     file = Path(file_path)
     if not file.exists():
         raise HTTPException(
@@ -614,17 +606,11 @@ async def get_media_info(
             "size": int(format_info.get("size", 0)),
             "bit_rate": int(format_info.get("bit_rate", 0)),
             "video_codec": video_stream.get("codec_name") if video_stream else None,
-            "video_resolution": f"{video_stream.get('width')}x{video_stream.get('height')}"
-            if video_stream
-            else None,
-            "video_fps": eval(video_stream.get("r_frame_rate", "0/1"))
-            if video_stream
-            else None,
+            "video_resolution": f"{video_stream.get('width')}x{video_stream.get('height')}" if video_stream else None,
+            "video_fps": _frame_rate(video_stream.get("r_frame_rate")) if video_stream else None,
             "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
             "audio_channels": audio_stream.get("channels") if audio_stream else None,
-            "audio_bitrate": int(audio_stream.get("bit_rate", 0))
-            if audio_stream
-            else None,
+            "audio_bitrate": int(audio_stream.get("bit_rate", 0)) if audio_stream else None,
         }
     except Exception as e:
         raise HTTPException(

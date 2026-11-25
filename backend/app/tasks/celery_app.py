@@ -41,6 +41,8 @@ celery_app = Celery(
         "app.tasks.folder_health",
         "app.tasks.seeding_monitor",
         "app.tasks.yts_sync",
+        "app.tasks.jellyfin",
+        "app.tasks.push_delivery",
     ],
 )
 

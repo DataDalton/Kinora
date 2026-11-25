@@ -14,8 +14,8 @@ import {
 	AUDIO_CHANNELS,
 	HDR_FORMATS,
 	SHOW_PRESETS,
-	INDEXERS_BY_TYPE,
 } from "../constants";
+import { useIndexerOptions } from "../useIndexerOptions";
 
 const SHOW_TOKENS = [
 	{
@@ -128,6 +128,7 @@ export default function TVShowsGroup({
 	setFormData,
 	activeTab,
 }: TVShowsGroupProps) {
+	const showIndexerOptions = useIndexerOptions("shows");
 	const [showBuilder, setShowBuilder] = useState(false);
 	const [activeField, setActiveField] = useState<"folder" | "file">("file");
 	const builderBackdropProps = useModalDismiss({
@@ -178,7 +179,7 @@ export default function TVShowsGroup({
 					Indexers for TV show searches
 				</p>
 				<div className="flex flex-wrap gap-2 p-3 bg-muted/50 rounded-lg border border-border">
-					{INDEXERS_BY_TYPE.shows.map((indexer) => {
+					{showIndexerOptions.map((indexer) => {
 						const index = formData.show_indexers.indexOf(indexer);
 						const isSelected = index !== -1;
 						return (

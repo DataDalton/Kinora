@@ -10,6 +10,9 @@ from datetime import datetime
 
 from app.db import get_pool
 
+# Seconds an ffprobe call may run before it is stopped.
+FFPROBE_TIMEOUT_SECONDS = 30
+
 
 class HardwareAccelerationService:
     """Detects and manages hardware acceleration devices"""
@@ -19,14 +22,9 @@ class HardwareAccelerationService:
         try:
             # Try lscpu command (available in most Linux containers)
             try:
-                result = subprocess.run(
-                    ["lscpu"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
+                result = subprocess.run(["lscpu"], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
-                    for line in result.stdout.split('\n'):
+                    for line in result.stdout.split("\n"):
                         if line.startswith("Model name:"):
                             cpu_name = line.split(":", 1)[1].strip()
                             if cpu_name:
@@ -49,10 +47,14 @@ class HardwareAccelerationService:
             # Try Windows PowerShell (for native Windows)
             try:
                 result = subprocess.run(
-                    ["powershell", "-Command", "Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty Name"],
+                    [
+                        "powershell",
+                        "-Command",
+                        "Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty Name",
+                    ],
                     capture_output=True,
                     text=True,
-                    timeout=5
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     cpu_name = result.stdout.strip()
@@ -68,10 +70,7 @@ class HardwareAccelerationService:
             # Try macOS sysctl
             try:
                 result = subprocess.run(
-                    ["sysctl", "-n", "machdep.cpu.brand_string"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
+                    ["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True, timeout=5
                 )
                 if result.returncode == 0:
                     cpu_name = result.stdout.strip()
@@ -107,16 +106,18 @@ class HardwareAccelerationService:
                     continue
                 parts = [p.strip() for p in line.split(",")]
                 if len(parts) >= 7:
-                    gpus.append({
-                        "device_type": "nvidia",
-                        "device_index": int(parts[0]),
-                        "device_name": parts[1],
-                        "device_uuid": parts[2],
-                        "pci_bus_id": parts[3],
-                        "compute_capability": parts[4],
-                        "memory_total": int(float(parts[5]) * 1024 * 1024),
-                        "driver_version": parts[6],
-                    })
+                    gpus.append(
+                        {
+                            "device_type": "nvidia",
+                            "device_index": int(parts[0]),
+                            "device_name": parts[1],
+                            "device_uuid": parts[2],
+                            "pci_bus_id": parts[3],
+                            "compute_capability": parts[4],
+                            "memory_total": int(float(parts[5]) * 1024 * 1024),
+                            "driver_version": parts[6],
+                        }
+                    )
             return gpus
         except FileNotFoundError:
             return []
@@ -139,16 +140,18 @@ class HardwareAccelerationService:
 
             output = stdout.decode() + stderr.decode()
             if "intel" in output.lower() and "driver" in output.lower():
-                return [{
-                    "device_type": "intel",
-                    "device_index": 0,
-                    "device_name": "Intel Quick Sync Video",
-                    "device_uuid": None,
-                    "pci_bus_id": None,
-                    "compute_capability": None,
-                    "memory_total": None,
-                    "driver_version": None,
-                }]
+                return [
+                    {
+                        "device_type": "intel",
+                        "device_index": 0,
+                        "device_name": "Intel Quick Sync Video",
+                        "device_uuid": None,
+                        "pci_bus_id": None,
+                        "compute_capability": None,
+                        "memory_total": None,
+                        "driver_version": None,
+                    }
+                ]
             return []
         except FileNotFoundError:
             return []
@@ -178,16 +181,18 @@ class HardwareAccelerationService:
                 if "GPU" in line and ":" in line:
                     gpu_name = line.split(":")[-1].strip()
                     if gpu_name:
-                        gpus.append({
-                            "device_type": "amd",
-                            "device_index": device_index,
-                            "device_name": gpu_name,
-                            "device_uuid": None,
-                            "pci_bus_id": None,
-                            "compute_capability": None,
-                            "memory_total": None,
-                            "driver_version": None,
-                        })
+                        gpus.append(
+                            {
+                                "device_type": "amd",
+                                "device_index": device_index,
+                                "device_name": gpu_name,
+                                "device_uuid": None,
+                                "pci_bus_id": None,
+                                "compute_capability": None,
+                                "memory_total": None,
+                                "driver_version": None,
+                            }
+                        )
                         device_index += 1
             return gpus
         except FileNotFoundError:
@@ -262,13 +267,11 @@ class HardwareAccelerationService:
         """Get available devices from database"""
         pool = await get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
+            rows = await conn.fetch("""
                 SELECT * FROM hardware_accel_devices
                 WHERE is_available = true
                 ORDER BY device_type, device_index
-                """
-            )
+                """)
             return [dict(row) for row in rows]
 
 
@@ -283,8 +286,10 @@ class FFmpegService:
         """Get media file information using ffprobe"""
         cmd = [
             self.ffprobe_path,
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
             file_path,
@@ -296,7 +301,14 @@ class FFmpegService:
             stderr=asyncio.subprocess.PIPE,
         )
 
-        stdout, stderr = await proc.communicate()
+        # A damaged or crafted file can make ffprobe hang, so it is stopped after the
+        # same limit the import's metadata extractor uses.
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=FFPROBE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise Exception(f"ffprobe timed out after {FFPROBE_TIMEOUT_SECONDS} seconds")
 
         if proc.returncode != 0:
             raise Exception(f"ffprobe failed: {stderr.decode()}")

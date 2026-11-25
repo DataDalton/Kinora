@@ -5,7 +5,7 @@ import asyncpg
 
 from app.db import get_db
 from app.schemas.history import DownloadHistory, DownloadHistoryCreate, DownloadHistoryUpdate, DownloadHistoryStats
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, require_permission
 from app.schemas.user import User
 
 router = APIRouter()
@@ -95,7 +95,7 @@ async def get_download_stats(
         SELECT
             COUNT(*) as total_downloads,
             COUNT(*) FILTER (WHERE status = 'completed') as completed,
-            COUNT(*) FILTER (WHERE status = 'failed') as failed,
+            COUNT(*) FILTER (WHERE status IN ('failed', 'import_failed')) as failed,
             COUNT(*) FILTER (WHERE status IN ('pending', 'downloading')) as in_progress,
             COALESCE(SUM(size), 0) as total_size_bytes,
             COUNT(*) FILTER (WHERE was_upgrade = true) as upgrades
@@ -160,6 +160,33 @@ async def get_history_entry(
             detail="History entry not found",
         )
 
+    return DownloadHistory(**dict(row))
+
+
+@router.post("/{history_id}/retry-import", response_model=DownloadHistory)
+async def retry_import(
+    history_id: int,
+    current_user: User = Depends(require_permission("system.downloads")),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Run the import again for a download whose import failed, for example after files were
+    added to the torrent or the profile's never-import list was changed.
+    """
+    row = await conn.fetchrow(
+        "UPDATE download_history SET status = 'processing', error_message = NULL, updated_at = NOW() "
+        "WHERE id = $1 AND status = 'import_failed' RETURNING *",
+        history_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only downloads whose import failed can be retried",
+        )
+
+    from app.tasks.download_monitor import process_completed_download
+
+    process_completed_download.delay(row["torrent_hash"])
     return DownloadHistory(**dict(row))
 
 
@@ -347,7 +374,5 @@ async def get_used_indexers(
     """
     Get list of indexers that have been used in download history
     """
-    rows = await conn.fetch(
-        "SELECT DISTINCT indexer FROM download_history ORDER BY indexer ASC"
-    )
+    rows = await conn.fetch("SELECT DISTINCT indexer FROM download_history ORDER BY indexer ASC")
     return [row["indexer"] for row in rows]

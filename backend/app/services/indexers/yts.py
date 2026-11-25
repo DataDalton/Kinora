@@ -3,7 +3,7 @@ from datetime import datetime
 
 from app.services.indexers.base import BaseIndexer, TorrentRelease
 from app.core.config import settings
-from app.core.http_client import http_get
+from app.core.http_client import indexer_get
 
 
 class YTSIndexer(BaseIndexer):
@@ -13,13 +13,10 @@ class YTSIndexer(BaseIndexer):
     """
 
     name = "YTS"
-    base_url = "https://yts.lt"
-    api_url = "https://yts.lt/api/v2"
-    alternative_urls = [
-        "https://yts.gg",
-        "https://yts.am",
-        "https://yts.ag",
-    ]
+    # Only the official site and the API host its own API names are used. Mirror domains
+    # are often run by third parties, so an outage is reported rather than routed around.
+    base_url = "https://yts.gg"
+    api_url = "https://movies-api.accel.li/api/v2"
     requires_cloudflare_bypass = False
     categories = {
         "movies": "Movies",
@@ -36,35 +33,26 @@ class YTSIndexer(BaseIndexer):
         limit: int = 100,
     ) -> List[TorrentRelease]:
         """
-        Search YTS for movie torrents using their API
+        Search YTS for movie torrents using their API.
+        Errors are raised so the search engine records them against the indexer's health.
         """
+        response = await indexer_get(
+            f"{self.current_api_url}/list_movies.json",
+            params={
+                "query_term": query,
+                "limit": min(limit, 50),
+                "sort_by": "seeds",
+                "order_by": "desc",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") != "ok":
+            raise Exception(f"YTS API returned status {data.get('status')}: {data.get('status_message')}")
+
         releases = []
-
-        try:
-            response = await http_get(
-                f"{self.current_api_url}/list_movies.json",
-                params={
-                    "query_term": query,
-                    "limit": min(limit, 50),
-                    "sort_by": "seeds",
-                    "order_by": "desc",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("status") != "ok":
-                return releases
-
-            movies = data.get("data", {}).get("movies", [])
-
-            for movie in movies:
-                releases.extend(self._parse_movie(movie))
-
-        except Exception as e:
-            print(f"Error searching YTS: {e}")
-            await self._try_alternative_url()
-
+        for movie in data.get("data", {}).get("movies") or []:
+            releases.extend(self._parse_movie(movie))
         return releases
 
     def _parse_movie(self, movie: dict) -> List[TorrentRelease]:
@@ -104,6 +92,7 @@ class YTSIndexer(BaseIndexer):
             full_title = f"{title_long} [{quality}] [{quality_type}] [YTS]"
 
             release = TorrentRelease(
+                origin_sites=["yts"],
                 title=full_title,
                 magnet=magnet,
                 detail_url=movie.get("url"),
@@ -143,7 +132,7 @@ class YTSIndexer(BaseIndexer):
         releases = []
 
         try:
-            response = await http_get(
+            response = await indexer_get(
                 f"{self.current_api_url}/list_movies.json",
                 params={
                     "limit": 50,
@@ -172,28 +161,11 @@ class YTSIndexer(BaseIndexer):
         Test if YTS API is reachable
         """
         try:
-            response = await http_get(f"{self.current_api_url}/list_movies.json?limit=1")
+            response = await indexer_get(f"{self.current_api_url}/list_movies.json?limit=1")
             data = response.json()
             return data.get("status") == "ok"
         except Exception:
-            return await self._try_alternative_url()
-
-    async def _try_alternative_url(self) -> bool:
-        """
-        Try alternative YTS URLs if main is down
-        """
-        for alt_url in self.alternative_urls:
-            try:
-                alt_api_url = alt_url + "/api/v2"
-                response = await http_get(f"{alt_api_url}/list_movies.json?limit=1")
-                data = response.json()
-                if data.get("status") == "ok":
-                    self.current_url = alt_url
-                    self.current_api_url = alt_api_url
-                    return True
-            except Exception:
-                continue
-        return False
+            return False
 
     def _build_magnet(self, info_hash: str, title: str) -> str:
         """

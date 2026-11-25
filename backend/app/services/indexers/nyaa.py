@@ -4,7 +4,7 @@ import re
 from bs4 import BeautifulSoup
 
 from app.services.indexers.base import BaseIndexer, TorrentRelease
-from app.core.http_client import http_get
+from app.core.http_client import indexer_get
 
 
 class NyaaIndexer(BaseIndexer):
@@ -14,12 +14,9 @@ class NyaaIndexer(BaseIndexer):
     """
 
     name = "Nyaa"
+    # Only the official domain is used. Mirror domains are often run by third parties, so
+    # an outage is reported rather than routed around.
     base_url = "https://nyaa.si"
-    alternative_urls = [
-        "https://nyaa.land",
-        "https://nyaa.iss.one",
-        "https://nyaa.iss.ink",
-    ]
     requires_cloudflare_bypass = False
 
     categories = {
@@ -52,17 +49,9 @@ class NyaaIndexer(BaseIndexer):
 
         torrents = []
         current_url = self.base_url
-
-        for url in [self.base_url] + self.alternative_urls:
-            try:
-                response = await http_get(f"{url}/", params=params)
-                if response.status_code == 200:
-                    current_url = url
-                    break
-            except Exception:
-                continue
-        else:
-            return []
+        # Errors are raised so the search engine records them against the indexer's health.
+        response = await indexer_get(f"{current_url}/", params=params)
+        response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
         rows = soup.select("tr.default, tr.success, tr.danger")
@@ -90,17 +79,8 @@ class NyaaIndexer(BaseIndexer):
 
         torrents = []
         current_url = self.base_url
-
-        for url in [self.base_url] + self.alternative_urls:
-            try:
-                response = await http_get(f"{url}/", params=params)
-                if response.status_code == 200:
-                    current_url = url
-                    break
-            except Exception:
-                continue
-        else:
-            return []
+        response = await indexer_get(f"{current_url}/", params=params)
+        response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "xml")
         items = soup.find_all("item")
@@ -119,14 +99,11 @@ class NyaaIndexer(BaseIndexer):
         """
         Test if Nyaa is reachable
         """
-        for url in [self.base_url] + self.alternative_urls:
-            try:
-                response = await http_get(f"{url}/", timeout=10.0)
-                if response.status_code == 200:
-                    return True
-            except Exception:
-                continue
-        return False
+        try:
+            response = await indexer_get(f"{self.base_url}/", timeout=10.0)
+            return response.status_code == 200
+        except Exception:
+            return False
 
     def _parse_row(self, row, base_url: str) -> Optional[TorrentRelease]:
         """
@@ -181,6 +158,12 @@ class NyaaIndexer(BaseIndexer):
             leechers_td = row.select_one("td:nth-of-type(7)")
             leechers = int(leechers_td.text.strip()) if leechers_td and leechers_td.text.strip().isdigit() else 0
 
+            # Nyaa colors rows its staff marked trusted green (success) and remakes red (danger).
+            row_classes = row.get("class") or []
+            badge = (
+                "nyaa_trusted" if "success" in row_classes else ("nyaa_remake" if "danger" in row_classes else None)
+            )
+
             # Parse anime-specific quality info
             parsed = self._parse_anime_quality(title)
 
@@ -203,6 +186,8 @@ class NyaaIndexer(BaseIndexer):
                 audio=parsed.get("audio"),
                 language=parsed.get("language"),
                 release_group=parsed.get("release_group"),
+                uploader_badge=badge,
+                origin_sites=["nyaa"],
                 raw_data={
                     "detail_url": detail_url,
                     "subtitle_type": parsed.get("subtitle_type"),
@@ -243,12 +228,23 @@ class NyaaIndexer(BaseIndexer):
             pub_date = item.find("pubDate")
             upload_date = self._parse_rss_date(pub_date.text) if pub_date else None
 
+            # Nyaa's feed carries the same trusted and remake markers as its row colors.
+            trusted_tag = item.find("nyaa:trusted")
+            remake_tag = item.find("nyaa:remake")
+            badge = None
+            if trusted_tag and trusted_tag.text.strip().lower() == "yes":
+                badge = "nyaa_trusted"
+            elif remake_tag and remake_tag.text.strip().lower() == "yes":
+                badge = "nyaa_remake"
+
             # Parse anime-specific quality info
             parsed = self._parse_anime_quality(title)
 
             return TorrentRelease(
                 title=title,
                 magnet=None,  # RSS doesn't include magnet, need to fetch detail page
+                uploader_badge=badge,
+                origin_sites=["nyaa"],
                 torrent_url=link,
                 detail_url=link,
                 info_hash=None,

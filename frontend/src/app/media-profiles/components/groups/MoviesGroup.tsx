@@ -14,8 +14,8 @@ import {
 	HDR_FORMATS,
 	SPECIAL_EDITIONS,
 	MOVIE_PRESETS,
-	INDEXERS_BY_TYPE,
 } from "../constants";
+import { useIndexerOptions } from "../useIndexerOptions";
 import QualityCheckboxList from "../shared/QualityCheckboxList";
 
 interface MoviesGroupProps {
@@ -140,6 +140,7 @@ export default function MoviesGroup({
 	setFormData,
 	activeTab,
 }: MoviesGroupProps) {
+	const movieIndexerOptions = useIndexerOptions("movies");
 	const [showBuilder, setShowBuilder] = useState(false);
 	const [activeField, setActiveField] = useState<"folder" | "file">("file");
 	const builderBackdropProps = useModalDismiss({
@@ -192,7 +193,7 @@ export default function MoviesGroup({
 							Indexers for movie searches
 						</p>
 						<div className="flex flex-wrap gap-2 p-3 bg-muted/50 rounded-lg border border-border">
-							{INDEXERS_BY_TYPE.movies.map((indexer) => {
+							{movieIndexerOptions.map((indexer) => {
 								const index =
 									formData.movie_indexers.indexOf(indexer);
 								const isSelected = index !== -1;

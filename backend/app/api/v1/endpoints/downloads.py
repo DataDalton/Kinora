@@ -15,10 +15,13 @@ from pydantic import BaseModel, Field
 import asyncpg
 
 from app.db import get_db
+from app.services import download_episodes
 from app.core.cache import cacheGet, cacheSet, cacheDelete
 from app.services.media_status import releaseDownloadingStatus
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.services.download_clients.base import TorrentInfo, TorrentState
+from app.services import hash_blocklist
+from app.services.torrent_validator import profile_for_item, validate_and_resume_torrent
 from app.api.v1.endpoints.auth import get_current_user, require_permission
 from app.schemas.user import User, UserWithPermissions
 
@@ -514,17 +517,27 @@ async def add_torrent(
 ):
     """
     Manually add a magnet or .torrent URL. Optionally maps it to a media item so
-    it is tracked in download history like an automated grab.
+    it is tracked in download history like an automated grab. The torrent is added
+    paused and validated before it downloads, using the item's profile when mapped
+    and the built-in defaults otherwise.
     """
     client = await _get_client_or_503()
 
-    tags = ["kinora", "manual"] + (body.tags or [])
+    if await hash_blocklist.isHashBlocked(
+        conn, hash_blocklist.infoHashFromSource(body.url), body.media_type, body.media_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This torrent is blocklisted because it failed validation before",
+        )
+
+    tags = ["kinora", "manual", "validating"] + (body.tags or [])
     torrent_hash = await client.add_torrent(
         torrent=body.url,
         save_path=body.save_path,
         category=body.category or body.media_type,
         tags=tags,
-        paused=False,
+        paused=True,
     )
 
     # Persist the source so a manually added release can be re-added later. The
@@ -563,9 +576,17 @@ async def add_torrent(
             torrent_url,
             torrent_hash,
         )
+        await download_episodes.recordCoveredEpisodes(conn, torrent_hash, body.media_type, body.media_id, title)
 
+    profile = await profile_for_item(conn, body.media_type, body.media_id)
+    report = await validate_and_resume_torrent(
+        torrent_hash=torrent_hash,
+        client=client,
+        profile=profile,
+        media_type=body.media_type or "manual",
+    )
     await _invalidateSnapshots()
-    return {"success": True, "hash": torrent_hash}
+    return {"success": True, "hash": torrent_hash, "validation": report.message}
 
 
 # ---------------------------------------------------------------------------
@@ -946,6 +967,13 @@ async def re_add_source(
     if not source:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No stored magnet or torrent URL")
 
+    known_hash = row.get("info_hash") or row.get("torrent_hash")
+    if await hash_blocklist.isHashBlocked(conn, known_hash, row["media_type"], row["media_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This torrent is blocklisted because it failed validation before",
+        )
+
     client = await _get_client_or_503()
 
     save_path = None
@@ -956,13 +984,14 @@ async def re_add_source(
 
     # The stored info hash (or prior torrent hash) identifies the same torrent, so
     # it is used directly instead of re-interrogating qBittorrent after adding.
+    readd_tags = ["kinora", "re-add", "validating"] + ([row["indexer"]] if row["indexer"] else [])
     torrent_hash = await client.add_torrent(
         torrent=source,
         save_path=save_path,
         category=row["media_type"],
-        tags=["kinora", "re-add", row["indexer"]] if row["indexer"] else ["kinora", "re-add"],
-        paused=False,
-        known_hash=row.get("info_hash") or row.get("torrent_hash"),
+        tags=readd_tags,
+        paused=True,
+        known_hash=known_hash,
     )
 
     await conn.execute(
@@ -970,8 +999,15 @@ async def re_add_source(
         torrent_hash,
         history_id,
     )
+    profile = await profile_for_item(conn, row["media_type"], row["media_id"])
+    report = await validate_and_resume_torrent(
+        torrent_hash=torrent_hash,
+        client=client,
+        profile=profile,
+        media_type=row["media_type"],
+    )
     await _invalidateSnapshots()
-    return {"success": True, "hash": torrent_hash}
+    return {"success": True, "hash": torrent_hash, "validation": report.message}
 
 
 # ---------------------------------------------------------------------------

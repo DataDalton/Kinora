@@ -47,6 +47,11 @@ class DownloadHistory(DownloadHistoryBase):
     status: str
     progress: float
     grab_mode: Optional[str] = None
+    # Trust details recorded when the release was chosen.
+    uploader: Optional[str] = None
+    trust_category: Optional[str] = None
+    safety_template: Optional[str] = None
+    origin_sites: Optional[List[str]] = None
     error_message: Optional[str] = None
     was_upgrade: bool
     started_at: datetime

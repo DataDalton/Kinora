@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional
+from collections import Counter
 import asyncpg
 import os
 import shutil
-from pathlib import Path
 
 from app.db import get_db
-from app.services import naming_tokens
-from app.tasks.download_monitor import parse_episode_info
+from app.services import rename_plan
+from app.services import jellyfin
 from app.db.repositories import MediaTagRepository, MediaProfileRepository
 from app.schemas.bulk import (
     BulkMonitorRequest,
@@ -19,6 +18,11 @@ from app.schemas.bulk import (
     BulkMediaProfileRequest,
     BulkRenameAllRequest,
     BulkOperationResult,
+    RenamePreviewEntry,
+    RenamePreviewCounts,
+    RenamePreviewResponse,
+    RenameApplyRequest,
+    RenameApplyResult,
 )
 from app.api.v1.endpoints.auth import get_current_user
 from app.schemas.user import User
@@ -45,226 +49,49 @@ def validateMediaType(mediaType: str) -> str:
     return TABLE_MAP[mediaType]
 
 
-_NAMING_DEFAULTS = {
-    "movie": ("{Movie CleanTitle} ({Release Year})", "{Movie CleanTitle} ({Release Year})"),
-    "show": ("{Show Title} - S{Season:00}E{Episode:00}", "{Show Title}/Season {Season:00}"),
-    "anime": ("{Anime Title} - {Episode:00}", "{Anime Title}"),
-}
-_VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg", ".m2ts", ".ts", ".webm"}
-_AUDIO_EXT = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma"}
-
-
-async def _root_path_for(conn, table: str, root_folder_id) -> Optional[str]:
-    if not root_folder_id:
-        return None
-    return await conn.fetchval("SELECT root_path FROM root_folders WHERE id = $1", root_folder_id)
-
-
-async def _video_naming_config(conn, media_type, media_profile_id):
-    prof = None
-    if media_profile_id:
-        prof = await conn.fetchrow(
-            "SELECT movie_naming_format, movie_folder_format, show_naming_format, show_folder_format, "
-            "anime_naming_format, anime_folder_format, illegal_char_replacement, colon_replacement "
-            "FROM media_profiles WHERE id = $1",
-            media_profile_id,
-        )
-    default_file, default_folder = _NAMING_DEFAULTS[media_type]
-    naming = (prof and prof[f"{media_type}_naming_format"]) or default_file
-    folder = (prof and prof[f"{media_type}_folder_format"]) or default_folder
-    illegal = (prof and prof["illegal_char_replacement"]) or ""
-    colon = (prof and prof["colon_replacement"]) or " -"
-    return naming, folder, illegal, colon
-
-
-def _item_top_folder(file_path: str, root_path: Optional[str]) -> str:
-    """Return the item's top-level folder (root/<ItemFolder>) or the file's directory."""
-    if not root_path:
-        return file_path if os.path.isdir(file_path) else os.path.dirname(file_path)
-    try:
-        rel = os.path.relpath(file_path, root_path)
-    except ValueError:
-        return os.path.dirname(file_path)
-    first = rel.split(os.sep)[0]
-    if first in ("", ".", ".."):
-        return os.path.dirname(file_path)
-    return os.path.join(root_path, first)
-
-
-def _walk_media(folder: str, extensions: set) -> List[str]:
-    if os.path.isfile(folder):
-        return [folder]
-    found = []
-    for dirpath, _dirs, files in os.walk(folder):
-        for name in files:
-            if Path(name).suffix.lower() in extensions:
-                found.append(os.path.join(dirpath, name))
-    return sorted(found)
-
-
-async def _rename_media_item(conn, media_type: str, row: dict) -> int:
-    """
-    Re-render an item's file(s) with the current profile naming format and move them.
-    Returns the number of files moved. Never deletes source data.
-    """
-    file_path = row.get("file_path")
-    if not file_path or not os.path.exists(file_path):
-        return 0
-    root_path = await _root_path_for(conn, TABLE_MAP[media_type], row.get("root_folder_id"))
-    moved = 0
-
-    if media_type == "movie":
-        naming, folder, illegal, colon = await _video_naming_config(conn, "movie", row.get("media_profile_id"))
-        ctx = naming_tokens.build_movie_context(dict(row), file_path, os.path.basename(file_path))
-        folder_name = naming_tokens.render(folder, ctx, illegal_replacement=illegal, colon_replacement=colon)
-        filename = naming_tokens.render(
-            naming, ctx, illegal_replacement=illegal, colon_replacement=colon, extension=Path(file_path).suffix
-        )
-        base = root_path or os.path.dirname(os.path.dirname(file_path))
-        new_path = os.path.join(base, folder_name, filename)
-        if os.path.normpath(new_path) != os.path.normpath(file_path):
-            os.makedirs(os.path.dirname(new_path), exist_ok=True)
-            shutil.move(file_path, new_path)
-            await conn.execute(
-                "UPDATE movies SET file_path = $1, updated_at = NOW() WHERE id = $2", new_path, row["id"]
-            )
-            moved = 1
-        return moved
-
-    if media_type in ("show", "anime"):
-        naming, folder, illegal, colon = await _video_naming_config(conn, media_type, row.get("media_profile_id"))
-        top = _item_top_folder(file_path, root_path)
-        base = root_path or os.path.dirname(top)
-        first_new = None
-        for src in _walk_media(top, _VIDEO_EXT):
-            ep = parse_episode_info(os.path.basename(src))
-            if ep.get("episode_number") is None:
-                continue
-            episode_info = {
-                "season_number": ep.get("season_number") or 1,
-                "episode_number": ep["episode_number"],
-                "episode_title": ep.get("episode_title") or "",
-                "absolute_episode": ep.get("absolute_episode"),
-            }
-            if media_type == "show":
-                ctx = naming_tokens.build_show_context(dict(row), episode_info, src, os.path.basename(src))
-            else:
-                ctx = naming_tokens.build_anime_context(dict(row), episode_info, src, os.path.basename(src))
-            folder_name = naming_tokens.render(folder, ctx, illegal_replacement=illegal, colon_replacement=colon)
-            filename = naming_tokens.render(
-                naming, ctx, illegal_replacement=illegal, colon_replacement=colon, extension=Path(src).suffix
-            )
-            new_path = os.path.join(base, folder_name, filename)
-            if os.path.normpath(new_path) != os.path.normpath(src):
-                os.makedirs(os.path.dirname(new_path), exist_ok=True)
-                shutil.move(src, new_path)
-                moved += 1
-            if first_new is None:
-                first_new = new_path
-        if first_new:
-            await conn.execute(
-                f"UPDATE {TABLE_MAP[media_type]} SET file_path = $1, updated_at = NOW() WHERE id = $2",
-                first_new,
-                row["id"],
-            )
-        return moved
-
-    if media_type == "album":
-        moved = await _rename_album(conn, row, root_path)
-        return moved
-
-    # artists have no files of their own to rename
-    return 0
-
-
-async def _rename_album(conn, row: dict, root_path: Optional[str]) -> int:
-    """Re-render an album's track files using the music naming formats."""
-    from app.services.file_manager import FileManager
-
-    file_path = row.get("file_path")
-    prof = None
-    if row.get("media_profile_id"):
-        prof = await conn.fetchrow(
-            "SELECT music_artist_folder_format, music_album_folder_format, music_track_naming_format, "
-            "music_multi_disc_format, illegal_char_replacement, colon_replacement "
-            "FROM media_profiles WHERE id = $1",
-            row["media_profile_id"],
-        )
-    artist_fmt = (prof and prof["music_artist_folder_format"]) or "{artist}"
-    album_fmt = (prof and prof["music_album_folder_format"]) or "{album} ({year})"
-    track_fmt = (prof and prof["music_track_naming_format"]) or "{track:00} - {title}"
-    multi_fmt = (prof and prof["music_multi_disc_format"]) or "{disc:00}-{track:00} - {title}"
-    illegal = (prof and prof["illegal_char_replacement"]) or ""
-    colon = (prof and prof["colon_replacement"]) or " -"
-
-    fm = FileManager()
-    top = _item_top_folder(file_path, root_path)
-    base = root_path or os.path.dirname(top)
-    audio_files = _walk_media(top, _AUDIO_EXT)
-    if not audio_files:
-        return 0
-
-    track_rows = await conn.fetch(
-        "SELECT disk_number, track_position, title FROM tracks WHERE album_id = $1 ORDER BY disk_number, track_position",
-        row["id"],
+def previewResponse(entries) -> RenamePreviewResponse:
+    """Build the preview response from classified rename entries."""
+    return RenamePreviewResponse(
+        entries=[_entryModel(entry) for entry in entries],
+        counts=RenamePreviewCounts(**rename_plan.statusCounts(entries)),
+        total=len(entries),
     )
-    use_meta = len(track_rows) == len(audio_files)
-    is_multi_disc = any((t["disk_number"] or 1) > 1 for t in track_rows)
-    year = row["release_date"].year if row.get("release_date") else None
-    genres = row.get("genres") or []
-    genre = (genres[0].get("name") if isinstance(genres[0], dict) else genres[0]) if genres else None
 
-    first_new = None
-    moved = 0
-    for idx, src in enumerate(audio_files, start=1):
-        if use_meta:
-            meta = track_rows[idx - 1]
-            disc_number = meta["disk_number"] or 1
-            track_number = meta["track_position"] or idx
-            track_title = meta["title"] or Path(src).stem
-        else:
-            disc_number, track_number, track_title = 1, idx, Path(src).stem
-        track_data = {
-            "artist": row.get("artist_name") or "Unknown Artist",
-            "album": row.get("title"),
-            "year": year,
-            "track_number": track_number,
-            "disc_number": disc_number,
-            "title": track_title,
-            "genre": genre,
-            "extension": Path(src).suffix,
-        }
-        artist_folder = fm.format_music_filename(
-            pattern=artist_fmt,
-            track_data=track_data,
-            include_extension=False,
-            illegal_replacement=illegal,
-            colon_replacement=colon,
-        )
-        album_folder = fm.format_music_filename(
-            pattern=album_fmt,
-            track_data=track_data,
-            include_extension=False,
-            illegal_replacement=illegal,
-            colon_replacement=colon,
-        )
-        track_name = fm.format_music_filename(
-            pattern=(multi_fmt if is_multi_disc else track_fmt),
-            track_data=track_data,
-            include_extension=True,
-            illegal_replacement=illegal,
-            colon_replacement=colon,
-        )
-        new_path = os.path.join(base, artist_folder, album_folder, track_name)
-        if os.path.normpath(new_path) != os.path.normpath(src):
-            os.makedirs(os.path.dirname(new_path), exist_ok=True)
-            shutil.move(src, new_path)
-            moved += 1
-        if first_new is None:
-            first_new = os.path.dirname(new_path)
-    if first_new:
-        await conn.execute("UPDATE albums SET file_path = $1, updated_at = NOW() WHERE id = $2", first_new, row["id"])
-    return moved
+
+def _entryModel(entry) -> RenamePreviewEntry:
+    return RenamePreviewEntry(
+        mediaType=entry.mediaType,
+        itemId=entry.itemId,
+        itemTitle=entry.itemTitle,
+        oldPath=entry.oldPath,
+        newPath=entry.newPath,
+        status=entry.status,
+        message=entry.message,
+    )
+
+
+async def applyRenameEntries(conn, entries) -> RenameApplyResult:
+    """Apply previewed change entries through rename_plan and summarise the outcome."""
+    results = await rename_plan.applyEntries(conn, [entry.model_dump() for entry in entries])
+    counts = Counter(result.status for result in results)
+    applied = counts.get(rename_plan.STATUS_APPLIED, 0)
+    failed = counts.get(rename_plan.STATUS_ERROR, 0)
+    errors = [
+        f"{result.mediaType} {result.itemId}: {result.message}"
+        for result in results
+        if result.status == rename_plan.STATUS_ERROR
+    ]
+    return RenameApplyResult(
+        success=failed == 0,
+        processed=applied,
+        failed=failed,
+        total=len(results),
+        errors=errors[:10],
+        applied=applied,
+        stale=counts.get(rename_plan.STATUS_STALE, 0),
+        conflict=counts.get(rename_plan.STATUS_CONFLICT, 0),
+        entries=[_entryModel(result) for result in results],
+    )
 
 
 async def _refresh_metadata_item(conn, media_type: str, row: dict) -> bool:
@@ -420,16 +247,21 @@ async def bulk_delete(
             f"SELECT id, file_path FROM {tableName} WHERE id = ANY($1)",
             request.ids,
         )
+        deletedPaths = []
         for row in rows:
             filePath = row.get("file_path")
             if filePath and os.path.exists(filePath):
                 try:
                     if os.path.isfile(filePath):
                         os.remove(filePath)
+                        deletedPaths.append(filePath)
                     elif os.path.isdir(filePath):
                         shutil.rmtree(filePath)
+                        deletedPaths.append(filePath)
                 except Exception as e:
                     errors.append(f"File deletion for {row['id']}: {str(e)}")
+        if deletedPaths:
+            jellyfin.queueLibraryUpdate(deletedPaths, jellyfin.UPDATE_DELETED)
 
     # Single batch delete
     result = await conn.execute(
@@ -450,45 +282,35 @@ async def bulk_delete(
     )
 
 
-@router.post("/{media_type}/rename", response_model=BulkOperationResult)
-async def bulk_rename(
+@router.post("/{media_type}/rename/preview", response_model=RenamePreviewResponse)
+async def bulk_rename_preview(
     media_type: str,
     request: BulkRenameRequest,
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """Rename files for the given items to the current naming convention (real move on disk)."""
+    """Show where the current naming format puts each file of the given items. Changes nothing."""
     tableName = validateMediaType(media_type)
-    errors = []
-
     rows = await conn.fetch(f"SELECT * FROM {tableName} WHERE id = ANY($1)", request.ids)
-    foundIds = {row["id"] for row in rows}
-    notFound = [i for i in request.ids if i not in foundIds]
+    plans = await rename_plan.buildPreview(conn, {media_type: rows})
+    return previewResponse([entry for plan in plans for entry in plan.entries])
 
-    processed = 0
-    failed = len(notFound)
-    if notFound:
-        errors.append(f"{len(notFound)} items not found")
 
-    for row in rows:
-        item = dict(row)
-        if not item.get("has_file") or not item.get("file_path"):
-            failed += 1
-            continue
-        try:
-            await _rename_media_item(conn, media_type, item)
-            processed += 1
-        except Exception as e:
-            failed += 1
-            errors.append(f"Rename {item['id']}: {str(e)}")
-
-    return BulkOperationResult(
-        success=failed == 0,
-        processed=processed,
-        failed=failed,
-        total=len(request.ids),
-        errors=errors[:10],
-    )
+@router.post("/{media_type}/rename", response_model=RenameApplyResult)
+async def bulk_rename(
+    media_type: str,
+    request: RenameApplyRequest,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """Move the files of a preview to their previewed targets. Stale and conflicting entries are skipped."""
+    validateMediaType(media_type)
+    if any(entry.mediaType != media_type for entry in request.entries):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Every entry must be of media type {media_type}",
+        )
+    return await applyRenameEntries(conn, request.entries)
 
 
 @router.post("/{media_type}/refresh-metadata", response_model=BulkOperationResult)
@@ -648,37 +470,50 @@ async def bulk_change_media_profile(
     )
 
 
-@router.post("/rename-all", response_model=BulkOperationResult)
-async def bulk_rename_all(
+@router.post("/rename-all/preview", response_model=RenamePreviewResponse)
+async def bulk_rename_all_preview(
     request: BulkRenameAllRequest,
     current_user: User = Depends(get_current_user),
     conn: asyncpg.Connection = Depends(get_db),
 ):
-    """Rename every library file to the current naming convention (real move on disk)."""
-    processed = 0
-    failed = 0
-    errors = []
+    """
+    Show where the current naming formats put every library file. media_type or
+    media_types narrows the media types, and media_profile_id narrows to items using
+    that profile. Changes nothing.
+    """
+    if request.media_types:
+        mediaTypes = request.media_types
+    elif request.media_type:
+        mediaTypes = [request.media_type]
+    else:
+        mediaTypes = list(rename_plan.RENAMEABLE_TYPES)
 
-    mediaTypes = [request.media_type] if request.media_type else ["movie", "show", "anime", "album"]
-
+    rowsByType = {}
     for mediaType in mediaTypes:
-        if mediaType not in VALID_MEDIA_TYPES:
+        if mediaType not in rename_plan.RENAMEABLE_TYPES:
             continue
         tableName = TABLE_MAP[mediaType]
-        rows = await conn.fetch(f"SELECT * FROM {tableName} WHERE has_file = true AND file_path IS NOT NULL")
-        for row in rows:
-            try:
-                await _rename_media_item(conn, mediaType, dict(row))
-                processed += 1
-            except Exception as e:
-                failed += 1
-                if len(errors) < 10:
-                    errors.append(f"{mediaType} {row['id']}: {str(e)}")
+        query = f"SELECT * FROM {tableName} WHERE has_file = true AND file_path IS NOT NULL"
+        if request.media_profile_id is not None:
+            rowsByType[mediaType] = await conn.fetch(f"{query} AND media_profile_id = $1", request.media_profile_id)
+        else:
+            rowsByType[mediaType] = await conn.fetch(query)
 
-    return BulkOperationResult(
-        success=failed == 0,
-        processed=processed,
-        failed=failed,
-        total=processed + failed,
-        errors=errors[:10],
-    )
+    plans = await rename_plan.buildPreview(conn, rowsByType)
+    return previewResponse([entry for plan in plans for entry in plan.entries])
+
+
+@router.post("/rename-all", response_model=RenameApplyResult)
+async def bulk_rename_all(
+    request: RenameApplyRequest,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """Move the files of a library wide preview to their previewed targets. Entries may span media types."""
+    invalid = {entry.mediaType for entry in request.entries} - set(VALID_MEDIA_TYPES)
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid media type. Must be one of: {', '.join(VALID_MEDIA_TYPES)}",
+        )
+    return await applyRenameEntries(conn, request.entries)

@@ -51,6 +51,10 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.js ./
 
+# Run as the image's unprivileged node user, which owns .next so the image cache can write.
+RUN chown -R node:node /app/.next
+USER node
+
 # Expose port
 EXPOSE 3000
 

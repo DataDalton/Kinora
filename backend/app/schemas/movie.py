@@ -11,7 +11,7 @@ def parseJsonField(value):
     if isinstance(value, str):
         try:
             return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             return value
     return value
 
@@ -57,6 +57,8 @@ class Movie(MovieBase):
 
     id: int
     status: str
+    # The metadata provider's release or airing status. status holds Kinora's own state.
+    metadata_status: Optional[str] = None
     runtime: Optional[int] = None
     tagline: Optional[str] = None
     production_companies: Optional[List[Dict[str, Any]]] = None

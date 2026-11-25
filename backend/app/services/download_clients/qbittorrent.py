@@ -44,17 +44,50 @@ class QBittorrentClient(BaseDownloadClient):
         self._cookie: Optional[str] = None
 
     async def _login(self) -> bool:
-        """Authenticate with qBittorrent"""
+        """
+        Authenticate with qBittorrent. A rejected login reloads the credentials from the
+        database once and retries, because another process may have rotated the password
+        (see ensure_qbittorrent_hardened) after this client was created.
+        """
+        if await self._try_login():
+            return True
+        if await self._reload_credentials():
+            return await self._try_login()
+        return False
+
+    async def _try_login(self) -> bool:
         response = await http_post(
             f"{self.base_url}/auth/login",
             data={"username": self.username, "password": self.password},
         )
-
         if response.text == "Ok.":
             self._cookie = response.cookies.get("SID")
             return True
-
         return False
+
+    async def _reload_credentials(self) -> bool:
+        """Read this client's username and password from the database. True when they changed."""
+        try:
+            from app.db import get_pool
+            from app.api.v1.endpoints.setup import decrypt_value
+
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT username, encrypted_password FROM download_clients "
+                    "WHERE client_type = 'qbittorrent' AND host = $1 AND port = $2 LIMIT 1",
+                    self.host,
+                    self.port,
+                )
+            if not row:
+                return False
+            password = decrypt_value(row["encrypted_password"])
+            if row["username"] == self.username and password == self.password:
+                return False
+            self.username, self.password = row["username"], password
+            return True
+        except Exception:
+            return False
 
     async def _request(
         self,
@@ -127,12 +160,27 @@ class QBittorrentClient(BaseDownloadClient):
         qBittorrent's add endpoint does not return the hash, so it is resolved in
         this order: a caller-supplied known_hash, the hash embedded in a magnet URI,
         then the hash that newly appears in the torrent list after adding.
+
+        A kinora-indexer:// link from a user-defined indexer is fetched by that indexer
+        with its own credentials, and the .torrent file is uploaded as it is, so a private
+        torrent keeps its private flag and tracker list.
         """
+        from app.services.indexers.custom.privatelink import isPrivateLink, resolveLink
+
+        fileBytes = None
+        if isPrivateLink(torrent):
+            resolved = await resolveLink(torrent)
+            known_hash = known_hash or resolved.infoHash
+            if resolved.magnet:
+                torrent = resolved.magnet
+            else:
+                fileBytes = resolved.fileBytes
+
         # Snapshot existing hashes before adding so the new one can be identified
         # even for .torrent URLs that carry no hash in the input string.
         existing = {t.hash.lower() for t in await self.get_torrents()}
 
-        data = {"urls": torrent}
+        data = {"urls": torrent} if fileBytes is None else {}
         if save_path:
             data["savepath"] = save_path
         if category:
@@ -145,10 +193,46 @@ class QBittorrentClient(BaseDownloadClient):
             data["paused"] = "true"
             data["stopped"] = "true"
 
-        await self._request("POST", "torrents/add", data=data)
+        if fileBytes is None:
+            await self._request("POST", "torrents/add", data=data)
+        else:
+            await self._upload_torrent_file(fileBytes, data)
 
         target = (known_hash or self._magnet_hash(torrent) or "").lower() or None
         return await self._resolve_added_hash(target, existing)
+
+    async def _upload_torrent_file(self, fileBytes: bytes, data: Dict[str, str]) -> None:
+        """Add a torrent from the bytes of a .torrent file, signing in again once when the session expired."""
+        from curl_cffi import CurlMime
+        from app.core.http_client import get_http_client
+
+        for attempt in range(2):
+            if not self._cookie:
+                await self._login()
+            mime = CurlMime()
+            mime.addpart(
+                name="torrents",
+                content_type="application/x-bittorrent",
+                filename="release.torrent",
+                data=fileBytes,
+            )
+            try:
+                client = await get_http_client()
+                response = await client.post(
+                    f"{self.base_url}/torrents/add",
+                    data=dict(data),
+                    multipart=mime,
+                    cookies={"SID": self._cookie} if self._cookie else None,
+                )
+            finally:
+                mime.close()
+            if response.status_code == 403 and attempt == 0:
+                self._cookie = None
+                continue
+            response.raise_for_status()
+            if (response.text or "").strip().lower().startswith("fails"):
+                raise Exception("qBittorrent did not accept the .torrent file")
+            return
 
     async def _resolve_added_hash(
         self,
@@ -263,6 +347,17 @@ class QBittorrentClient(BaseDownloadClient):
         """Get list of files in torrent"""
         files = await self._request("GET", "torrents/files", data={"hash": hash})
         return files or []
+
+    async def set_file_priority(self, hash: str, file_indexes: List[int], priority: int) -> bool:
+        """Set the download priority of files by index. Priority 0 means do not download."""
+        if not file_indexes:
+            return True
+        await self._request(
+            "POST",
+            "torrents/filePrio",
+            data={"hash": hash, "id": "|".join(str(i) for i in file_indexes), "priority": priority},
+        )
+        return True
 
     async def set_share_limits(
         self,

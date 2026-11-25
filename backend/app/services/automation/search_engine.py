@@ -12,15 +12,22 @@ import asyncio
 import hashlib
 
 from app.services.indexers.base import TorrentRelease
+from app.services import download_episodes
 from app.services.indexers.leetx import leetx_indexer
 from app.services.indexers.yts import yts_indexer
 from app.services.indexers.nyaa import NyaaIndexer
+from app.services.indexers.extto import extto_indexer
+from app.services.indexers import search_context
+from app.services.indexers.custom import registry as custom_indexers
 from app.services.media_profile import MediaProfile, media_profile_service
 from app.services import music_quality
 from app.services import release_index
 from app.services.download_clients.qbittorrent import get_qbittorrent_client
 from app.core.cache import cacheGet, cacheSet
 from app.services.torrent_validator import validate_and_resume_torrent
+from app.services import release_matching
+from app.services import indexer_health
+from app.services import release_trust
 from app.services.folder_selector import folderSelector
 
 # Media type -> root_folders.media_type scope, and -> the item table that stores root_folder_id.
@@ -95,12 +102,14 @@ async def _record_download_history(
     grab_mode="auto",
     was_upgrade=False,
     root_folder_id=None,
+    safety_template=None,
 ) -> None:
     """
     Write a complete download_history row for an added release, including the magnet/
     .torrent source and info hash so it can be re-added later from the archive, plus the
-    root_folder_id so the organizer can place the completed files. Keyed on torrent_hash and
-    idempotent. Best effort, never raises.
+    root_folder_id so the organizer can place the completed files, and the trust category
+    and safety template the release was chosen under. Keyed on torrent_hash and idempotent.
+    Best effort, never raises.
     """
     try:
         await conn.execute(
@@ -108,9 +117,13 @@ async def _record_download_history(
             INSERT INTO download_history (
                 media_id, media_type, torrent_hash, torrent_title, indexer,
                 quality, size, magnet_link, torrent_url, info_hash, status,
-                grab_mode, was_upgrade, root_folder_id, download_client, created_at
+                grab_mode, was_upgrade, root_folder_id, download_client, created_at,
+                uploader, trust_category, safety_template, origin_sites
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'downloading', $11, $12, $13, 'qbittorrent', NOW())
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'downloading', $11, $12, $13, 'qbittorrent', NOW(),
+                $14, $15, $16, $17
+            )
             ON CONFLICT (torrent_hash) DO UPDATE SET
                 media_id = EXCLUDED.media_id,
                 media_type = EXCLUDED.media_type,
@@ -122,6 +135,10 @@ async def _record_download_history(
                 grab_mode = EXCLUDED.grab_mode,
                 was_upgrade = EXCLUDED.was_upgrade,
                 root_folder_id = COALESCE(EXCLUDED.root_folder_id, download_history.root_folder_id),
+                uploader = EXCLUDED.uploader,
+                trust_category = EXCLUDED.trust_category,
+                safety_template = EXCLUDED.safety_template,
+                origin_sites = EXCLUDED.origin_sites,
                 updated_at = NOW()
             """,
             media_id,
@@ -137,9 +154,160 @@ async def _record_download_history(
             grab_mode,
             was_upgrade,
             root_folder_id,
+            release.uploader,
+            getattr(release, "trust_category", None),
+            safety_template,
+            list(getattr(release, "origin_sites", None) or []),
         )
+        await download_episodes.recordCoveredEpisodes(conn, torrent_hash, media_type, media_id, release.title)
     except Exception as e:
         print(f"Failed to record download history for {torrent_hash}: {e}")
+
+
+# How many times a search picks again after its choice turns out to be blocklisted by hash.
+_BLOCKED_RESELECT_LIMIT = 3
+
+# Detail pages read per selection to find whether a release a Balanced profile rejected
+# for its site is also on a Balanced site the search result did not show.
+SITE_CHECKS_PER_SELECTION = 3
+
+
+async def _isReleaseHashBlocked(conn, release, media_type, media_id) -> bool:
+    """True when the release's info hash, from the release or its magnet, is on the blocklist."""
+    from app.db import get_pool
+    from app.services import hash_blocklist
+
+    infoHash = release.info_hash or hash_blocklist.infoHashFromSource(release.magnet)
+    if not infoHash:
+        return False
+    try:
+        if conn is not None:
+            return await hash_blocklist.isHashBlocked(conn, infoHash, media_type, media_id)
+        pool = await get_pool()
+        async with pool.acquire() as poolConn:
+            return await hash_blocklist.isHashBlocked(poolConn, infoHash, media_type, media_id)
+    except Exception as e:
+        print(f"Could not check the hash blocklist for {release.title}: {e}")
+        return False
+
+
+async def _load_match_target(conn, media_type, media_id, query, episode_target=None):
+    """
+    What a search is for, loaded from the media item, so releases of other titles,
+    years or seasons are rejected. The season and episode come from the query, since
+    episode and season searches put SxxEyy or Sxx there. episode_target, a dict with
+    season, episode and absolute_episode, replaces them for an episode search. Without a
+    library list in episode_target the target accepts only releases of that one episode.
+    With one, packs are accepted and checked by the caller. Returns None when the item
+    cannot be loaded, which leaves selection unchanged.
+    """
+    from app.db import get_pool
+    from app.services import release_matching
+
+    if not media_id or media_type not in ("movie", "show", "anime", "album"):
+        return None
+    sql = {
+        "movie": "SELECT title, original_title, release_date AS item_date, metadata FROM movies WHERE id = $1",
+        "show": "SELECT title, original_title, first_air_date AS item_date, metadata FROM shows WHERE id = $1",
+        "anime": "SELECT title, original_title, release_date AS item_date, metadata FROM anime WHERE id = $1",
+        "album": (
+            "SELECT a.title, NULL AS original_title, a.release_date AS item_date, NULL::jsonb AS metadata, "
+            "ar.name AS artist FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id WHERE a.id = $1"
+        ),
+    }[media_type]
+    try:
+        if conn is not None:
+            row = await conn.fetchrow(sql, media_id)
+        else:
+            pool = await get_pool()
+            async with pool.acquire() as poolConn:
+                row = await poolConn.fetchrow(sql, media_id)
+    except Exception as e:
+        print(f"Could not load match target for {media_type} {media_id}: {e}")
+        return None
+    if not row:
+        return None
+    metadata = row["metadata"]
+    if isinstance(metadata, str):
+        try:
+            import json
+
+            metadata = json.loads(metadata)
+        except ValueError:
+            metadata = None
+    titles = [row["title"], row["original_title"]] + release_matching.alternativeTitles(metadata)
+    titles = list(dict.fromkeys(t for t in titles if t))
+    season, episode = release_matching.seasonEpisodeFromQuery(query)
+    absoluteEpisode = None
+    singleEpisode = False
+    if episode_target and media_type in ("show", "anime"):
+        season = episode_target.get("season")
+        episode = episode_target.get("episode")
+        absoluteEpisode = episode_target.get("absolute_episode")
+        singleEpisode = episode_target.get("library") is None
+    itemDate = row["item_date"]
+    return release_matching.MatchTarget(
+        kind=media_type,
+        titles=titles,
+        year=itemDate.year if itemDate else None,
+        season=season if media_type in ("show", "anime") else None,
+        episode=episode if media_type in ("show", "anime") else None,
+        absoluteEpisode=absoluteEpisode,
+        singleEpisode=singleEpisode,
+        artist=row["artist"] if media_type == "album" else None,
+    )
+
+
+def _episodeUpgradeCheck(target, library, profile, media_type, upgrade_allowed):
+    """
+    The release check for an episode upgrade. A release must hold the target episode,
+    and every library episode it holds must get a better file, so a season pack never
+    replaces an episode that already has the same or a better quality.
+    """
+    from app.services import release_matching
+
+    def isTarget(episode):
+        if target.absoluteEpisode is not None and episode.get("absolute") == target.absoluteEpisode:
+            return True
+        return episode.get("season") == target.season and episode.get("episode") == target.episode
+
+    def check(release):
+        covered = release_matching.coveredEpisodes(release.title, target, library)
+        if not covered or not any(isTarget(e) for e in covered):
+            return False
+        return all(
+            media_profile_service.needs_upgrade(
+                e.get("quality"), release.quality, profile, media_type, upgrade_allowed=upgrade_allowed
+            )
+            for e in covered
+        )
+
+    return check
+
+
+async def _notify_template_blocked(media_type, media_id, query, rejected, template) -> None:
+    """
+    Tell the user a search found releases that the profile's safety template rejected
+    and nothing else was acceptable, once per item per window, so a Trusted profile that
+    keeps finding nothing is visible instead of looking like an empty search.
+    """
+    try:
+        from app.services.notifications import create_notification
+
+        name = {"trusted": "Trusted", "balanced": "Balanced"}.get(template or "", template or "")
+        await create_notification(
+            type=f"template_blocked_{media_type}_{media_id}",
+            title=f"No allowed release for {query}",
+            message=(
+                f"Found {rejected} release(s), none allowed by the {name} template. "
+                "Switching the profile to Balanced allows more sources."
+            ),
+            severity="info",
+            data={"media_type": media_type, "media_id": media_id, "template": template, "rejected": rejected},
+            dedup_window_seconds=7 * 24 * 3600,
+        )
+    except Exception as e:
+        print(f"Could not send the template notice for {query}: {e}")
 
 
 async def _fetch_blocklisted_titles(conn, media_type, media_id) -> set:
@@ -181,6 +349,10 @@ class SearchEngine:
             leetx_indexer,
             yts_indexer,
         ]
+        # YTS lists only movies, so TV searches without a profile indexer list use 1337x alone.
+        self.show_indexers = [
+            leetx_indexer,
+        ]
         # Nyaa only for anime - best quality releases with proper fansubs
         self.nyaa_indexer = NyaaIndexer()
         self.anime_indexers = [
@@ -191,18 +363,28 @@ class SearchEngine:
             leetx_indexer,
         ]
 
-    async def _search_indexer_with_retry(self, indexer, query, category, limit_per_indexer, max_retries):
+    async def _search_indexer_with_retry(
+        self, indexer, query, category, limit_per_indexer, max_retries, search_stats=None
+    ):
         """
         Search a single indexer, retrying on transient errors up to max_retries times
-        with a short backoff. Returns an empty list when every attempt fails.
+        with a short backoff. Returns an empty list when every attempt fails, and records
+        the failure in search_stats["indexer_errors"] and the indexer's health so an
+        outage is told apart from a search that found nothing.
         """
+        name = getattr(indexer, "name", str(indexer))
         attempts = max(0, max_retries) + 1
         for attempt in range(attempts):
             try:
-                return await indexer.search(query, category, limit_per_indexer)
+                results = await indexer.search(query, category, limit_per_indexer)
+                await indexer_health.record_success(name)
+                return results
             except Exception as e:
                 if attempt >= attempts - 1:
-                    print(f"Indexer {getattr(indexer, 'name', indexer)} failed after {attempt + 1} attempt(s): {e}")
+                    print(f"Indexer {name} failed after {attempt + 1} attempt(s): {e}")
+                    if search_stats is not None:
+                        search_stats.setdefault("indexer_errors", {})[name] = str(e)[:300]
+                    await indexer_health.record_failure(name, str(e))
                     return []
                 await asyncio.sleep(min(2**attempt, 5))
         return []
@@ -228,18 +410,32 @@ class SearchEngine:
         never count, so callers can rate-limit only real indexer traffic.
         """
         tasks = []
+        await custom_indexers.ensureLoaded()
 
         # Use selected indexers if provided
         if selected_indexers:
             indexers = [self._indexer_by_name(name) for name in selected_indexers if self._indexer_by_name(name)]
         # Fall back to media type based selection
         elif media_type == "anime":
-            indexers = self.anime_indexers
+            indexers = list(self.anime_indexers)
         elif media_type == "music":
-            indexers = self.music_indexers
+            indexers = list(self.music_indexers)
             category = "music"  # Force music category for 1337x
+        elif media_type in ("show", "episode"):
+            indexers = list(self.show_indexers)
         else:
-            indexers = self.general_indexers
+            indexers = list(self.general_indexers)
+
+        # A profile's indexer list decides which user-defined indexers it searches, the same
+        # as built-in ones. Without a list, every user-defined indexer enabled for search
+        # joins searches of the media types it covers.
+        context = search_context.current()
+        scope = context.scope if context and context.scope else search_context.scopeFor(media_type, category)
+        indexers = [indexer for indexer in indexers if getattr(indexer, "searchEnabled", True)]
+        if not selected_indexers:
+            for indexer in custom_indexers.searchIndexers(scope):
+                if indexer not in indexers:
+                    indexers.append(indexer)
 
         # Short-TTL cache so repeated identical searches (re-runs, cascade retries,
         # search-again after blocklist) skip the indexer round trip. Magnets are
@@ -254,7 +450,7 @@ class SearchEngine:
 
         for indexer in indexers:
             task = asyncio.create_task(
-                self._search_indexer_with_retry(indexer, query, category, limit_per_indexer, max_retries)
+                self._search_indexer_with_retry(indexer, query, category, limit_per_indexer, max_retries, search_stats)
             )
             tasks.append(task)
 
@@ -278,18 +474,17 @@ class SearchEngine:
             except Exception as e:
                 print(f"Indexer error: {e}")
 
-        # Deduplicate by info_hash
-        seen_hashes = set()
-        unique_releases = []
+        # When every indexer failed or timed out, the empty result says nothing about
+        # whether the item exists, so callers leave the search backoff unchanged.
+        if search_stats is not None and indexers:
+            failed = len(search_stats.get("indexer_errors", {})) + len(pending)
+            if not all_releases and failed >= len(indexers):
+                search_stats["all_indexers_failed"] = True
 
-        for release in all_releases:
-            if release.info_hash and release.info_hash in seen_hashes:
-                continue
-
-            if release.info_hash:
-                seen_hashes.add(release.info_hash)
-
-            unique_releases.append(release)
+        # Merge copies of the same torrent (by hash, or title and size) and set each
+        # release's trust category, so a copy found through ext.to and through 1337x
+        # counts once with the best trust and every site it is listed on.
+        unique_releases = await release_trust.annotate(all_releases)
 
         # Persist everything the live sweep saw into the local release index so
         # future searches can answer locally.
@@ -308,17 +503,29 @@ class SearchEngine:
         return result
 
     def _indexer_by_name(self, name: Optional[str]):
-        """Resolve an indexer instance from its display name."""
+        """Resolve an indexer instance from its display name, built-in or user-defined."""
         return {
             "1337x": leetx_indexer,
             "YTS": yts_indexer,
             "Nyaa": self.nyaa_indexer,
-        }.get(name)
+            "ext.to": extto_indexer,
+        }.get(
+            name
+        ) or custom_indexers.byName(name)
 
     def _search_cache_key(self, query, category, media_type, selected_indexers) -> str:
-        """Build a deterministic cache key for a search."""
+        """
+        Build a deterministic cache key for a search. The user-defined indexer set and the
+        item ids are part of it, because indexers that search by id answer per item.
+        """
         idx = ",".join(sorted(selected_indexers)) if selected_indexers else (media_type or "auto")
-        raw = f"{query}|{category}|{media_type}|{idx}".lower()
+        context = search_context.current()
+        item = (
+            f"{context.imdbId}|{context.tmdbId}|{context.tvdbId}|{context.season}|{context.episode}|{context.artist}"
+            if context
+            else ""
+        )
+        raw = f"{query}|{category}|{media_type}|{idx}|{custom_indexers.versionTag()}|{item}".lower()
         return "idxsearch:" + hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
     async def resolve_download_source(self, release: TorrentRelease) -> None:
@@ -349,18 +556,41 @@ class SearchEngine:
         preferred_uploaders: Optional[List[str]],
         blocked_uploaders: Optional[List[str]],
         blocklisted_titles: Optional[set],
+        match_target=None,
+        rejection_stats: Optional[dict] = None,
+        site_deferred: Optional[list] = None,
     ) -> Optional[TorrentRelease]:
         """
-        Apply the full profile gate (blocklist, minimum requirements, blocked
-        uploaders, anime rules) to a batch and return the highest-scoring release.
+        Apply the full profile gate (item match, blocklist, minimum requirements,
+        blocked uploaders, anime rules) to a batch and return the highest-scoring release.
         score_release ranks by the profile's preference order across resolution,
         source, codec, audio, and HDR, so this preserves the cascade priorities.
+        When site_deferred is a list, releases that pass every gate except a Balanced
+        site rejection a detail page could reverse are added to it instead of dropped.
         """
+        template = getattr(profile, "safety_template", "open")
         filtered_releases = []
         for release in releases:
+            # Skip releases of a different title, year, season or episode.
+            if not release_matching.releaseMatches(release.title, match_target):
+                continue
+            if match_target is not None and match_target.releaseCheck and not match_target.releaseCheck(release):
+                continue
+
             # Skip releases the user has blocklisted for this item.
             if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
                 continue
+
+            # Skip releases the profile's safety template does not allow, unless a detail
+            # page could show the release is also on a site the template allows.
+            allowed, _reason = release_trust.isAllowed(release, template)
+            needsSiteCheck = False
+            if not allowed:
+                if rejection_stats is not None:
+                    rejection_stats["template_rejected"] = rejection_stats.get("template_rejected", 0) + 1
+                if site_deferred is None or not release_trust.siteCheckCouldAllow(release, template):
+                    continue
+                needsSiteCheck = True
 
             if not media_profile_service._meets_minimum_requirements(release, profile, media_type):
                 continue
@@ -372,7 +602,7 @@ class SearchEngine:
             if media_type == "anime" and not self._meets_anime_requirements(release, profile):
                 continue
 
-            filtered_releases.append(release)
+            (site_deferred if needsSiteCheck else filtered_releases).append(release)
 
         if not filtered_releases:
             return None
@@ -385,6 +615,73 @@ class SearchEngine:
             media_type,
         )
 
+    async def _select_with_site_check(
+        self,
+        releases: List[TorrentRelease],
+        profile: MediaProfile,
+        media_type: Optional[str],
+        preferred_uploaders: Optional[List[str]],
+        blocked_uploaders: Optional[List[str]],
+        blocklisted_titles: Optional[set],
+        match_target=None,
+        rejection_stats: Optional[dict] = None,
+    ) -> Optional[TorrentRelease]:
+        """_filter_and_select, then a detail-page site check of deferred releases that would outrank its pick."""
+        deferred: List[TorrentRelease] = []
+        best = self._filter_and_select(
+            releases,
+            profile,
+            media_type,
+            preferred_uploaders,
+            blocked_uploaders,
+            blocklisted_titles,
+            match_target,
+            rejection_stats,
+            site_deferred=deferred,
+        )
+        if not deferred:
+            return best
+
+        def rank(release):
+            return media_profile_service.score_release(
+                release, profile, preferred_uploaders, blocked_uploaders, media_type
+            )
+
+        return await self._confirm_deferred_sites(best, deferred, profile, rank)
+
+    async def _confirm_deferred_sites(self, best, deferred, profile, rank):
+        """
+        Read the detail pages of releases a Balanced profile rejected only for their site,
+        best ranked first, and return the first one the full site list shows is allowed.
+        Only releases that would outrank the current pick are read, and no more than
+        SITE_CHECKS_PER_SELECTION of them, so a search costs at most that many page reads.
+        Each site list read is stored in the release index so later searches already know it.
+        """
+        template = getattr(profile, "safety_template", "open")
+        bestRank = rank(best) if best is not None else None
+        checked = 0
+        for release in sorted(deferred, key=rank, reverse=True):
+            releaseRank = rank(release)
+            if isinstance(releaseRank, (int, float)) and releaseRank < 0:
+                continue
+            if bestRank is not None and releaseRank <= bestRank:
+                break
+            if checked >= SITE_CHECKS_PER_SELECTION:
+                break
+            checked += 1
+            try:
+                await extto_indexer.refresh_sites(release)
+            except Exception as e:
+                print(f"Could not read the sites for '{release.title}': {e}")
+                continue
+            await release_index.addOriginSites(release.indexer, release.detail_url, release.origin_sites)
+            allowed, _reason = release_trust.isAllowed(release, template)
+            if not allowed:
+                continue
+            print(f"[OK] Detail page shows '{release.title}' is also on {', '.join(release.origin_sites)}")
+            return release
+        return best
+
     async def cascading_search(
         self,
         base_query: str,
@@ -395,6 +692,7 @@ class SearchEngine:
         media_type: Optional[str] = None,
         blocklisted_titles: Optional[set] = None,
         search_stats: Optional[dict] = None,
+        match_target=None,
     ) -> Optional[TorrentRelease]:
         """
         Broad-first cascading search.
@@ -440,13 +738,16 @@ class SearchEngine:
                 limit=200,
                 max_age_days=LOCAL_INDEX_MAX_AGE_DAYS,
             )
-            best_release = self._filter_and_select(
+            local_releases = await release_trust.annotate(local_releases)
+            best_release = await self._select_with_site_check(
                 local_releases,
                 profile,
                 media_type,
                 preferred_uploaders,
                 blocked_uploaders,
                 blocklisted_titles,
+                match_target,
+                search_stats,
             )
             if best_release:
                 print(
@@ -467,13 +768,15 @@ class SearchEngine:
             max_retries=profile.max_retries,
             search_stats=search_stats,
         )
-        best_release = self._filter_and_select(
+        best_release = await self._select_with_site_check(
             releases,
             profile,
             media_type,
             preferred_uploaders,
             blocked_uploaders,
             blocklisted_titles,
+            match_target,
+            search_stats,
         )
         if best_release:
             print(
@@ -506,13 +809,15 @@ class SearchEngine:
                     if not releases:
                         continue
 
-                    best_release = self._filter_and_select(
+                    best_release = await self._select_with_site_check(
                         releases,
                         profile,
                         media_type,
                         preferred_uploaders,
                         blocked_uploaders,
                         blocklisted_titles,
+                        match_target,
+                        search_stats,
                     )
 
                     if not best_release:
@@ -563,6 +868,7 @@ class SearchEngine:
         grab_mode: str = "auto",
         upgrade_allowed: Optional[bool] = None,
         search_stats: Optional[dict] = None,
+        episode_target: Optional[dict] = None,
     ) -> Optional[str]:
         """
         Search with cascading quality, select best, and download.
@@ -571,36 +877,68 @@ class SearchEngine:
         When current_quality is provided, only grabs a release that is an upgrade;
         upgrade_allowed is the effective per-item decision (item override, else profile)
         and lets a per-item override drive the upgrade regardless of the profile default.
+        episode_target (season, episode, absolute_episode) aims a show or anime search at
+        one episode. With a library list in it (every episode of the series that has a file,
+        with its quality) a pack is accepted only when it holds the episode and every
+        library episode it holds would get a better file. Without one, only releases of
+        that single episode are accepted.
         """
+        if search_stats is None:
+            search_stats = {}
         # Skip releases the user has blocklisted for this item (auto-search only).
-        blocklisted_titles = await _fetch_blocklisted_titles(history_conn, media_type, history_media_id)
-        best_release = await self.cascading_search(
-            query,
-            profile,
-            category,
-            preferred_uploaders,
-            blocked_uploaders,
-            media_type,
-            blocklisted_titles=blocklisted_titles,
-            search_stats=search_stats,
-        )
+        blocklisted_titles = set(await _fetch_blocklisted_titles(history_conn, media_type, history_media_id) or ())
+        match_target = await _load_match_target(history_conn, media_type, history_media_id, query, episode_target)
+        if match_target is not None and episode_target and episode_target.get("library") is not None:
+            match_target.releaseCheck = _episodeUpgradeCheck(
+                match_target, episode_target["library"], profile, media_type, upgrade_allowed
+            )
+        # The item's ids, for indexers that search by IMDb, TMDB or TVDB id.
+        itemContext = await search_context.forItem(history_conn, media_type, history_media_id, match_target)
+        for _attempt in range(_BLOCKED_RESELECT_LIMIT):
+            with search_context.using(itemContext):
+                best_release = await self.cascading_search(
+                    query,
+                    profile,
+                    category,
+                    preferred_uploaders,
+                    blocked_uploaders,
+                    media_type,
+                    blocklisted_titles=blocklisted_titles,
+                    search_stats=search_stats,
+                    match_target=match_target,
+                )
 
-        if not best_release:
-            return None
-
-        # Upgrade mode: only proceed when the found release beats the current quality.
-        if current_quality:
-            if not media_profile_service.needs_upgrade(
-                current_quality,
-                best_release.quality,
-                profile,
-                media_type,
-                upgrade_allowed=upgrade_allowed,
-            ):
+            if not best_release:
+                if search_stats.get("template_rejected") and history_media_id:
+                    await _notify_template_blocked(
+                        media_type,
+                        history_media_id,
+                        query,
+                        search_stats["template_rejected"],
+                        getattr(profile, "safety_template", None),
+                    )
                 return None
 
-        # Resolve the magnet on demand for the one release we are grabbing.
-        await self.resolve_download_source(best_release)
+            # Upgrade mode: only proceed when the found release beats the current quality.
+            if current_quality:
+                if not media_profile_service.needs_upgrade(
+                    current_quality,
+                    best_release.quality,
+                    profile,
+                    media_type,
+                    upgrade_allowed=upgrade_allowed,
+                ):
+                    return None
+
+            # Resolve the magnet on demand for the one release we are grabbing, then
+            # skip it and pick again when its hash failed validation before.
+            await self.resolve_download_source(best_release)
+            if not await _isReleaseHashBlocked(history_conn, best_release, media_type, history_media_id):
+                break
+            print(f"Skipping blocklisted torrent: {best_release.title}")
+            blocklisted_titles.add((best_release.title or "").strip().lower())
+        else:
+            return None
 
         # Prefer .torrent file if available, fallback to magnet
         torrent_source = best_release.torrent_url or best_release.magnet
@@ -649,6 +987,7 @@ class SearchEngine:
                     grab_mode=grab_mode,
                     was_upgrade=(grab_mode == "upgrade"),
                     root_folder_id=root_folder_id,
+                    safety_template=getattr(profile, "safety_template", None),
                 )
 
             # Trigger validation immediately after adding
@@ -683,6 +1022,9 @@ class SearchEngine:
             (yts_indexer, None),
             (self.nyaa_indexer, None),
         ]
+        # User-defined indexers enabled for RSS read their own newest-uploads feed.
+        await custom_indexers.ensureLoaded()
+        feeds.extend((indexer, None) for indexer in custom_indexers.rssIndexers())
 
         tasks = [indexer.get_rss(category) for indexer, category in feeds]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -771,6 +1113,7 @@ class SearchEngine:
         blocklisted_titles: Optional[set] = None,
         min_tier: Optional[str] = None,
         search_stats: Optional[dict] = None,
+        match_target=None,
     ) -> Optional[TorrentRelease]:
         """
         Music cascading search over the profile's allowed quality tiers, highest
@@ -809,10 +1152,26 @@ class SearchEngine:
         if selected_indexers:
             print(f"Selected indexers: {selected_indexers}")
 
-        def music_filter(candidates):
-            """Blocklist, uploader, and tier gate shared by the local and live passes."""
+        template = getattr(profile, "safety_template", "open")
+
+        def music_filter(candidates, deferred):
+            """
+            Item match, blocklist, uploader, and tier gate shared by the local and live
+            passes. Releases a detail page could move past a Balanced site rejection go to
+            deferred instead of being dropped.
+            """
             kept = []
             for release in candidates:
+                if not release_matching.releaseMatches(release.title, match_target):
+                    continue
+                allowed, _reason = release_trust.isAllowed(release, template)
+                needsSiteCheck = False
+                if not allowed:
+                    if search_stats is not None:
+                        search_stats["template_rejected"] = search_stats.get("template_rejected", 0) + 1
+                    if not release_trust.siteCheckCouldAllow(release, template):
+                        continue
+                    needsSiteCheck = True
                 if blocklisted_titles and (release.title or "").strip().lower() in blocklisted_titles:
                     continue
                 if blocked_uploaders and release.uploader in blocked_uploaders:
@@ -827,17 +1186,25 @@ class SearchEngine:
                         continue
                 elif min_tier is not None:
                     continue
-                kept.append(release)
+                (deferred if needsSiteCheck else kept).append(release)
             return kept
 
+        def rank(release):
+            return self._music_rank(release, preferred_uploaders)
+
         # Local index pass first: zero indexer round trips when the album is known.
+        local_deferred: List[TorrentRelease] = []
         local_candidates = music_filter(
-            await release_index.searchLocal(
-                query, media_type="music", limit=200, max_age_days=LOCAL_INDEX_MAX_AGE_DAYS
-            )
+            await release_trust.annotate(
+                await release_index.searchLocal(
+                    query, media_type="music", limit=200, max_age_days=LOCAL_INDEX_MAX_AGE_DAYS
+                )
+            ),
+            local_deferred,
         )
-        if local_candidates:
+        if local_candidates or local_deferred:
             best_release = self._select_best_music_release(local_candidates, profile, preferred_uploaders)
+            best_release = await self._confirm_deferred_sites(best_release, local_deferred, profile, rank)
             if best_release:
                 print(
                     f"[OK] Selected from local index: {best_release.title} (tier {self._release_tier(best_release)})"
@@ -864,12 +1231,14 @@ class SearchEngine:
             if not releases:
                 continue
 
-            filtered_releases = music_filter(releases)
+            deferred: List[TorrentRelease] = []
+            filtered_releases = music_filter(releases, deferred)
 
-            if not filtered_releases:
+            if not filtered_releases and not deferred:
                 continue
 
             best_release = self._select_best_music_release(filtered_releases, profile, preferred_uploaders)
+            best_release = await self._confirm_deferred_sites(best_release, deferred, profile, rank)
 
             if best_release:
                 print(f"\n[OK] Selected: {best_release.title}")
@@ -908,14 +1277,14 @@ class SearchEngine:
         """
         if not releases:
             return None
-
-        def score_release(release: TorrentRelease) -> tuple:
-            tier_score = music_quality.rank(self._release_tier(release))
-            uploader_score = 1 if preferred_uploaders and release.uploader in preferred_uploaders else 0
-            return (tier_score, uploader_score, release.seeders)
-
-        releases.sort(key=score_release, reverse=True)
+        releases.sort(key=lambda release: self._music_rank(release, preferred_uploaders), reverse=True)
         return releases[0]
+
+    def _music_rank(self, release: TorrentRelease, preferred_uploaders: Optional[List[str]] = None) -> tuple:
+        """Music ranking key, by quality tier, then preferred uploader, then seeders."""
+        tier_score = music_quality.rank(self._release_tier(release))
+        uploader_score = 1 if preferred_uploaders and release.uploader in preferred_uploaders else 0
+        return (tier_score, uploader_score, release.seeders or 0)
 
     async def search_music_and_download(
         self,
@@ -942,28 +1311,51 @@ class SearchEngine:
         proceeds when the found release beats it.
         """
         upgrade = grab_mode == "upgrade" and current_quality is not None
-        blocklisted_titles = await _fetch_blocklisted_titles(history_conn, "album", history_media_id)
-        best_release = await self.music_cascading_search(
-            query,
-            profile,
-            preferred_uploaders,
-            blocked_uploaders,
-            blocklisted_titles=blocklisted_titles,
-            min_tier=current_quality if upgrade else None,
-            search_stats=search_stats,
-        )
+        if search_stats is None:
+            search_stats = {}
+        blocklisted_titles = set(await _fetch_blocklisted_titles(history_conn, "album", history_media_id) or ())
+        match_target = await _load_match_target(history_conn, "album", history_media_id, query)
+        # The artist and album, for indexers that search those fields.
+        itemContext = await search_context.forItem(history_conn, "album", history_media_id, match_target)
+        for _attempt in range(_BLOCKED_RESELECT_LIMIT):
+            with search_context.using(itemContext):
+                best_release = await self.music_cascading_search(
+                    query,
+                    profile,
+                    preferred_uploaders,
+                    blocked_uploaders,
+                    blocklisted_titles=blocklisted_titles,
+                    min_tier=current_quality if upgrade else None,
+                    search_stats=search_stats,
+                    match_target=match_target,
+                )
 
-        if not best_release:
-            return None
-
-        # Upgrade gate: only proceed when the found release is a worthwhile upgrade.
-        if upgrade:
-            candidate_tier = self._release_tier(best_release)
-            if not music_quality.needs_music_upgrade(current_quality, candidate_tier, profile, upgrade_allowed):
+            if not best_release:
+                if search_stats.get("template_rejected") and history_media_id:
+                    await _notify_template_blocked(
+                        "album",
+                        history_media_id,
+                        query,
+                        search_stats["template_rejected"],
+                        getattr(profile, "safety_template", None),
+                    )
                 return None
 
-        # Resolve the magnet on demand for the one release we are grabbing.
-        await self.resolve_download_source(best_release)
+            # Upgrade gate: only proceed when the found release is a worthwhile upgrade.
+            if upgrade:
+                candidate_tier = self._release_tier(best_release)
+                if not music_quality.needs_music_upgrade(current_quality, candidate_tier, profile, upgrade_allowed):
+                    return None
+
+            # Resolve the magnet on demand for the one release we are grabbing, then
+            # skip it and pick again when its hash failed validation before.
+            await self.resolve_download_source(best_release)
+            if not await _isReleaseHashBlocked(history_conn, best_release, "album", history_media_id):
+                break
+            print(f"Skipping blocklisted torrent: {best_release.title}")
+            blocklisted_titles.add((best_release.title or "").strip().lower())
+        else:
+            return None
 
         torrent_source = best_release.torrent_url or best_release.magnet
 
@@ -1009,6 +1401,7 @@ class SearchEngine:
                     grab_mode=grab_mode,
                     was_upgrade=(grab_mode == "upgrade"),
                     root_folder_id=root_folder_id,
+                    safety_template=getattr(profile, "safety_template", None),
                 )
 
             # Trigger validation immediately after adding

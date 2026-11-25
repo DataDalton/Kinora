@@ -4,6 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
+import RenamePreviewModal, {
+	type RenamePreviewScope,
+} from "@/components/RenamePreviewModal";
 import {
 	CheckSquare,
 	Square,
@@ -84,6 +87,10 @@ export default function BulkSelectionToolbar({
 		useState(false);
 	const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
 	const [selectedProfileId, setSelectedProfileId] = useState<number | null>(
+		null,
+	);
+	// Rename opens a preview of the selected items. The ids are captured when it opens.
+	const [renameScope, setRenameScope] = useState<RenamePreviewScope | null>(
 		null,
 	);
 	const [operationProgress, setOperationProgress] = useState<{
@@ -213,9 +220,6 @@ export default function BulkSelectionToolbar({
 					endpoint = `/bulk/${mediaType}/delete`;
 					payload = { ...payload, delete_files: true };
 					break;
-				case "rename":
-					endpoint = `/bulk/${mediaType}/rename`;
-					break;
 				case "refresh-metadata":
 					endpoint = `/bulk/${mediaType}/refresh-metadata`;
 					break;
@@ -320,6 +324,15 @@ export default function BulkSelectionToolbar({
 		if (action === "change-profile") {
 			setPendingAction(action);
 			setShowProfileSelector(true);
+			return;
+		}
+
+		if (action === "rename") {
+			setRenameScope({
+				previewEndpoint: `/bulk/${mediaType}/rename/preview`,
+				previewBody: { ids: [...selectedIds] },
+				applyEndpoint: `/bulk/${mediaType}/rename`,
+			});
 			return;
 		}
 
@@ -802,6 +815,20 @@ export default function BulkSelectionToolbar({
 					</div>
 				</div>
 			)}
+
+			<RenamePreviewModal
+				isOpen={renameScope !== null}
+				title="Rename Files"
+				description={`Preview of the new names for ${renameScope?.previewBody?.ids ? (renameScope.previewBody.ids as number[]).length : 0} selected item(s). Nothing is moved until the rename is confirmed.`}
+				scope={renameScope}
+				onClose={() => setRenameScope(null)}
+				onApplied={() => {
+					queryClient.invalidateQueries({ queryKey: [mediaType] });
+					queryClient.invalidateQueries({ queryKey: ["tags"] });
+					onDeselectAll();
+					onOperationComplete?.();
+				}}
+			/>
 		</>
 	);
 }

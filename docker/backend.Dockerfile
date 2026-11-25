@@ -13,11 +13,19 @@ RUN apt-get update && apt-get install -y \
     util-linux \
     gnupg \
     curl \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
     && rm -rf /var/lib/apt/lists/*
 
-# Add uv to PATH
-ENV PATH="/root/.local/bin:$PATH"
+# The app runs as an unprivileged user. uv lives in /usr/local/bin so any user can run
+# it, the environment is never re-synced at runtime (UV_NO_SYNC) because the runtime
+# user does not own it, and caches go to /tmp. Compose picks the user id with PUID and
+# PGID, and the kinora user covers the default of 1000.
+ENV UV_NO_SYNC=1 \
+    UV_CACHE_DIR=/tmp/uv-cache \
+    HOME=/home/kinora
+RUN groupadd --gid 1000 kinora \
+    && useradd --uid 1000 --gid 1000 --home-dir /home/kinora --create-home --shell /usr/sbin/nologin kinora \
+    && chmod 0777 /home/kinora
 
 # Attempt to install NVIDIA CUDA toolkit for GPU transcoding
 # Falls back to software transcoding if unavailable
@@ -30,7 +38,7 @@ RUN apt-get update \
 COPY pyproject.toml uv.lock ./
 
 # Install Python dependencies with uv
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-cache
 
 # Development stage
 FROM base AS development
@@ -48,6 +56,8 @@ FROM base AS production
 
 # Copy application code
 COPY . .
+
+USER kinora
 
 # Start server with backpressure handling and worker respawning (init runs before server
 # starts). http=auto serves HTTP/1.1 and negotiates HTTP/2 when asked. Browser-facing

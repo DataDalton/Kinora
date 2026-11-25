@@ -97,6 +97,8 @@ class Show(ShowBase):
 
     id: int
     status: str
+    # The metadata provider's release or airing status. status holds Kinora's own state.
+    metadata_status: Optional[str] = None
     number_of_seasons: Optional[int] = None
     number_of_episodes: Optional[int] = None
     networks: Optional[List[Dict[str, Any]]] = None

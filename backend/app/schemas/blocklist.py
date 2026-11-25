@@ -23,6 +23,10 @@ class BlocklistEntry(BlocklistBase):
 
     id: int
     blocked_at: datetime
+    info_hash: Optional[str] = None
+    scope: str = "item"
+    # Title of the library item the entry belongs to, filled in by the list endpoint.
+    media_title: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

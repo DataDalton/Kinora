@@ -6,6 +6,7 @@ import asyncpg
 import os
 import shutil
 
+from app.services.jellyfin import queueLibraryUpdate, UPDATE_DELETED
 from app.db import get_db
 from app.db.repositories import ArtistRepository, AlbumRepository, TrackRepository
 
@@ -1141,6 +1142,8 @@ async def delete_artist_with_files(
             except Exception as e:
                 errors.append(f"Failed to remove artist folder: {str(e)}")
 
+    queueLibraryUpdate(deletedFiles, UPDATE_DELETED)
+
     await repo.delete(artist_id)
 
     return {
@@ -1181,6 +1184,8 @@ async def delete_album_with_files(
             except Exception as e:
                 errors.append(f"Failed to delete {album['file_path']}: {str(e)}")
 
+    queueLibraryUpdate(deletedFiles, UPDATE_DELETED)
+
     await repo.delete(album_id)
 
     return {
@@ -1217,6 +1222,8 @@ async def delete_track_with_files(
                 deletedFiles.append(track["file_path"])
             except Exception as e:
                 errors.append(f"Failed to delete {track['file_path']}: {str(e)}")
+
+    queueLibraryUpdate(deletedFiles, UPDATE_DELETED)
 
     await repo.delete(track_id)
 

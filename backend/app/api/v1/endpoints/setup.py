@@ -84,8 +84,8 @@ async def ensure_bundled_download_client() -> None:
     Register the bundled qBittorrent as the download client on first boot, so the setup
     wizard is not required for the default Docker deployment. Runs only when
     QBITTORRENT_AUTOCONFIG is on and no download client exists yet, so a manually
-    configured client is never replaced. qBittorrent bypasses authentication for the
-    internal subnet (seeded into its config), so no password is needed here.
+    configured client is never replaced. The client is registered with the seeded login,
+    and ensure_qbittorrent_hardened then replaces the seeded password with the generated one.
     """
     if not settings.QBITTORRENT_AUTOCONFIG:
         return
@@ -216,6 +216,93 @@ async def bind_qbittorrent_when_tunnel_ready() -> None:
     print("[INIT] qBittorrent never reported a VPN interface, leaving it unbound")
 
 
+# WebUI settings the bundled qBittorrent runs with once hardened. Every client must log
+# in (no subnet or localhost bypass), cross-site requests are refused, and only the host
+# names the WebUI is really reached by are accepted.
+QBITTORRENT_HARDENED_PREFERENCES = {
+    "bypass_auth_subnet_whitelist_enabled": False,
+    "bypass_local_auth": False,
+    "web_ui_csrf_protection_enabled": True,
+    "web_ui_host_header_validation_enabled": True,
+    "web_ui_domain_list": "localhost;127.0.0.1;[::1];gluetun",
+}
+
+
+async def ensure_qbittorrent_hardened() -> bool:
+    """
+    Harden the bundled qBittorrent WebUI. Applies QBITTORRENT_HARDENED_PREFERENCES and,
+    while the stored password is still the seeded default, replaces it with the random
+    password the bootstrap wrote to the secrets volume (qbittorrent_password). A password
+    the user chose is never replaced, and a client the user configured elsewhere is left
+    alone. qBittorrent applies the new password first and the stored copy is updated
+    after, so the two never disagree for longer than one request.
+
+    Returns True once settled, False while qBittorrent is not reachable yet.
+    """
+    if not settings.QBITTORRENT_AUTOCONFIG:
+        return True
+    try:
+        from app.db import get_pool
+        from app.services.download_clients.qbittorrent import get_qbittorrent_client
+
+        client = await get_qbittorrent_client()
+        if not client:
+            return False
+        if client.host != settings.QBITTORRENT_HOST or client.port != settings.QBITTORRENT_PORT:
+            return True
+
+        secret = settings._read_secret_file("qbittorrent_password")
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # One API process applies the change while the others wait and then see it done.
+                await conn.execute("SELECT pg_advisory_xact_lock(4915624)")
+                row = await conn.fetchrow(
+                    "SELECT id, encrypted_password FROM download_clients "
+                    "WHERE client_type = 'qbittorrent' AND host = $1 AND port = $2 LIMIT 1",
+                    settings.QBITTORRENT_HOST,
+                    settings.QBITTORRENT_PORT,
+                )
+                if not row:
+                    return True
+                storedPassword = decrypt_value(row["encrypted_password"])
+                client.password = storedPassword
+
+                prefs = await client.get_preferences()
+                changes = {k: v for k, v in QBITTORRENT_HARDENED_PREFERENCES.items() if prefs.get(k) != v}
+                rotate = bool(secret) and storedPassword == settings.QBITTORRENT_PASSWORD and secret != storedPassword
+                if rotate:
+                    changes["web_ui_password"] = secret
+                if not changes:
+                    return True
+
+                await client.set_preferences(changes)
+                if rotate:
+                    await conn.execute(
+                        "UPDATE download_clients SET encrypted_password = $1, updated_at = NOW() WHERE id = $2",
+                        encrypt_value(secret),
+                        row["id"],
+                    )
+                    client.password = secret
+        applied = sorted(k for k in changes if k != "web_ui_password")
+        print(f"[INIT] Hardened qBittorrent WebUI ({', '.join(applied) or 'no setting changes'})")
+        if rotate:
+            print("[INIT] Replaced the seeded qBittorrent password with the generated one from the secrets volume")
+        return True
+    except Exception as e:
+        print(f"[INIT] qBittorrent hardening not ready yet: {e}")
+        return False
+
+
+async def harden_qbittorrent_when_ready() -> None:
+    """Keep attempting the WebUI hardening until qBittorrent answers or the window closes."""
+    for _ in range(BINDING_RETRY_LIMIT):
+        if await ensure_qbittorrent_hardened():
+            return
+        await asyncio.sleep(BINDING_RETRY_SECONDS)
+    print("[INIT] qBittorrent never answered, WebUI hardening skipped until the next start")
+
+
 class SetupStatusResponse(BaseModel):
     """Response for setup status check"""
 
@@ -241,6 +328,32 @@ class TMDBSetupRequest(BaseModel):
     """Request to configure TMDB API key"""
 
     api_key: str = Field(..., min_length=32, description="TMDB API v3 key")
+
+
+@router.get("/qbittorrent-webui-login")
+async def get_qbittorrent_webui_login(current_user=Depends(require_permission("system.admin"))):
+    """
+    The login for the bundled qBittorrent WebUI, for administrators. After hardening the
+    WebUI needs a password from every client, and the generated one lives only in the
+    secrets volume and the stored download client.
+    """
+    from app.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT username, encrypted_password FROM download_clients "
+            "WHERE client_type = 'qbittorrent' AND host = $1 AND port = $2 LIMIT 1",
+            settings.QBITTORRENT_HOST,
+            settings.QBITTORRENT_PORT,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="No bundled qBittorrent is configured")
+    return {
+        "url": "http://127.0.0.1:8080",
+        "username": row["username"],
+        "password": decrypt_value(row["encrypted_password"]),
+    }
 
 
 @router.get("/status", response_model=SetupStatusResponse)
@@ -470,12 +583,15 @@ async def mark_setup_complete(
         ),
     ]
 
+    # setup_complete is always set. The other rows are defaults, added only when missing, so
+    # completing setup again never resets a setting an admin has changed.
     for key, value, value_type, is_encrypted, category, description in settings_to_create:
+        conflict = "DO UPDATE SET value = $2, updated_at = NOW()" if key == "setup_complete" else "DO NOTHING"
         await conn.execute(
-            """
+            f"""
             INSERT INTO app_settings (key, value, value_type, is_encrypted, category, description)
             VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+            ON CONFLICT (key) {conflict}
             """,
             key,
             value,
@@ -485,7 +601,16 @@ async def mark_setup_complete(
             description,
         )
 
-    return {"status": "success", "message": "Setup completed successfully"}
+    # A fresh install gets one profile, so items can be added and searched right away. It
+    # uses the same defaults as a new profile in the editor, on the Trusted template.
+    profileCreated = False
+    if not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM media_profiles)"):
+        from app.api.v1.endpoints.media_profiles import MediaProfileCreate, insertMediaProfile
+
+        await insertMediaProfile(conn, MediaProfileCreate(name="Default", languages=["en"]))
+        profileCreated = True
+
+    return {"status": "success", "message": "Setup completed successfully", "profile_created": profileCreated}
 
 
 class DirectoryItem(BaseModel):

@@ -427,3 +427,184 @@ async def initialize_default_settings(
         )
 
     return {"message": "Default settings initialized"}
+
+
+# ---- Jellyfin library updates ----
+# These routes sit under /jellyfin/ with a second path segment, so the single segment
+# /{key} routes above never match them.
+
+
+class JellyfinPathMapping(BaseModel):
+    kinora_path: str = Field(..., description="Path prefix as Kinora sees the library")
+    jellyfin_path: str = Field(..., description="The same location as Jellyfin sees it")
+
+
+class JellyfinLastUpdate(BaseModel):
+    state: str
+    message: Optional[str] = None
+    pathCount: Optional[int] = None
+    timestamp: Optional[str] = None
+
+
+class JellyfinConfigResponse(BaseModel):
+    enabled: bool
+    url: str
+    api_key_set: bool
+    path_mappings: List[JellyfinPathMapping]
+    last_update: Optional[JellyfinLastUpdate] = None
+
+
+class JellyfinConfigUpdate(BaseModel):
+    enabled: bool
+    url: str = ""
+    # None keeps the stored key, an empty string clears it.
+    api_key: Optional[str] = None
+    path_mappings: List[JellyfinPathMapping] = []
+
+
+class JellyfinTestRequest(BaseModel):
+    # Values typed into the form. Missing values fall back to the stored settings.
+    url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+async def _jellyfinConfigResponse(conn: asyncpg.Connection) -> JellyfinConfigResponse:
+    from app.services import jellyfin
+
+    config = await jellyfin.loadConfig(conn)
+    lastUpdate = await jellyfin.readStatus()
+    return JellyfinConfigResponse(
+        enabled=config["enabled"],
+        url=config["url"],
+        api_key_set=bool(config["apiKey"]),
+        path_mappings=[JellyfinPathMapping(**mapping) for mapping in config["pathMappings"]],
+        last_update=JellyfinLastUpdate(**lastUpdate) if lastUpdate and lastUpdate.get("state") else None,
+    )
+
+
+@router.get("/jellyfin/config", response_model=JellyfinConfigResponse)
+async def get_jellyfin_config(
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
+):
+    """Jellyfin connection and path mapping settings. The API key is reported only as set or not set."""
+    return await _jellyfinConfigResponse(conn)
+
+
+@router.put("/jellyfin/config", response_model=JellyfinConfigResponse)
+async def update_jellyfin_config(
+    body: JellyfinConfigUpdate,
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
+):
+    """Save the Jellyfin settings. Rows are upserted so saving works before the seed migration runs."""
+    import json
+    from app.services import jellyfin
+
+    url = body.url.strip().rstrip("/")
+    if url and not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Server URL must start with http:// or https://",
+        )
+
+    mappings = jellyfin.parsePathMappings([mapping.model_dump() for mapping in body.path_mappings])
+
+    rows = [
+        (
+            jellyfin.SETTING_ENABLED,
+            "true" if body.enabled else "false",
+            "boolean",
+            False,
+            "Send library changes to Jellyfin",
+        ),
+        (jellyfin.SETTING_URL, url, "string", False, "Jellyfin server URL"),
+        (jellyfin.SETTING_PATH_MAPPINGS, json.dumps(mappings), "json", False, "Kinora to Jellyfin path prefixes"),
+    ]
+    if body.api_key is not None:
+        apiKey = body.api_key.strip()
+        rows.append(
+            (jellyfin.SETTING_API_KEY, encrypt_value(apiKey) if apiKey else "", "string", True, "Jellyfin API key")
+        )
+
+    async with conn.transaction():
+        for key, value, valueType, isEncrypted, description in rows:
+            await conn.execute(
+                """
+                INSERT INTO app_settings (key, value, value_type, is_encrypted, category, description)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                key,
+                value,
+                valueType,
+                isEncrypted,
+                jellyfin.SETTINGS_CATEGORY,
+                description,
+            )
+
+    return await _jellyfinConfigResponse(conn)
+
+
+@router.post("/jellyfin/test")
+async def test_jellyfin_connection(
+    body: JellyfinTestRequest,
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
+):
+    """Call Jellyfin's GET /System/Info with the given or stored URL and API key."""
+    from app.services import jellyfin
+
+    stored = await jellyfin.loadConfig(conn)
+    url = body.url if body.url is not None and body.url.strip() else stored["url"]
+    apiKey = body.api_key if body.api_key is not None and body.api_key.strip() else stored["apiKey"]
+    return await jellyfin.testConnection(url, apiKey.strip())
+
+
+class ReleaseRegionUpdate(BaseModel):
+    region: str = Field(..., min_length=2, max_length=2, description="ISO 3166-1 country code")
+
+
+@router.get("/release-region/config")
+async def get_release_region(
+    current_user: UserWithPermissions = Depends(require_permission("system.settings")),
+):
+    """The country whose release dates the calendar uses, plus every country TMDB lists."""
+    from app.services.metadata.tmdb import tmdb_service
+
+    tmdb_service.invalidateReleaseRegion()
+    region = await tmdb_service.getReleaseRegion()
+    try:
+        countries = await tmdb_service.getCountries()
+    except Exception as e:
+        print(f"Error loading TMDB country list: {e}")
+        countries = []
+    return {"region": region, "countries": countries}
+
+
+@router.put("/release-region/config")
+async def update_release_region(
+    body: ReleaseRegionUpdate,
+    conn: asyncpg.Connection = Depends(get_db),
+    current_user: UserWithPermissions = Depends(require_permission("system.settings")),
+):
+    """Save the release region and recompute the stored release dates of every movie."""
+    from app.services.metadata.tmdb import tmdb_service
+    from app.tasks.metadata_refresh import recompute_release_dates
+
+    region = body.region.strip().upper()
+    countries = await tmdb_service.getCountries()
+    if countries and region not in {country["code"] for country in countries}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown country code {region}")
+
+    await conn.execute(
+        """
+        INSERT INTO app_settings (key, value, value_type, is_encrypted, category, description)
+        VALUES ('release_region', $1, 'string', FALSE, 'metadata', 'Country whose movie release dates are used')
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        """,
+        region,
+    )
+    tmdb_service.invalidateReleaseRegion()
+    recompute_release_dates.delay()
+    return {"region": region}

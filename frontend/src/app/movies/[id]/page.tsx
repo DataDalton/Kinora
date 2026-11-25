@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { usePermissions } from "@/contexts/PermissionContext";
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -104,6 +105,7 @@ export default function MovieDetailPage() {
 	const [showDeleteModal, setShowDeleteModal] = useState(false);
 	const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
 	const [showManualImport, setShowManualImport] = useState(false);
+	const { canManage: canManageMedia } = usePermissions();
 
 	const { data: movie, isLoading: movieLoading } = useQuery({
 		queryKey: ["movie", movieId],
@@ -526,15 +528,17 @@ export default function MovieDetailPage() {
 								</button>
 
 								<div className="grid grid-cols-3 gap-2">
-									<button
-										onClick={() =>
-											setShowManualImport(true)
-										}
-										className="flex flex-col items-center justify-center gap-1.5 px-2 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition text-sm font-medium cursor-pointer"
-									>
-										<Upload className="w-5 h-5" />
-										Manual Import
-									</button>
+									{canManageMedia("movies") && (
+										<button
+											onClick={() =>
+												setShowManualImport(true)
+											}
+											className="flex flex-col items-center justify-center gap-1.5 px-2 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition text-sm font-medium cursor-pointer"
+										>
+											<Upload className="w-5 h-5" />
+											Manual Import
+										</button>
+									)}
 									<button
 										onClick={() =>
 											refreshMetadataMutation.mutate()

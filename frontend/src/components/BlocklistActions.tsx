@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ban, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/toast/ToastProvider";
+import { usePermissions } from "@/contexts/PermissionContext";
 
 interface BlocklistActionsProps {
 	mediaType: string;
@@ -25,6 +26,7 @@ export default function BlocklistActions({
 }: BlocklistActionsProps) {
 	const queryClient = useQueryClient();
 	const toast = useToast();
+	const { hasPermission } = usePermissions();
 	const [done, setDone] = useState(false);
 
 	const mutation = useMutation({
@@ -64,7 +66,9 @@ export default function BlocklistActions({
 		},
 	});
 
-	if (!SUPPORTED.includes(mediaType)) return null;
+	// Blocklisting needs the download management permission, checked again by the API.
+	if (!SUPPORTED.includes(mediaType) || !hasPermission("system.downloads"))
+		return null;
 
 	if (done) {
 		return (

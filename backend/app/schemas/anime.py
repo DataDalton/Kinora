@@ -49,6 +49,8 @@ class Anime(AnimeBase):
 
     id: int
     status: str
+    # The metadata provider's release or airing status. status holds Kinora's own state.
+    metadata_status: Optional[str] = None
     episodes: Optional[int] = None
     duration: Optional[int] = None
     season_year: Optional[int] = None

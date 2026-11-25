@@ -306,6 +306,18 @@ class SystemHealthMonitor:
                 "message": str(e),
             }
 
+        # Jellyfin library updates report the outcome of the latest batch, no network call.
+        try:
+            from app.services.jellyfin import healthEntry
+
+            results["jellyfin"] = await healthEntry(conn)
+        except Exception as e:
+            results["jellyfin"] = {
+                "name": "Jellyfin",
+                "status": "error",
+                "message": str(e),
+            }
+
         return results
 
     @staticmethod

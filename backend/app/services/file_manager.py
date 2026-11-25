@@ -221,11 +221,52 @@ class FileManager:
             else:
                 raise ValueError(f"Invalid operation: {operation}")
 
+            # Tell Jellyfin about the new file, and about the old location after a move.
+            from app.services.jellyfin import queueLibraryUpdate, UPDATE_CREATED, UPDATE_DELETED
+
+            queueLibraryUpdate([str(destination)], UPDATE_CREATED)
+            if operation == "move":
+                queueLibraryUpdate([str(source)], UPDATE_DELETED)
             return True
 
         except Exception as e:
             print(f"Error organizing file: {e}")
             return False
+
+    def link_into_library(self, source_path: str, destination_path: str, replace_existing: bool = False) -> str:
+        """
+        Hardlink a downloaded file into the library and return the path it landed at.
+
+        An existing destination that is already the same file is left alone. Any other
+        existing file is kept, and the new file is linked beside it under a numbered name,
+        unless replace_existing is set (the upgrade delete_old policy), in which case the
+        old file is removed first.
+        """
+        source = Path(source_path)
+        destination = Path(destination_path)
+        if not source.exists():
+            raise FileNotFoundError(f"Source file not found: {source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        if destination.exists():
+            if os.path.samefile(source, destination):
+                return str(destination)
+            if replace_existing:
+                destination.unlink()
+            else:
+                destination = Path(self._numbered_path(str(destination)))
+
+        os.link(str(source), str(destination))
+        return str(destination)
+
+    @staticmethod
+    def _numbered_path(path: str) -> str:
+        """A free path beside the given one, numbered before the extension."""
+        base, ext = os.path.splitext(path)
+        counter = 2
+        while os.path.exists(f"{base}.{counter}{ext}"):
+            counter += 1
+        return f"{base}.{counter}{ext}"
 
     def extract_largest_video(self, torrent_path: str) -> Optional[str]:
         """

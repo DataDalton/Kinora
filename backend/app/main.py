@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
         ensure_bundled_download_client,
         ensure_bundled_root_folders,
         bind_qbittorrent_when_tunnel_ready,
+        harden_qbittorrent_when_ready,
     )
 
     await ensure_bundled_download_client()
@@ -54,6 +55,8 @@ async def lifespan(app: FastAPI):
     # Runs alongside the application rather than before it, because the VPN tunnel can
     # take longer to come up than the rest of the stack and the binding needs it.
     bindingTask = asyncio.create_task(bind_qbittorrent_when_tunnel_ready())
+    # Same reason for the WebUI hardening, which waits for qBittorrent to answer.
+    hardeningTask = asyncio.create_task(harden_qbittorrent_when_ready())
     # Reclaim FlareSolverr browsers held by sessions whose owning process has exited.
     try:
         from app.services.cloudflare.flaresolverr import flaresolverr
@@ -64,6 +67,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown: stop the pending binding retry, then close the pool and HTTP client
     bindingTask.cancel()
+    hardeningTask.cancel()
     await close_pool()
     await close_http_client()
 

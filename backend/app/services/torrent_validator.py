@@ -9,9 +9,11 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 import os
-import json
+import re
 import asyncio
 import logging
+
+from app.services import torrent_contents
 
 if TYPE_CHECKING:
     from app.services.download_clients.qbittorrent import QBittorrentClient
@@ -26,7 +28,19 @@ class ValidationResult(str, Enum):
     PASSED = "passed"
     FAILED_FORBIDDEN = "failed_forbidden"
     FAILED_NO_VALID = "failed_no_valid"
+    FAILED_ARCHIVE = "failed_archive"
     PENDING = "pending"
+
+
+# Archives and disk images. A torrent whose largest archive is bigger than its largest
+# media file is rejected, since the media is then likely a decoy for what is packed inside.
+ARCHIVE_EXTENSIONS = {".rar", ".zip", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso", ".img", ".bin", ".cab"}
+_splitArchivePattern = re.compile(r"\.(r\d{2}|\d{3}|part\d+\.rar)$", re.IGNORECASE)
+
+
+def _isArchive(name: str) -> bool:
+    lowered = name.lower()
+    return os.path.splitext(lowered)[1] in ARCHIVE_EXTENSIONS or bool(_splitArchivePattern.search(lowered))
 
 
 @dataclass
@@ -48,9 +62,13 @@ class TorrentValidator:
     Validates torrent files against media profile extension rules.
 
     Validation logic:
-    1. Check each file extension against forbidden list (instant fail)
+    1. Executables, scripts and shortcuts, plus the profile's forbidden list, fail
+       instantly in every mode. So does a file disguised with an executable extension
+       before its real one, such as movie.exe.mkv.
     2. Check if any files match allowed extensions
     3. If no allowed files found, validation fails
+    4. If the largest archive or disk image is bigger than the largest allowed file,
+       validation fails
     """
 
     # Default forbidden extensions (security risk)
@@ -131,9 +149,11 @@ class TorrentValidator:
         if forbidden_extensions is None:
             forbidden_extensions = self.DEFAULT_FORBIDDEN
 
-        # Normalize extensions to lowercase with leading dot
+        # Normalize extensions to lowercase with leading dot. The fixed executable list
+        # is always part of the forbidden set, whatever the profile holds.
         allowed = set(ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in allowed_extensions)
         forbidden = set(ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in forbidden_extensions)
+        forbidden |= set(torrent_contents.FIXED_NEVER_IMPORT)
         ignored = set(self.IGNORED_EXTENSIONS)
 
         valid_files = []
@@ -141,6 +161,9 @@ class TorrentValidator:
         forbidden_files = []
         valid_size = 0
         total_size = 0
+        largest_valid = 0
+        largest_archive = 0
+        largest_archive_name = None
 
         for file_info in files:
             file_name = file_info.get("name", "")
@@ -150,10 +173,20 @@ class TorrentValidator:
             # Get file extension
             _, ext = os.path.splitext(file_name.lower())
 
-            # Forbidden extensions are always rejected, in both modes.
-            if ext in forbidden:
+            # Forbidden extensions and disguised executables are always rejected, in both modes.
+            if ext in forbidden or torrent_contents.hasDisguisedExecutable(os.path.basename(file_name)):
                 forbidden_files.append(file_name)
                 continue
+
+            if _isArchive(file_name):
+                if file_size > largest_archive:
+                    largest_archive = file_size
+                    largest_archive_name = file_name
+                invalid_files.append(file_name)
+                continue
+
+            if ext in allowed:
+                largest_valid = max(largest_valid, file_size)
 
             if mode == "blocklist":
                 # Accept every file that is not forbidden or ignored.
@@ -174,6 +207,12 @@ class TorrentValidator:
             message = f"Forbidden files detected: {', '.join(os.path.basename(f) for f in forbidden_files[:3])}"
             if len(forbidden_files) > 3:
                 message += f" and {len(forbidden_files) - 3} more"
+        elif largest_archive and largest_archive > largest_valid:
+            result = ValidationResult.FAILED_ARCHIVE
+            message = (
+                f"Archive {os.path.basename(largest_archive_name)} is larger than any media file, "
+                "so the media is likely a decoy"
+            )
         elif not valid_files:
             result = ValidationResult.FAILED_NO_VALID
             message = f"No valid media files found. Expected: {', '.join(allowed_extensions[:5])}"
@@ -322,24 +361,8 @@ async def validate_and_resume_torrent(
         ValidationReport with results
     """
     validator = TorrentValidator()
-
-    # Skip validation if disabled in profile
-    if not profile.validation_enabled:
-        logger.info(f"Validation disabled for profile '{profile.name}', resuming torrent {torrent_hash[:8]}")
-        await _mark_validated_and_resume(client, torrent_hash)
-        await _apply_seeding(client, torrent_hash, profile)
-        skip_report = ValidationReport(
-            result=ValidationResult.PASSED,
-            valid_files=[],
-            invalid_files=[],
-            forbidden_files=[],
-            total_files=0,
-            valid_size=0,
-            total_size=0,
-            message="Validation skipped (disabled in profile)",
-        )
-        await write_validation_state(torrent_hash, STEP_PASSED, skip_report)
-        return skip_report
+    if profile is None:
+        profile = default_validation_profile()
 
     # Wait for metadata to be ready
     await write_validation_state(torrent_hash, STEP_WAITING_METADATA)
@@ -386,33 +409,87 @@ async def validate_and_resume_torrent(
         await write_validation_state(torrent_hash, STEP_PENDING, no_files_report)
         return no_files_report
 
-    # Get allowed/forbidden extensions from profile
-    allowed_extensions = profile.get_allowed_extensions_for_type(media_type)
-    forbidden_extensions = profile.forbidden_extensions or validator.DEFAULT_FORBIDDEN
-
-    # Run validation
     await write_validation_state(torrent_hash, STEP_CHECKING_EXTENSIONS)
-    report = validator.validate_files(
-        files=files,
-        media_type=media_type,
-        allowed_extensions=allowed_extensions,
-        forbidden_extensions=forbidden_extensions,
-        mode=profile.validation_mode,
-    )
+    report = run_profile_validation(validator, files, media_type, profile)
 
     # Handle result
     await write_validation_state(torrent_hash, STEP_RESOLVING, report)
     if report.result == ValidationResult.PASSED:
+        await skip_never_import_files(client, torrent_hash, files, profile)
         await _mark_validated_and_resume(client, torrent_hash)
         await _apply_seeding(client, torrent_hash, profile)
         logger.info(f"Validation passed for {torrent_hash[:8]}: {report.message}")
         await write_validation_state(torrent_hash, STEP_PASSED, report)
     else:
-        await _handle_validation_failure(client, torrent_hash, profile, report)
+        await handle_validation_failure(client, torrent_hash, profile.validation_failure_action, report, media_type)
         logger.warning(f"Validation failed for {torrent_hash[:8]}: {report.message}")
         await write_validation_state(torrent_hash, STEP_FAILED, report)
 
     return report
+
+
+async def profile_for_item(conn, media_type: Optional[str], media_id) -> Optional["MediaProfile"]:
+    """The media profile assigned to a library item, or None when it has none."""
+    from app.services.media_profile import MediaProfile
+
+    table = {"movie": "movies", "show": "shows", "anime": "anime", "album": "albums"}.get(media_type or "")
+    if not table or not media_id:
+        return None
+    row = await conn.fetchrow(
+        f"SELECT mp.* FROM {table} m JOIN media_profiles mp ON mp.id = m.media_profile_id WHERE m.id = $1",
+        media_id,
+    )
+    return MediaProfile.from_row(dict(row)) if row else None
+
+
+def default_validation_profile() -> "MediaProfile":
+    """Validation settings for adds with no media profile, using the built-in defaults."""
+    from app.services.media_profile import MediaProfile
+
+    return MediaProfile(id=0, name="Kinora defaults")
+
+
+def run_profile_validation(validator: "TorrentValidator", files, media_type: str, profile) -> ValidationReport:
+    """
+    Validate files with a profile's settings. When the profile turns validation off, the
+    checks that are always on still run (executables, disguised files, oversized
+    archives), with every other file accepted. A media type with no allowed extensions,
+    such as an unmapped manual add, is checked the same way.
+    """
+    allowed_extensions = profile.get_allowed_extensions_for_type(media_type)
+    forbidden_extensions = profile.forbidden_extensions or validator.DEFAULT_FORBIDDEN
+    mode = profile.validation_mode
+    if not profile.validation_enabled or not allowed_extensions:
+        forbidden_extensions = []
+        mode = "blocklist"
+    return validator.validate_files(
+        files=files,
+        media_type=media_type,
+        allowed_extensions=allowed_extensions,
+        forbidden_extensions=forbidden_extensions,
+        mode=mode,
+    )
+
+
+async def skip_never_import_files(client, torrent_hash: str, files, profile) -> None:
+    """
+    Set files on the profile's never-import list to do-not-download in the client, so
+    they never reach the disk. Files without an index in the client's list are left as is.
+    """
+    neverImport = torrent_contents.neverImportList(getattr(profile, "never_import_extensions", None))
+    indexes = []
+    for position, file_info in enumerate(files):
+        name = (file_info.get("name") or "").replace("\\", "/")
+        entry = torrent_contents.TorrentFile(name, name, int(file_info.get("size") or 0))
+        if torrent_contents.isNeverImport(entry, neverImport) or torrent_contents.isSample(entry):
+            indexes.append(file_info.get("index", position))
+    if not indexes or len(indexes) == len(files):
+        return
+    try:
+        await client.set_file_priority(torrent_hash, indexes, 0)
+        logger.info(f"Skipping {len(indexes)} never-import file(s) in {torrent_hash[:8]}")
+    except Exception as e:
+        logger.debug(f"Could not set file priorities for {torrent_hash[:8]}: {e}")
 
 
 async def _apply_seeding(client: "QBittorrentClient", torrent_hash: str, profile: "MediaProfile") -> None:
@@ -435,15 +512,21 @@ async def _mark_validated_and_resume(client: "QBittorrentClient", torrent_hash: 
         logger.error(f"Failed to mark torrent {torrent_hash[:8]} as validated: {e}")
 
 
-async def _handle_validation_failure(
+async def handle_validation_failure(
     client: "QBittorrentClient",
     torrent_hash: str,
-    profile: "MediaProfile",
+    action: Optional[str],
     report: ValidationReport,
+    media_type: Optional[str] = None,
 ) -> None:
-    """Handle validation failure based on profile settings."""
-    action = profile.validation_failure_action
-
+    """
+    Handle a failed validation. The torrent is deleted, quarantined or left paused per
+    the profile's failure action. Its hash is blocklisted for every item so no search or
+    RSS pass picks it again, the download history row records the failure, and the item
+    goes back to wanted (or completed when it already has a file) so a different release
+    can be found.
+    """
+    action = action or "pause_notify"
     try:
         await client.remove_tags(torrent_hash, ["validating"])
 
@@ -454,12 +537,17 @@ async def _handle_validation_failure(
         elif action == "quarantine":
             logger.info(f"Quarantining torrent {torrent_hash[:8]} due to validation failure")
             await client.set_tags(torrent_hash, ["validation-failed", "quarantine"])
-            await client.set_category(torrent_hash, "quarantine")
+            try:
+                await client.set_category(torrent_hash, "quarantine")
+            except Exception:
+                logger.debug("Quarantine category is not set up in the download client")
 
         else:  # pause_notify (default)
             logger.info(f"Pausing torrent {torrent_hash[:8]} for manual review: {report.message}")
             await client.set_tags(torrent_hash, ["validation-failed"])
             # Torrent is already paused, just leave it
+
+        await _record_validation_failure(torrent_hash, action, report, media_type)
 
         # Notify the user of the failed validation and the action taken.
         try:
@@ -481,3 +569,40 @@ async def _handle_validation_failure(
 
     except Exception as e:
         logger.error(f"Failed to handle validation failure for {torrent_hash[:8]}: {e}")
+
+
+async def _record_validation_failure(torrent_hash: str, action: str, report: ValidationReport, media_type) -> None:
+    """
+    Write the failure to download history, blocklist the hash, and move the item out of
+    downloading once none of its downloads are active, to completed when it has a file
+    and to wanted otherwise.
+    """
+    from app.db import get_pool
+    from app.services import hash_blocklist, media_status
+
+    status_by_action = {"quarantine": "quarantined"}
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "UPDATE download_history SET status = $2, error_message = $3, updated_at = NOW() "
+                    "WHERE torrent_hash = $1 RETURNING media_type, media_id, torrent_title",
+                    torrent_hash,
+                    status_by_action.get(action, "validation_failed"),
+                    report.message,
+                )
+                itemType = row["media_type"] if row else media_type
+                itemId = row["media_id"] if row else None
+                await hash_blocklist.blockHash(
+                    conn,
+                    torrent_hash,
+                    row["torrent_title"] if row else None,
+                    f"Validation failed: {report.message}",
+                    itemType,
+                    itemId,
+                )
+                if itemType and itemId:
+                    await media_status.releaseDownloadingStatus(conn, itemType, itemId)
+    except Exception as e:
+        logger.error(f"Could not record validation failure for {torrent_hash[:8]}: {e}")

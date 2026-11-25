@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { usePermissions } from "@/contexts/PermissionContext";
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -106,6 +107,7 @@ export default function ShowDetailPage() {
 	const [showDeleteModal, setShowDeleteModal] = useState(false);
 	const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
 	const [showManualImport, setShowManualImport] = useState(false);
+	const { canManage: canManageMedia } = usePermissions();
 
 	const { data: show, isLoading: showLoading } = useQuery({
 		queryKey: ["show", showId],
@@ -553,15 +555,17 @@ export default function ShowDetailPage() {
 												: "Auto Search & Download"}
 										</button>
 
-										<button
-											onClick={() =>
-												setShowManualImport(true)
-											}
-											className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer"
-										>
-											<Upload className="w-5 h-5" />
-											Manual Import
-										</button>
+										{canManageMedia("shows") && (
+											<button
+												onClick={() =>
+													setShowManualImport(true)
+												}
+												className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-card text-foreground border-2 border-border rounded-lg hover:bg-accent transition font-medium cursor-pointer"
+											>
+												<Upload className="w-5 h-5" />
+												Manual Import
+											</button>
+										)}
 
 										<div className="flex gap-2">
 											<button

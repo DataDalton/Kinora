@@ -6,6 +6,8 @@ import { Download, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import BlocklistActions from "@/components/BlocklistActions";
+import ImportFailedActions from "@/components/ImportFailedActions";
+import TrustBadge from "@/components/TrustBadge";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { getDownloadStats } from "@/lib/api/downloads";
 
@@ -26,6 +28,8 @@ interface Download {
 	started_at: string;
 	completed_at: string | null;
 	error_message: string | null;
+	trust_category?: string | null;
+	safety_template?: string | null;
 }
 
 export default function ActivityPage() {
@@ -77,14 +81,18 @@ export default function ActivityPage() {
 			processing: "bg-blue-100 text-blue-800",
 			completed: "bg-green-100 text-green-800",
 			failed: "bg-red-100 text-red-800",
+			import_failed: "bg-red-100 text-red-800",
 			pending: "bg-yellow-100 text-yellow-800",
+		};
+		const labels: Record<string, string> = {
+			import_failed: "import failed",
 		};
 
 		return (
 			<span
 				className={`px-2 py-1 text-xs rounded ${colors[status] || "bg-gray-100 text-gray-800"}`}
 			>
-				{status}
+				{labels[status] || status}
 			</span>
 		);
 	};
@@ -97,7 +105,10 @@ export default function ActivityPage() {
 	const completedDownloads =
 		downloads?.filter((d: Download) => d.status === "completed") || [];
 	const failedDownloads =
-		downloads?.filter((d: Download) => d.status === "failed") || [];
+		downloads?.filter(
+			(d: Download) =>
+				d.status === "failed" || d.status === "import_failed",
+		) || [];
 
 	return (
 		<div className="min-h-screen">
@@ -179,6 +190,14 @@ export default function ActivityPage() {
 																	download.indexer
 																}
 															</span>
+															<TrustBadge
+																trustCategory={
+																	download.trust_category
+																}
+																safetyTemplate={
+																	download.safety_template
+																}
+															/>
 															{download.grab_mode ===
 																"manual" && (
 																<span className="px-2 py-0.5 bg-purple-500/20 text-purple-500 rounded">
@@ -257,6 +276,14 @@ export default function ActivityPage() {
 																	download.indexer
 																}
 															</span>
+															<TrustBadge
+																trustCategory={
+																	download.trust_category
+																}
+																safetyTemplate={
+																	download.safety_template
+																}
+															/>
 															{download.grab_mode ===
 																"manual" && (
 																<span className="px-2 py-0.5 bg-purple-500/20 text-purple-500 rounded">
@@ -324,6 +351,14 @@ export default function ActivityPage() {
 																	download.indexer
 																}
 															</span>
+															<TrustBadge
+																trustCategory={
+																	download.trust_category
+																}
+																safetyTemplate={
+																	download.safety_template
+																}
+															/>
 															{download.grab_mode ===
 																"manual" && (
 																<span className="px-2 py-0.5 bg-purple-500/20 text-purple-500 rounded">
@@ -340,6 +375,23 @@ export default function ActivityPage() {
 													<div className="flex flex-col items-end gap-2">
 														{getStatusBadge(
 															download.status,
+														)}
+														{download.status ===
+															"import_failed" && (
+															<ImportFailedActions
+																historyId={
+																	download.id
+																}
+																mediaType={
+																	download.media_type
+																}
+																mediaId={
+																	download.media_id
+																}
+																releaseTitle={
+																	download.torrent_title
+																}
+															/>
 														)}
 														<BlocklistActions
 															mediaType={

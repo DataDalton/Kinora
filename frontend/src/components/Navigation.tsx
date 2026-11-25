@@ -13,6 +13,7 @@ import {
 	Plus,
 	LayoutDashboard,
 	Activity,
+	CalendarDays,
 	Film,
 	Tv,
 	Sparkles,
@@ -166,6 +167,17 @@ export default function Navigation() {
 					visible: true,
 				},
 				{
+					href: "/calendar",
+					label: "Calendar",
+					icon: CalendarDays,
+					visible:
+						permissionsLoading ||
+						canView("movies") ||
+						canView("shows") ||
+						canView("anime") ||
+						canView("music"),
+				},
+				{
 					href: "/downloads",
 					label: "Downloads",
 					icon: Download,
@@ -238,13 +250,15 @@ export default function Navigation() {
 					href: "/transcoding",
 					label: "Transcoding",
 					icon: Settings,
-					visible: permissionsLoading || hasAnySystemPermission,
+					visible:
+						permissionsLoading || hasPermission("system.settings"),
 				},
 				{
 					href: "/media-profiles",
 					label: "Media Profiles",
 					icon: FileVideo,
-					visible: permissionsLoading || hasAnySystemPermission,
+					visible:
+						permissionsLoading || hasPermission("system.settings"),
 				},
 				{
 					href: "/settings",
