@@ -446,7 +446,7 @@ services:
       SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES:-} # exit country, e.g. Canada (comma-separate for a rotating pool)
       SERVER_CITIES: ${VPN_SERVER_CITIES:-} # optional - narrow to cities, e.g. Toronto,Montreal
       # Port forwarding (makes qBittorrent connectable - better seeding)
-      VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-off} # on for PIA/ProtonVPN dynamic forwarding; off for AirVPN (static port set in their panel)
+      VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-off} # on for PIA/ProtonVPN dynamic forwarding; off for AirVPN and other static ports, entered in Kinora under Download Settings
       VPN_PORT_FORWARDING_PROVIDER: ${VPN_PORT_FORWARDING_PROVIDER:-} # set to your provider name when forwarding is on
       # Timezone (affects logs and the off-peak seeding schedule)
       TZ: ${TZ:-Etc/UTC} # e.g. America/New_York
@@ -621,10 +621,11 @@ configs:
         fi
       fi
 
-      # gluetun control-server auth config using the generated key (generate once)
-      if [ ! -f "$$AUTH_DIR/config.toml" ]; then
-        KEY=$$(cat "$$SECRETS_DIR/gluetun_api_key")
-        cat > "$$AUTH_DIR/config.toml" <<EOF
+      # gluetun control-server auth config using the generated key. Rewritten on every
+      # start because it holds nothing but the key and the route list, so an existing
+      # install picks up routes that newer Kinora versions call.
+      KEY=$$(cat "$$SECRETS_DIR/gluetun_api_key")
+      cat > "$$AUTH_DIR/config.toml" <<EOF
       [[roles]]
       name = "kinora"
       routes = [
@@ -636,14 +637,15 @@ configs:
         "GET /v1/openvpn/status",
         "PUT /v1/openvpn/status",
         "GET /v1/openvpn/portforwarded",
+        "GET /v1/portforward",
+        "PUT /v1/portforward",
         "GET /v1/dns/status",
         "GET /v1/version",
       ]
       auth = "apikey"
       apikey = "$$KEY"
       EOF
-        echo "bootstrap: generated gluetun auth config"
-      fi
+      echo "bootstrap: wrote gluetun auth config"
 
       # qBittorrent config (seed once, never overwrite an existing one). Sets a known WebUI
       # login (admin / adminadmin) so qBittorrent does not generate a random temporary

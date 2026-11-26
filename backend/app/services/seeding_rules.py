@@ -146,18 +146,20 @@ class SeedingRulesEngine:
     # VPN safety
     # ------------------------------------------------------------------
     async def _apply_vpn_safety(self, client, automation: Dict[str, Any]) -> None:
-        """Sync the VPN forwarded port and enforce the kill switch when enabled."""
-        if not automation.get("vpn_port_sync_enabled") and not automation.get("vpn_kill_switch_enabled"):
-            return
+        """Open static forwarded ports, sync the forwarded port and enforce the kill switch when enabled."""
         try:
-            from app.services.gluetun import get_gluetun_client, get_kinora_public_ip
+            from app.services.gluetun import applyConfiguredPorts, get_gluetun_client, get_kinora_public_ip
 
             gluetun = await get_gluetun_client()
             if not gluetun:
                 return
 
+            # Runs every cycle regardless of the sync toggle, since gluetun drops these ports
+            # whenever the tunnel reconnects and the port is closed until they are sent again.
+            openPorts = await applyConfiguredPorts(gluetun, automation)
+
             if automation.get("vpn_port_sync_enabled"):
-                await self._sync_forwarded_port(client, gluetun)
+                await self._sync_forwarded_port(client, gluetun, openPorts[0] if openPorts else None)
 
             if automation.get("vpn_kill_switch_enabled"):
                 vpn_status = await gluetun.get_vpn_status()
@@ -169,9 +171,11 @@ class SeedingRulesEngine:
         except Exception as e:
             logger.warning(f"VPN safety check failed: {e}")
 
-    async def _sync_forwarded_port(self, client, gluetun) -> None:
+    async def _sync_forwarded_port(self, client, gluetun, staticPort: Optional[int]) -> None:
         """Match qBittorrent's listen port to the VPN forwarded port, notify on drift."""
-        port = await gluetun.get_forwarded_port()
+        # A static port set in Kinora and open in gluetun is qBittorrent's. Otherwise the
+        # provider assigned the port.
+        port = staticPort or await gluetun.get_forwarded_port()
         if not port:
             return
         prefs = await client.get_preferences()

@@ -173,6 +173,7 @@ export interface AutomationSettings {
 	gluetun_url: string;
 	vpn_kill_switch_enabled: boolean;
 	vpn_port_sync_enabled: boolean;
+	vpn_forwarded_port: number | null;
 	dl_limit_kbps: number;
 	up_limit_kbps: number;
 	alt_dl_limit_kbps: number;
@@ -235,6 +236,8 @@ export interface GluetunStatus {
 	city?: string | null;
 	provider?: string | null;
 	forwarded_port?: number | null;
+	forwarded_ports?: number[];
+	port_forwarding_mode?: "automatic" | "manual" | null;
 	version?: string | null;
 	message?: string | null;
 }

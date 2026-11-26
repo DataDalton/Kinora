@@ -56,6 +56,7 @@ const DEFAULT_AUTOMATION: AutomationSettings = {
 	gluetun_url: "http://gluetun:8000",
 	vpn_kill_switch_enabled: true,
 	vpn_port_sync_enabled: true,
+	vpn_forwarded_port: null,
 	dl_limit_kbps: 0,
 	up_limit_kbps: 0,
 	alt_dl_limit_kbps: 0,
@@ -953,6 +954,15 @@ export default function DownloadSettingsPage() {
 		queryKey: ["net-interfaces"],
 		queryFn: getNetworkInterfaces,
 		enabled: canManage && section === "vpn",
+	});
+
+	// Tells whether the VPN provider assigns the port itself or the port is entered here,
+	// and which ports gluetun has open right now.
+	const { data: gluetunStatus } = useQuery({
+		queryKey: ["gluetun-status"],
+		queryFn: getGluetunStatus,
+		enabled: canManage && section === "vpn" && automation.gluetun_enabled,
+		refetchInterval: 15000,
 	});
 
 	// Seed the form and baseline from the server once. Guarding against re-runs means
@@ -1876,6 +1886,57 @@ export default function DownloadSettingsPage() {
 											}
 										/>
 									</Row>
+									{gluetunStatus?.port_forwarding_mode ===
+									"automatic" ? (
+										<Row
+											label="Forwarded port"
+											hint="Your VPN assigns this port automatically."
+										>
+											<span className="text-sm font-mono">
+												{gluetunStatus.forwarded_port ??
+													"Waiting for the VPN"}
+											</span>
+										</Row>
+									) : (
+										<Row
+											label="Forwarded port"
+											hint="For VPNs where ports are set in your account, like AirVPN under Client Area, Ports. Kinora opens it in gluetun's firewall and sets it as qBittorrent's listen port."
+										>
+											{automation.vpn_forwarded_port &&
+												gluetunStatus?.forwarded_ports?.includes(
+													automation.vpn_forwarded_port,
+												) && (
+													<span className="flex items-center gap-1 text-xs text-green-500">
+														<ShieldCheck className="w-3.5 h-3.5" />{" "}
+														Open
+													</span>
+												)}
+											<input
+												type="number"
+												min={1}
+												max={65535}
+												value={
+													automation.vpn_forwarded_port ??
+													""
+												}
+												onChange={(e) => {
+													const port = parseInt(
+														e.target.value,
+														10,
+													);
+													updateAutomation({
+														vpn_forwarded_port:
+															port >= 1 &&
+															port <= 65535
+																? port
+																: null,
+													});
+												}}
+												placeholder="e.g. 43533"
+												className="w-64 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:ring-2 focus:ring-primary focus:outline-none"
+											/>
+										</Row>
+									)}
 									<Row
 										label="Auto-sync forwarded port"
 										hint="Keep qBittorrent's listen port matched to the VPN forwarded port."

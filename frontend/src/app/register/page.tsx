@@ -45,6 +45,23 @@ export default function RegisterPage() {
 		use_ssl: false,
 	});
 	const [setupError, setSetupError] = useState("");
+	// "manual" when the VPN provider assigns static ports in its own dashboard (AirVPN), so
+	// the port is asked for here. Providers gluetun forwards for itself need nothing.
+	const [portForwardingMode, setPortForwardingMode] = useState<string | null>(
+		null,
+	);
+	const [vpnPort, setVpnPort] = useState("");
+
+	useEffect(() => {
+		if (!needsSetup) return;
+		api.get("/downloads/gluetun")
+			.then((response) =>
+				setPortForwardingMode(
+					response.data?.port_forwarding_mode ?? null,
+				),
+			)
+			.catch(() => setPortForwardingMode(null));
+	}, [needsSetup]);
 
 	useEffect(() => {
 		const checkRegistrationStatus = async () => {
@@ -129,11 +146,24 @@ export default function RegisterPage() {
 			setSetupError("A TMDB API key is required.");
 			return;
 		}
+		const port = vpnPort.trim() ? Number(vpnPort) : null;
+		if (
+			port !== null &&
+			!(Number.isInteger(port) && port >= 1 && port <= 65535)
+		) {
+			setSetupError(
+				"The forwarded port must be a number from 1 to 65535.",
+			);
+			return;
+		}
 		setLoading(true);
 		try {
 			// qBittorrent is auto-configured. Only send an override when the user customized it.
 			if (customizeQbit) {
 				await api.post("/setup/qbittorrent", qbit);
+			}
+			if (port !== null) {
+				await api.put("/downloads/vpn-port", { port });
 			}
 			await api.post("/setup/tmdb", { api_key: tmdbKey });
 			// Finalize: seeds the default system settings and marks setup complete.
@@ -426,6 +456,42 @@ export default function RegisterPage() {
 										under Settings, API.
 									</p>
 								</div>
+								{portForwardingMode === "manual" && (
+									<div>
+										<label
+											htmlFor="vpnPort"
+											className="block text-sm font-semibold text-foreground mb-2"
+										>
+											VPN Forwarded Port (optional)
+										</label>
+										<input
+											id="vpnPort"
+											type="number"
+											min={1}
+											max={65535}
+											value={vpnPort}
+											onChange={(e) =>
+												setVpnPort(e.target.value)
+											}
+											className={cn(
+												"w-full px-4 py-3 rounded-lg",
+												"bg-background border-2 border-input",
+												"text-foreground placeholder:text-muted-foreground",
+												"focus:outline-none focus:border-primary focus:ring-4 focus:ring-ring/20",
+												"transition-all duration-200",
+											)}
+											placeholder="e.g. 43533"
+										/>
+										<p className="text-xs text-muted-foreground mt-2">
+											Your VPN sets forwarded ports in
+											your account, like AirVPN under
+											Client Area, Ports. Kinora opens the
+											port and gives it to qBittorrent so
+											peers can connect to you. It can be
+											changed later in Download Settings.
+										</p>
+									</div>
+								)}
 								<div className="border border-border rounded-lg">
 									<button
 										type="button"

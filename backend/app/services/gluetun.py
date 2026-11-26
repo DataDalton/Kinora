@@ -8,7 +8,7 @@ interface binding.
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from app.db import get_pool
 from app.core.http_client import http_get, http_put, http_post
@@ -106,13 +106,52 @@ class GluetunClient:
             return data.get("version") or data.get("current")
         return None
 
-    async def get_forwarded_port(self) -> Optional[int]:
-        # The forwarded-port route differs across gluetun versions, so try both.
-        for path in ("/v1/openvpn/portforwarded", "/v1/portforwarded"):
+    async def get_forwarded_ports(self) -> List[int]:
+        """Ports gluetun currently forwards and allows through its firewall, in order."""
+        # Current gluetun serves /v1/portforward and redirects the older OpenVPN route to
+        # it. Older releases only have the OpenVPN route, so it is the fallback.
+        for path in ("/v1/portforward", "/v1/openvpn/portforwarded"):
             data = await self._get(path)
-            if isinstance(data, dict) and data.get("port"):
-                return int(data["port"])
-        return None
+            if not isinstance(data, dict):
+                continue
+            ports = data.get("ports")
+            if isinstance(ports, list):
+                return [int(p) for p in ports if p]
+            if data.get("port"):
+                return [int(data["port"])]
+            return []
+        return []
+
+    async def get_forwarded_port(self) -> Optional[int]:
+        ports = await self.get_forwarded_ports()
+        return ports[0] if ports else None
+
+    async def get_port_forwarding_mode(self) -> Optional[str]:
+        """
+        "automatic" when gluetun requests the port from the provider itself (PIA, ProtonVPN),
+        "manual" when the provider assigns static ports in its own dashboard (AirVPN), and
+        None when gluetun cannot be reached.
+        """
+        data = await self._get("/v1/vpn/settings")
+        if not isinstance(data, dict):
+            return None
+        forwarding = (data.get("provider") or {}).get("port_forwarding") or {}
+        return "automatic" if forwarding.get("enabled") else "manual"
+
+    async def set_forwarded_ports(self, ports: List[int]) -> bool:
+        """
+        Replace the ports gluetun forwards and opens in its firewall, without a restart. Only
+        accepted in manual mode. Gluetun drops these ports when the tunnel reconnects, so the
+        caller sends them again whenever they go missing.
+        """
+        try:
+            resp = await http_put(f"{self.url}/v1/portforward", json={"ports": ports}, headers=self.headers)
+            if resp.status_code == 200:
+                return True
+            logger.warning(f"Gluetun refused the forwarded ports {ports} with status {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Gluetun set_forwarded_ports failed: {e}")
+        return False
 
     async def set_vpn_status(self, status: str) -> bool:
         """status: 'running' | 'stopped'."""
@@ -133,6 +172,31 @@ async def get_gluetun_client() -> Optional[GluetunClient]:
     if not config:
         return None
     return GluetunClient(config["url"], config.get("api_key"))
+
+
+def configuredPorts(automation: Dict[str, Any]) -> List[int]:
+    """The static forwarded ports set in Kinora, with qBittorrent's port first."""
+    port = automation.get("vpn_forwarded_port")
+    return [int(port)] if port else []
+
+
+async def applyConfiguredPorts(gluetun: GluetunClient, automation: Dict[str, Any]) -> Optional[List[int]]:
+    """
+    Open the ports set in Kinora in gluetun's firewall when the provider uses static ports.
+    Sends them only when gluetun's list differs, which covers a first save, a changed or
+    cleared port, and a tunnel reconnect that dropped them. Returns the ports gluetun now
+    forwards, or None when nothing was applied.
+    """
+    if await gluetun.get_port_forwarding_mode() != "manual":
+        return None
+    wanted = configuredPorts(automation)
+    current = await gluetun.get_forwarded_ports()
+    if current == wanted:
+        return current
+    if await gluetun.set_forwarded_ports(wanted):
+        logger.info(f"Opened forwarded ports {wanted} in gluetun's firewall")
+        return wanted
+    return None
 
 
 async def get_kinora_public_ip() -> Optional[str]:

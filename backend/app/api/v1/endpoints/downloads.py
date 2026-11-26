@@ -615,6 +615,10 @@ class AutomationSettings(BaseModel):
     gluetun_url: str = "http://gluetun:8000"
     vpn_kill_switch_enabled: bool = True
     vpn_port_sync_enabled: bool = True
+    # qBittorrent's forwarded port for providers that assign static ports in their own
+    # dashboard (AirVPN). Kinora opens it in gluetun's firewall. Providers that gluetun
+    # forwards for itself (PIA, ProtonVPN) leave this empty.
+    vpn_forwarded_port: Optional[int] = Field(None, ge=1, le=65535)
     # Global and alternative speed limits in KiB/s. 0 means unlimited.
     dl_limit_kbps: int = 0
     up_limit_kbps: int = 0
@@ -744,7 +748,58 @@ async def update_download_settings(
     except Exception as exc:
         logger.warning("Failed to apply speed limits to qBittorrent: %s", exc)
 
+    await applyVpnPortsNow(automation)
+
     return {"success": True}
+
+
+class VpnPortUpdate(BaseModel):
+    port: Optional[int] = Field(None, ge=1, le=65535)
+
+
+@router.put("/vpn-port")
+async def update_vpn_port(
+    body: VpnPortUpdate,
+    current_user: UserWithPermissions = Depends(require_permission("system.downloads")),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """Set or clear the static forwarded port alone, as first-run setup does."""
+    row = await _get_enabled_client_row(conn)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No enabled qBittorrent client configured",
+        )
+    automation = {**AutomationSettings().model_dump(), **_parse_automation(row["automation_settings"])}
+    automation["vpn_forwarded_port"] = body.port
+    await conn.execute(
+        "UPDATE download_clients SET automation_settings = $1::jsonb, updated_at = NOW() WHERE id = $2",
+        automation,
+        row["id"],
+    )
+    await applyVpnPortsNow(automation)
+    return {"success": True}
+
+
+async def applyVpnPortsNow(automation: Dict[str, Any]) -> None:
+    """
+    Open the static forwarded port in gluetun and point qBittorrent at it right after a
+    save, rather than waiting for the next seeding-rules cycle. Best effort, since that
+    cycle applies it again every minute.
+    """
+    from app.services.gluetun import applyConfiguredPorts, get_gluetun_client
+
+    try:
+        gluetun = await get_gluetun_client()
+        if not gluetun:
+            return
+        openPorts = await applyConfiguredPorts(gluetun, automation)
+        if openPorts and automation.get("vpn_port_sync_enabled", True):
+            client = await get_qbittorrent_client()
+            if client:
+                await client.set_preferences({"listen_port": openPorts[0]})
+    except Exception as exc:
+        logger.warning("Failed to apply the VPN forwarded port: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1134,7 +1189,8 @@ async def gluetun_status(
 
     pub = await gluetun.get_public_ip()
     vpn_status = await gluetun.get_vpn_status()
-    forwarded_port = await gluetun.get_forwarded_port()
+    forwarded_ports = await gluetun.get_forwarded_ports()
+    port_forwarding_mode = await gluetun.get_port_forwarding_mode()
     version = await gluetun.get_version()
 
     return {
@@ -1148,7 +1204,11 @@ async def gluetun_status(
         "country": pub.get("country") if pub else None,
         "city": pub.get("city") if pub else None,
         "provider": (pub.get("organization") or pub.get("provider")) if pub else None,
-        "forwarded_port": forwarded_port,
+        "forwarded_port": forwarded_ports[0] if forwarded_ports else None,
+        "forwarded_ports": forwarded_ports,
+        # "automatic" when gluetun gets the port from the provider, "manual" when the port
+        # is entered in Kinora, None when gluetun did not answer.
+        "port_forwarding_mode": port_forwarding_mode,
         "version": version,
     }
 
