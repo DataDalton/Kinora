@@ -1,9 +1,11 @@
-# Development layer merged on top of docker-compose.yml. It builds the Kinora images from
+# Development layer merged on top of docker-compose.yml or docker-compose.jellyfin.yml. It builds the Kinora images from
 # this checkout instead of pulling them from GHCR, and mounts the backend source into the
 # containers. Everything else comes from docker-compose.yml.
 #
 # Enable it by adding this line to the .env next to the compose files:
 #   COMPOSE_FILE=docker-compose.yml;docker-compose.dev.yml
+# or, for the stack with Jellyfin:
+#   COMPOSE_FILE=docker-compose.jellyfin.yml;docker-compose.dev.yml
 # Use : instead of ; as the separator on Linux and macOS.
 
 x-backend-build: &backend_build

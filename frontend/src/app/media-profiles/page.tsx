@@ -25,8 +25,10 @@ import {
 import { ClipboardList } from "lucide-react";
 import {
 	DEFAULT_NEVER_IMPORT_EXTENSIONS,
+	MUSIC_QUALITY_TIERS_HIGH_TO_LOW,
 	MUSIC_TIER_LABELS,
 } from "./components/constants";
+import type { AnimeTab, MoviesTab, TVShowsTab } from "./components/types";
 
 interface MediaProfile {
 	id: number;
@@ -64,9 +66,10 @@ interface MediaProfile {
 	subtitle_languages?: string[];
 	upgrade_allowed: boolean;
 	upgrade_replace_policy?: string;
-	uploaders?: string[];
 	release_groups?: string[];
+	release_group_mode?: string;
 	regex_filters?: string[];
+	regex_mode?: string;
 	seeder_weight?: number;
 	size_weight?: number;
 	recency_weight?: number;
@@ -84,9 +87,8 @@ interface MediaProfile {
 	anime_naming_format?: string;
 	anime_folder_format?: string;
 	// Anime options
-	anime_subtitle_preference?: string;
 	anime_allow_hardsub?: boolean;
-	anime_prefer_dual_audio?: boolean;
+	anime_audio_preference?: string;
 	anime_audio_language?: string;
 	anime_subtitle_language?: string;
 	// Indexers per media type
@@ -100,7 +102,6 @@ interface MediaProfile {
 	music_track_naming_format?: string;
 	music_multi_disc_format?: string;
 	music_quality_tiers?: string[];
-	music_quality_cutoff?: string;
 	music_embed_lyrics?: boolean;
 	music_embed_artwork?: boolean;
 	// File output settings
@@ -251,19 +252,15 @@ export default function MediaProfilesPage() {
 				subtitle_languages: data.subtitle_languages,
 				upgrade_allowed: data.upgrade_allowed,
 				upgrade_replace_policy: data.upgrade_replace_policy,
-				uploaders: data.uploader_filter
-					? data.uploader_filter
-							.split(",")
-							.map((s) => s.trim())
-							.filter(Boolean)
-					: [],
 				release_groups: data.release_group_filter
 					? data.release_group_filter
 							.split(",")
 							.map((s) => s.trim())
 							.filter(Boolean)
 					: [],
+				release_group_mode: data.release_group_mode,
 				regex_filters: data.custom_regex ? [data.custom_regex] : [],
+				regex_mode: data.regex_mode,
 				seeder_weight: data.seeder_weight,
 				size_weight: data.size_weight,
 				recency_weight: data.recency_weight,
@@ -281,9 +278,8 @@ export default function MediaProfilesPage() {
 				anime_naming_format: data.anime_naming_format,
 				anime_folder_format: data.anime_folder_format,
 				// Anime options
-				anime_subtitle_preference: data.anime_subtitle_preference,
 				anime_allow_hardsub: data.anime_allow_hardsub,
-				anime_prefer_dual_audio: data.anime_prefer_dual_audio,
+				anime_audio_preference: data.anime_audio_preference,
 				anime_audio_language: data.anime_audio_language,
 				anime_subtitle_language: data.anime_subtitle_language,
 				// Indexers per media type
@@ -297,7 +293,6 @@ export default function MediaProfilesPage() {
 				music_track_naming_format: data.music_track_naming_format,
 				music_multi_disc_format: data.music_multi_disc_format,
 				music_quality_tiers: data.music_quality_tiers,
-				music_quality_cutoff: data.music_quality_cutoff,
 				music_embed_lyrics: data.music_embed_lyrics,
 				music_embed_artwork: data.music_embed_artwork,
 				// File output settings
@@ -375,19 +370,15 @@ export default function MediaProfilesPage() {
 				subtitle_languages: data.subtitle_languages,
 				upgrade_allowed: data.upgrade_allowed,
 				upgrade_replace_policy: data.upgrade_replace_policy,
-				uploaders: data.uploader_filter
-					? data.uploader_filter
-							.split(",")
-							.map((s) => s.trim())
-							.filter(Boolean)
-					: [],
 				release_groups: data.release_group_filter
 					? data.release_group_filter
 							.split(",")
 							.map((s) => s.trim())
 							.filter(Boolean)
 					: [],
+				release_group_mode: data.release_group_mode,
 				regex_filters: data.custom_regex ? [data.custom_regex] : [],
+				regex_mode: data.regex_mode,
 				seeder_weight: data.seeder_weight,
 				size_weight: data.size_weight,
 				recency_weight: data.recency_weight,
@@ -405,9 +396,8 @@ export default function MediaProfilesPage() {
 				anime_naming_format: data.anime_naming_format,
 				anime_folder_format: data.anime_folder_format,
 				// Anime options
-				anime_subtitle_preference: data.anime_subtitle_preference,
 				anime_allow_hardsub: data.anime_allow_hardsub,
-				anime_prefer_dual_audio: data.anime_prefer_dual_audio,
+				anime_audio_preference: data.anime_audio_preference,
 				anime_audio_language: data.anime_audio_language,
 				anime_subtitle_language: data.anime_subtitle_language,
 				// Indexers per media type
@@ -421,7 +411,6 @@ export default function MediaProfilesPage() {
 				music_track_naming_format: data.music_track_naming_format,
 				music_multi_disc_format: data.music_multi_disc_format,
 				music_quality_tiers: data.music_quality_tiers,
-				music_quality_cutoff: data.music_quality_cutoff,
 				music_embed_lyrics: data.music_embed_lyrics,
 				music_embed_artwork: data.music_embed_artwork,
 				// File output settings
@@ -535,9 +524,12 @@ export default function MediaProfilesPage() {
 					| "keep_old"
 					| "delete_old"
 					| "keep_versions") || defaults.upgrade_replace_policy,
-			uploader_filter: profile.uploaders?.join(", ") || "",
 			release_group_filter: profile.release_groups?.join(", ") || "",
+			release_group_mode:
+				profile.release_group_mode === "require" ? "require" : "prefer",
 			custom_regex: profile.regex_filters?.[0] || "",
+			regex_mode:
+				profile.regex_mode === "include" ? "include" : "exclude",
 			seeder_weight: profile.seeder_weight ?? 40,
 			size_weight: profile.size_weight ?? 40,
 			recency_weight: profile.recency_weight ?? 20,
@@ -570,13 +562,12 @@ export default function MediaProfilesPage() {
 			anime_folder_format:
 				profile.anime_folder_format || defaults.anime_folder_format,
 			// Anime options
-			anime_subtitle_preference:
-				(profile.anime_subtitle_preference as
-					| "softsub"
-					| "hardsub"
-					| "dual_audio") || "softsub",
 			anime_allow_hardsub: profile.anime_allow_hardsub ?? false,
-			anime_prefer_dual_audio: profile.anime_prefer_dual_audio ?? false,
+			anime_audio_preference:
+				(profile.anime_audio_preference as
+					| "any"
+					| "prefer_dual"
+					| "dual_only") || "any",
 			anime_audio_language: profile.anime_audio_language || "ja",
 			anime_subtitle_language: profile.anime_subtitle_language || "en",
 			// Indexers per media type
@@ -599,8 +590,6 @@ export default function MediaProfilesPage() {
 				defaults.music_multi_disc_format,
 			music_quality_tiers:
 				profile.music_quality_tiers || defaults.music_quality_tiers,
-			music_quality_cutoff:
-				profile.music_quality_cutoff || defaults.music_quality_cutoff,
 			music_embed_lyrics: profile.music_embed_lyrics ?? true,
 			music_embed_artwork: profile.music_embed_artwork ?? true,
 			// File output settings
@@ -743,7 +732,7 @@ export default function MediaProfilesPage() {
 			try {
 				new RegExp(formData.custom_regex);
 			} catch {
-				errors.push("Custom regex filter is invalid");
+				errors.push("Custom regex pattern is invalid");
 			}
 		}
 
@@ -866,35 +855,21 @@ export default function MediaProfilesPage() {
 				return (
 					<MoviesGroup
 						{...sectionProps}
-						activeTab={
-							activeTab as "indexers" | "quality" | "naming"
-						}
+						activeTab={activeTab as MoviesTab}
 					/>
 				);
 			case "tvshows":
 				return (
 					<TVShowsGroup
 						{...sectionProps}
-						activeTab={
-							activeTab as
-								| "indexers"
-								| "quality"
-								| "naming"
-								| "options"
-						}
+						activeTab={activeTab as TVShowsTab}
 					/>
 				);
 			case "anime":
 				return (
 					<AnimeGroup
 						{...sectionProps}
-						activeTab={
-							activeTab as
-								| "indexers"
-								| "quality"
-								| "naming"
-								| "options"
-						}
+						activeTab={activeTab as AnimeTab}
 					/>
 				);
 			case "music":
@@ -910,9 +885,7 @@ export default function MediaProfilesPage() {
 				return (
 					<SearchGroup
 						{...sectionProps}
-						activeTab={
-							activeTab as "sorting" | "filters" | "timing"
-						}
+						activeTab={activeTab as "sorting" | "trust" | "timing"}
 					/>
 				);
 			case "fileoutput":
@@ -960,15 +933,15 @@ export default function MediaProfilesPage() {
 			profile.music_quality_tiers &&
 			profile.music_quality_tiers.length > 0
 		) {
-			const cutoffLabel = profile.music_quality_cutoff
-				? MUSIC_TIER_LABELS[profile.music_quality_cutoff] ||
-					profile.music_quality_cutoff
-				: null;
+			// Upgrades stop at the highest allowed tier.
+			const topTier = MUSIC_QUALITY_TIERS_HIGH_TO_LOW.find((tier) =>
+				profile.music_quality_tiers?.includes(tier),
+			);
 			summaryItems.push({
 				label: "Music Quality",
 				value:
 					`${profile.music_quality_tiers.length} tier(s)` +
-					(cutoffLabel ? `, cutoff ${cutoffLabel}` : ""),
+					(topTier ? `, up to ${MUSIC_TIER_LABELS[topTier]}` : ""),
 			});
 		}
 

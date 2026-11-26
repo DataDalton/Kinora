@@ -47,6 +47,9 @@ class MatchTarget:
     # Further check on a whole release after the title match, such as the episode upgrade
     # check that every episode a pack would replace gets a better file. True keeps it.
     releaseCheck: Optional[Callable[[object], bool]] = None
+    # Every library episode of the series (dicts with season, episode and absolute),
+    # used to count the episodes a pack holds. None when not loaded.
+    episodes: Optional[List[dict]] = None
     artist: Optional[str] = None
 
 
@@ -232,6 +235,18 @@ def coveredEpisodes(releaseTitle: str, target: MatchTarget, episodes: List[dict]
         if _absoluteNumbers(releaseTitle, target.titles):
             return None
     return list(episodes)
+
+
+def episodeCount(releaseTitle: str, target: Optional[MatchTarget]) -> Optional[int]:
+    """
+    How many library episodes a show or anime release holds, read from its name. Returns
+    None when the series episodes are not loaded or the name cannot be read, so the
+    caller treats the release as one episode.
+    """
+    if target is None or target.kind not in ("show", "anime") or not target.episodes or not releaseTitle:
+        return None
+    covered = coveredEpisodes(releaseTitle, target, target.episodes)
+    return len(covered) if covered else None
 
 
 def releaseMatches(releaseTitle: str, target: Optional[MatchTarget]) -> bool:

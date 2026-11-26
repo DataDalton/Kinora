@@ -303,7 +303,8 @@ function Toggle({
 
 export { Toggle };
 
-// A setting with a switch beside its title and description. The switch keeps its full
+// A setting with a switch beside its title and description. The whole card is the
+// switch, so a click anywhere on it toggles the setting. The switch keeps its full
 // width however narrow the card gets.
 function ToggleCard({
 	title,
@@ -319,20 +320,36 @@ function ToggleCard({
 	disabled?: boolean;
 }) {
 	return (
-		<div className="flex items-center justify-between gap-4 p-4 rounded-lg border border-border">
+		<button
+			type="button"
+			role="switch"
+			aria-checked={enabled}
+			onClick={() => onChange(!enabled)}
+			disabled={disabled}
+			className={`w-full text-left flex items-center justify-between gap-4 p-4 rounded-lg border border-border transition ${
+				disabled
+					? "cursor-not-allowed"
+					: "hover:bg-muted/80 cursor-pointer"
+			}`}
+		>
 			<div className="min-w-0">
 				<p className="text-sm font-medium">{title}</p>
 				<p className="text-xs text-muted-foreground mt-1">
 					{description}
 				</p>
 			</div>
-			<Toggle
-				enabled={enabled}
-				onChange={onChange}
-				disabled={disabled}
-				title={title}
-			/>
-		</div>
+			<span
+				className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+					enabled ? "bg-primary" : "bg-muted"
+				} ${disabled ? "opacity-50" : ""}`}
+			>
+				<span
+					className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+						enabled ? "translate-x-6" : "translate-x-1"
+					}`}
+				/>
+			</span>
+		</button>
 	);
 }
 

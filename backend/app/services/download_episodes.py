@@ -32,6 +32,13 @@ _SERIES_TITLE_SQL = {
 }
 
 
+async def seriesEpisodes(conn, mediaType: str, seriesId: int) -> Optional[List[dict]]:
+    """Every library episode of a show or anime as dicts with id, season, episode and absolute."""
+    if mediaType not in _EPISODE_SQL or not seriesId:
+        return None
+    return [dict(row) for row in await conn.fetch(_EPISODE_SQL[mediaType], seriesId)]
+
+
 async def coveredEpisodeIds(conn, mediaType: str, seriesId: int, releaseTitle: str) -> Optional[List[int]]:
     """
     Ids of the library episodes a release covers, read from its name. Returns None for
@@ -43,7 +50,7 @@ async def coveredEpisodeIds(conn, mediaType: str, seriesId: int, releaseTitle: s
     seriesRow = await conn.fetchrow(_SERIES_TITLE_SQL[mediaType], seriesId)
     if not seriesRow:
         return None
-    episodes = [dict(row) for row in await conn.fetch(_EPISODE_SQL[mediaType], seriesId)]
+    episodes = await seriesEpisodes(conn, mediaType, seriesId)
     titles = [title for title in (seriesRow["title"], seriesRow["original_title"]) if title]
     season, episode = release_matching.seasonEpisodeFromQuery(releaseTitle)
     absoluteEpisode = None

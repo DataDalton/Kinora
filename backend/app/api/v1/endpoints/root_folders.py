@@ -1,8 +1,10 @@
 """
 API endpoints for managing root folders and folder selection settings.
 """
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
+import asyncio
 import asyncpg
 import os
 import platform
@@ -30,6 +32,23 @@ from app.tasks.folder_health import checkSingleFolder
 
 router = APIRouter()
 
+# Running Jellyfin library updates, held so they are not collected before they finish.
+_jellyfinSyncTasks: set = set()
+
+_FOLDER_FIELDS_SQL = "SELECT name, root_path, media_type FROM root_folders WHERE id = $1"
+
+
+def _syncJellyfinLibrary(old, new) -> None:
+    """Carry a root folder change over to the bundled Jellyfin in the background."""
+    from app.services import jellyfin_setup
+
+    def fields(folder):
+        return {key: folder[key] for key in ("name", "root_path", "media_type")} if folder else None
+
+    task = asyncio.create_task(jellyfin_setup.syncFolderLibrary(fields(old), fields(new)))
+    _jellyfinSyncTasks.add(task)
+    task.add_done_callback(_jellyfinSyncTasks.discard)
+
 
 @router.get("/", response_model=List[RootFolderWithStats])
 async def listRootFolders(
@@ -41,16 +60,14 @@ async def listRootFolders(
     if mediaType:
         folders = await folderSelector.getFoldersForMediaType(conn, mediaType, activeOnly=False)
     else:
-        rows = await conn.fetch(
-            """
+        rows = await conn.fetch("""
             SELECT id, media_type, name, root_path, download_path, priority,
                    fill_threshold_percent, fill_threshold_gb, is_active, is_default,
                    total_space_bytes, free_space_bytes, last_health_check,
                    health_status, health_message, created_at, updated_at
             FROM root_folders
             ORDER BY media_type, priority ASC, id ASC
-            """
-        )
+            """)
         folders = [dict(row) for row in rows]
 
     # Add computed stats
@@ -108,7 +125,7 @@ async def getSelectionSettings(
         FROM folder_selection_settings
         WHERE media_type = $1
         """,
-        mediaType
+        mediaType,
     )
 
     if not row:
@@ -141,7 +158,7 @@ async def updateSelectionSettings(
         FROM folder_selection_settings
         WHERE media_type = $1
         """,
-        mediaType
+        mediaType,
     )
 
     return dict(row)
@@ -198,6 +215,7 @@ async def createRootFolder(
             fillThresholdPercent=folderData.fill_threshold_percent,
             fillThresholdGb=folderData.fill_threshold_gb,
         )
+        _syncJellyfinLibrary(None, folder)
 
         # Add computed stats
         total = folder.get("total_space_bytes")
@@ -233,6 +251,7 @@ async def updateRootFolder(
     """Update an existing root folder."""
 
     try:
+        before = await conn.fetchrow(_FOLDER_FIELDS_SQL, folderId)
         folder = await folderSelector.updateFolder(
             conn,
             folderId,
@@ -250,6 +269,7 @@ async def updateRootFolder(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Root folder not found",
             )
+        _syncJellyfinLibrary(before, folder)
 
         # Add computed stats
         total = folder.get("total_space_bytes")
@@ -282,12 +302,14 @@ async def deleteRootFolder(
     """
 
     try:
+        before = await conn.fetchrow(_FOLDER_FIELDS_SQL, folderId)
         deleted = await folderSelector.deleteFolder(conn, folderId)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Root folder not found",
             )
+        _syncJellyfinLibrary(before, None)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -309,10 +331,7 @@ async def testRootFolder(
             detail="Root folder not found",
         )
 
-    result = await folderHealthMonitor.testFolder(
-        folder["root_path"],
-        folder["download_path"]
-    )
+    result = await folderHealthMonitor.testFolder(folder["root_path"], folder["download_path"])
 
     return result
 
@@ -323,10 +342,7 @@ async def testFolderPaths(
     currentUser=Depends(get_current_user),
 ):
     """Test folder paths before creating a folder."""
-    result = await folderHealthMonitor.testFolder(
-        testData.root_path,
-        testData.download_path
-    )
+    result = await folderHealthMonitor.testFolder(testData.root_path, testData.download_path)
     return result
 
 
@@ -364,6 +380,7 @@ async def browseDirectory(
         if platform.system() == "Windows":
             # Return available drives on Windows
             import string
+
             drives = []
             for letter in string.ascii_uppercase:
                 drivePath = f"{letter}:\\"
@@ -405,7 +422,7 @@ async def browseDirectory(
             try:
                 if os.path.isdir(fullPath):
                     directories.append(entry)
-            except (PermissionError, OSError):
+            except PermissionError, OSError:
                 continue
 
         # Determine parent

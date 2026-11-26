@@ -264,46 +264,52 @@ export default function TrustedUploadersSection() {
 								) : (
 									<div
 										key={entry.id}
-										className={`bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm flex items-center justify-between gap-4 ${
+										className={`bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm flex items-center justify-between gap-2 ${
 											entry.enabled ? "" : "opacity-50"
 										}`}
 									>
-										<div className="min-w-0">
-											<p className="text-sm font-semibold">
-												{entry.display_name}
-											</p>
-											<div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-1">
-												<span>
-													ext.to{" "}
-													{entry.ext_name || "none"}
-												</span>
-												<span>
-													1337x{" "}
-													{entry.leetx_name || "none"}
-												</span>
-												<span className="px-2 py-0.5 bg-muted rounded">
-													{entry.is_default
-														? "Default"
-														: "Added"}
-												</span>
+										<button
+											type="button"
+											role="switch"
+											aria-checked={entry.enabled}
+											onClick={() =>
+												toggleMutation.mutate(entry)
+											}
+											className="flex-1 min-w-0 flex items-center justify-between gap-4 text-left cursor-pointer"
+											title={
+												entry.enabled
+													? "Turn off"
+													: "Turn on"
+											}
+										>
+											<div className="min-w-0">
+												<p className="text-sm font-semibold">
+													{entry.display_name}
+												</p>
+												<div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-1">
+													<span>
+														ext.to{" "}
+														{entry.ext_name ||
+															"none"}
+													</span>
+													<span>
+														1337x{" "}
+														{entry.leetx_name ||
+															"none"}
+													</span>
+													<span className="px-2 py-0.5 bg-muted rounded">
+														{entry.is_default
+															? "Default"
+															: "Added"}
+													</span>
+												</div>
 											</div>
-										</div>
-										<div className="flex items-center gap-2">
-											<button
-												type="button"
-												onClick={() =>
-													toggleMutation.mutate(entry)
-												}
-												className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+											<span
+												className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
 													entry.enabled
 														? "bg-primary"
 														: "bg-muted"
 												}`}
-												title={
-													entry.enabled
-														? "Turn off"
-														: "Turn on"
-												}
 											>
 												<span
 													className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -312,7 +318,9 @@ export default function TrustedUploadersSection() {
 															: "translate-x-1"
 													}`}
 												/>
-											</button>
+											</span>
+										</button>
+										<div className="flex items-center gap-2">
 											<button
 												type="button"
 												onClick={() => startEdit(entry)}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
@@ -255,6 +256,14 @@ type SettingsSection =
 	| "jellyfin"
 	| "database";
 
+// Sections other pages link to with /settings?section=<id>.
+const LINKABLE_SECTIONS: SettingsSection[] = [
+	"trusted-uploaders",
+	"jellyfin",
+	"indexers",
+	"blocklist",
+];
+
 // Reads the API error detail, which is a string or a list of validation errors.
 function getErrorDetail(error: any): string | undefined {
 	const detail = error.response?.data?.detail;
@@ -264,12 +273,27 @@ function getErrorDetail(error: any): string | undefined {
 }
 
 export default function SettingsPage() {
+	// useSearchParams requires a suspense boundary during prerendering.
+	return (
+		<Suspense fallback={<div className="min-h-screen" />}>
+			<SettingsPageContent />
+		</Suspense>
+	);
+}
+
+function SettingsPageContent() {
+	const searchParams = useSearchParams();
 	const queryClient = useQueryClient();
 	const { hasPermission } = usePermissions();
 	const [editingKey, setEditingKey] = useState<string | null>(null);
 	const [editValue, setEditValue] = useState("");
-	const [selectedSection, setSelectedSection] =
-		useState<SettingsSection>("users");
+	// Opens the section named in ?section= when another page links here.
+	const [selectedSection, setSelectedSection] = useState<SettingsSection>(
+		() => {
+			const requested = searchParams.get("section") as SettingsSection;
+			return LINKABLE_SECTIONS.includes(requested) ? requested : "users";
+		},
+	);
 	const [editingClientId, setEditingClientId] = useState<number | null>(null);
 	const [editingClient, setEditingClient] = useState<
 		Partial<DownloadClient> & { password?: string }
@@ -3000,116 +3024,131 @@ function SettingsGroupSection({
 }) {
 	return (
 		<div className="space-y-4">
-			{group.settings.map((setting) => (
-				<div
-					key={setting.key}
-					className="bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm"
-				>
-					<div className="flex justify-between items-start">
-						<div className="flex-1">
-							<h3 className="font-medium text-lg mb-1">
-								{setting.key
-									.replace(/_/g, " ")
-									.replace(/\b\w/g, (c) => c.toUpperCase())}
-							</h3>
-							{setting.description && (
-								<p className="text-sm text-muted-foreground mb-3">
-									{setting.description}
-								</p>
-							)}
-
-							{setting.value_type === "boolean" &&
-							editingKey !== setting.key ? (
-								<div className="flex items-center gap-4">
-									<label className="relative inline-flex items-center cursor-pointer">
-										<input
-											type="checkbox"
-											checked={setting.value === "true"}
-											onChange={(e) => {
-												updateMutation.mutate({
-													key: setting.key,
-													value: e.target.checked
-														? "true"
-														: "false",
-												});
-											}}
-											className="sr-only peer"
-										/>
-										<div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/40 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
-										<span className="ml-3 text-sm font-medium">
-											{setting.value === "true"
-												? "Enabled"
-												: "Disabled"}
-										</span>
-									</label>
-								</div>
-							) : editingKey === setting.key ? (
-								<div className="flex gap-2">
-									<input
-										type={
-											setting.is_sensitive
-												? "password"
-												: setting.value_type ===
-													  "integer"
-													? "number"
-													: "text"
-										}
-										value={editValue}
-										onChange={(e) =>
-											setEditValue(e.target.value)
-										}
-										className="flex-1 px-3 py-2 border-input bg-background text-foreground border rounded focus:outline-none focus:ring-2 focus:ring-ring"
-										placeholder={`Enter ${setting.key}`}
-										{...(setting.value_type === "integer"
-											? { min: 1, step: 1 }
-											: {})}
-									/>
-									<button
-										onClick={() => onSave(setting.key)}
-										className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
-										disabled={updateMutation.isPending}
-									>
-										Save
-									</button>
-									<button
-										onClick={onCancel}
-										className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:opacity-90 cursor-pointer"
-									>
-										Cancel
-									</button>
-								</div>
-							) : (
-								<div className="flex items-center gap-2">
-									<code className="flex-1 bg-muted text-muted-foreground px-3 py-2 rounded text-sm">
-										{setting.value ||
-											"(not set - using default)"}
-									</code>
-									<button
-										onClick={() => onEdit(setting)}
-										className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
-									>
-										Edit
-									</button>
-									{setting.value &&
-										setting.value !== "***HIDDEN***" && (
-											<button
-												onClick={() =>
-													onReset(setting.key)
-												}
-												className="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:opacity-90 cursor-pointer"
-												disabled={
-													deleteMutation.isPending
-												}
-											>
-												Reset
-											</button>
+			{group.settings.map((setting) => {
+				// A boolean setting card is one label, so a click anywhere on it flips the checkbox.
+				const isToggleCard =
+					setting.value_type === "boolean" &&
+					editingKey !== setting.key;
+				const CardTag = isToggleCard ? "label" : "div";
+				return (
+					<CardTag
+						key={setting.key}
+						className={`bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm ${
+							isToggleCard ? "block cursor-pointer" : ""
+						}`}
+					>
+						<div className="flex justify-between items-start">
+							<div className="flex-1">
+								<h3 className="font-medium text-lg mb-1">
+									{setting.key
+										.replace(/_/g, " ")
+										.replace(/\b\w/g, (c) =>
+											c.toUpperCase(),
 										)}
-								</div>
-							)}
+								</h3>
+								{setting.description && (
+									<p className="text-sm text-muted-foreground mb-3">
+										{setting.description}
+									</p>
+								)}
+
+								{setting.value_type === "boolean" &&
+								editingKey !== setting.key ? (
+									<div className="flex items-center gap-4">
+										<span className="relative inline-flex items-center cursor-pointer">
+											<input
+												type="checkbox"
+												checked={
+													setting.value === "true"
+												}
+												onChange={(e) => {
+													updateMutation.mutate({
+														key: setting.key,
+														value: e.target.checked
+															? "true"
+															: "false",
+													});
+												}}
+												className="sr-only peer"
+											/>
+											<div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/40 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+											<span className="ml-3 text-sm font-medium">
+												{setting.value === "true"
+													? "Enabled"
+													: "Disabled"}
+											</span>
+										</span>
+									</div>
+								) : editingKey === setting.key ? (
+									<div className="flex gap-2">
+										<input
+											type={
+												setting.is_sensitive
+													? "password"
+													: setting.value_type ===
+														  "integer"
+														? "number"
+														: "text"
+											}
+											value={editValue}
+											onChange={(e) =>
+												setEditValue(e.target.value)
+											}
+											className="flex-1 px-3 py-2 border-input bg-background text-foreground border rounded focus:outline-none focus:ring-2 focus:ring-ring"
+											placeholder={`Enter ${setting.key}`}
+											{...(setting.value_type ===
+											"integer"
+												? { min: 1, step: 1 }
+												: {})}
+										/>
+										<button
+											onClick={() => onSave(setting.key)}
+											className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
+											disabled={updateMutation.isPending}
+										>
+											Save
+										</button>
+										<button
+											onClick={onCancel}
+											className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:opacity-90 cursor-pointer"
+										>
+											Cancel
+										</button>
+									</div>
+								) : (
+									<div className="flex items-center gap-2">
+										<code className="flex-1 bg-muted text-muted-foreground px-3 py-2 rounded text-sm">
+											{setting.value ||
+												"(not set - using default)"}
+										</code>
+										<button
+											onClick={() => onEdit(setting)}
+											className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 cursor-pointer"
+										>
+											Edit
+										</button>
+										{setting.value &&
+											setting.value !==
+												"***HIDDEN***" && (
+												<button
+													onClick={() =>
+														onReset(setting.key)
+													}
+													className="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:opacity-90 cursor-pointer"
+													disabled={
+														deleteMutation.isPending
+													}
+												>
+													Reset
+												</button>
+											)}
+									</div>
+								)}
+							</div>
 						</div>
-					</div>
-				</div>
-			))}
+					</CardTag>
+				);
+			})}
 		</div>
 	);
 }

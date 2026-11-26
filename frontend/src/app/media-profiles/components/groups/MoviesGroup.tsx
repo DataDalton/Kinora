@@ -4,7 +4,7 @@ import NamingPreview from "../shared/NamingPreview";
 import { useState } from "react";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { X } from "lucide-react";
-import { MediaProfileFormData } from "../types";
+import { MediaProfileFormData, MoviesTab } from "../types";
 import {
 	RESOLUTIONS,
 	VIDEO_CODECS,
@@ -21,7 +21,7 @@ import QualityCheckboxList from "../shared/QualityCheckboxList";
 interface MoviesGroupProps {
 	formData: MediaProfileFormData;
 	setFormData: (data: MediaProfileFormData) => void;
-	activeTab: "indexers" | "quality" | "naming";
+	activeTab: MoviesTab;
 }
 
 const MOVIE_TOKENS = [
@@ -341,6 +341,20 @@ export default function MoviesGroup({
 						label="Special Editions"
 						description="Select all acceptable special editions for movies"
 					/>
+				</div>
+			)}
+
+			{activeTab === "size" && (
+				<div className="space-y-6">
+					<div className="bg-blue-500/20 border border-blue-500/30 rounded-lg p-4">
+						<h4 className="font-semibold text-sm mb-2">
+							Movie Size Limits
+						</h4>
+						<p className="text-xs text-muted-foreground">
+							Releases outside these limits are skipped. A limit
+							left at zero is not applied.
+						</p>
+					</div>
 
 					{/* Size Limits */}
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-4">

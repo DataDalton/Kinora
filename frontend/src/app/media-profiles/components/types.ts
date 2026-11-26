@@ -56,9 +56,10 @@ export interface MediaProfileFormData {
 	max_retries: number;
 	max_results: number;
 	min_seeds: number;
-	uploader_filter: string;
 	release_group_filter: string;
+	release_group_mode: "prefer" | "require";
 	custom_regex: string;
+	regex_mode: "include" | "exclude";
 	search_sort_preference: "weighted" | "seeders" | "size" | "date";
 	seeder_weight: number;
 	size_weight: number;
@@ -83,9 +84,8 @@ export interface MediaProfileFormData {
 	anime_naming_format: string;
 	anime_folder_format: string;
 	// Anime options
-	anime_subtitle_preference: "softsub" | "hardsub" | "dual_audio";
 	anime_allow_hardsub: boolean;
-	anime_prefer_dual_audio: boolean;
+	anime_audio_preference: "any" | "prefer_dual" | "dual_only";
 	anime_audio_language: string;
 	anime_subtitle_language: string;
 	// Music settings
@@ -94,7 +94,6 @@ export interface MediaProfileFormData {
 	music_track_naming_format: string;
 	music_multi_disc_format: string;
 	music_quality_tiers: string[];
-	music_quality_cutoff: string;
 	music_embed_lyrics: boolean;
 	music_embed_artwork: boolean;
 	// Torrent validation settings
@@ -131,11 +130,11 @@ export type NavigationGroup =
 	| "fileoutput";
 
 export type ProfileTab = "general" | "languages" | "validation" | "seeding";
-export type MoviesTab = "indexers" | "quality" | "naming";
-export type TVShowsTab = "indexers" | "quality" | "naming" | "options";
-export type AnimeTab = "indexers" | "quality" | "naming" | "options";
+export type MoviesTab = "indexers" | "quality" | "size" | "naming";
+export type TVShowsTab = "indexers" | "quality" | "size" | "naming" | "options";
+export type AnimeTab = "indexers" | "quality" | "size" | "naming" | "options";
 export type MusicTab = "indexers" | "quality" | "naming";
-export type SearchTab = "sorting" | "filters" | "trust" | "timing";
+export type SearchTab = "sorting" | "trust" | "timing";
 export type SafetyTemplate = "trusted" | "balanced" | "open";
 export type FileOutputTab = "files";
 

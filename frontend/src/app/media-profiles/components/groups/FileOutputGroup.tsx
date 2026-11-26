@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { FilePlus2, Lock, Plus, X } from "lucide-react";
 import { MediaProfileFormData } from "../types";
 import {
@@ -63,7 +64,7 @@ export default function FileOutputGroup({
 		<div className="space-y-6">
 			<div>
 				<label className="block text-sm font-semibold mb-2">
-					Media Server
+					Naming Style
 				</label>
 				<div className="flex gap-2">
 					<button
@@ -92,9 +93,17 @@ export default function FileOutputGroup({
 					</button>
 				</div>
 				<p className="text-xs text-muted-foreground mt-1">
-					Jellyfin applies optimized naming with TMDB IDs and folder
-					structure, and writes NFO metadata. Custom keeps your
-					per-type naming formats.
+					Jellyfin naming adds TMDB IDs to folder names and writes
+					.nfo metadata files next to the media. Custom keeps your
+					per-type naming formats. This only sets file names, and does
+					not connect to a server.{" "}
+					<Link
+						href="/settings?section=jellyfin"
+						className="text-primary hover:underline"
+					>
+						Connect Jellyfin in Settings
+					</Link>{" "}
+					to rescan its libraries after each import.
 				</p>
 			</div>
 
@@ -136,7 +145,18 @@ export default function FileOutputGroup({
 				</p>
 			</div>
 
-			<div className="p-4 bg-muted/50 rounded-lg border border-border">
+			<button
+				type="button"
+				role="switch"
+				aria-checked={formData.import_extra_files}
+				onClick={() =>
+					setFormData({
+						...formData,
+						import_extra_files: !formData.import_extra_files,
+					})
+				}
+				className="w-full text-left p-4 bg-muted/50 rounded-lg border border-border hover:bg-muted/80 transition cursor-pointer"
+			>
 				<div className="flex items-center justify-between">
 					<div className="flex items-center gap-3">
 						<FilePlus2 className="w-5 h-5 text-primary" />
@@ -151,16 +171,8 @@ export default function FileOutputGroup({
 							</p>
 						</div>
 					</div>
-					<button
-						type="button"
-						onClick={() =>
-							setFormData({
-								...formData,
-								import_extra_files:
-									!formData.import_extra_files,
-							})
-						}
-						className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+					<span
+						className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
 							formData.import_extra_files
 								? "bg-primary"
 								: "bg-muted"
@@ -173,9 +185,9 @@ export default function FileOutputGroup({
 									: "translate-x-1"
 							}`}
 						/>
-					</button>
+					</span>
 				</div>
-			</div>
+			</button>
 
 			<div className="p-4 rounded-lg border border-border">
 				<div className="flex items-center justify-between mb-3">

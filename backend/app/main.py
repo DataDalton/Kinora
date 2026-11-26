@@ -57,6 +57,10 @@ async def lifespan(app: FastAPI):
     bindingTask = asyncio.create_task(bind_qbittorrent_when_tunnel_ready())
     # Same reason for the WebUI hardening, which waits for qBittorrent to answer.
     hardeningTask = asyncio.create_task(harden_qbittorrent_when_ready())
+    # Links the Jellyfin bundled by docker-compose.jellyfin.yml once it answers.
+    from app.services.jellyfin_setup import linkBundledJellyfinWhenReady
+
+    jellyfinTask = asyncio.create_task(linkBundledJellyfinWhenReady())
     # Reclaim FlareSolverr browsers held by sessions whose owning process has exited.
     try:
         from app.services.cloudflare.flaresolverr import flaresolverr
@@ -68,6 +72,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: stop the pending binding retry, then close the pool and HTTP client
     bindingTask.cancel()
     hardeningTask.cancel()
+    jellyfinTask.cancel()
     await close_pool()
     await close_http_client()
 

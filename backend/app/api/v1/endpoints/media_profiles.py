@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, field_validator
 import asyncpg
 
@@ -51,6 +51,13 @@ DEFAULT_PROFILE_INDEXERS = {
 # Resolutions a new profile accepts for video, in preference order.
 DEFAULT_PROFILE_RESOLUTIONS = ["1080p", "720p"]
 
+# prefer ranks listed release groups higher, require rejects every other group.
+ReleaseGroupMode = Literal["prefer", "require"]
+# include keeps titles matching every pattern, exclude drops titles matching any.
+RegexMode = Literal["include", "exclude"]
+# any accepts every audio layout, prefer_dual ranks dual audio higher, dual_only requires it.
+AnimeAudioPreference = Literal["any", "prefer_dual", "dual_only"]
+
 
 class MediaProfileCreate(BaseModel):
     """
@@ -95,9 +102,10 @@ class MediaProfileCreate(BaseModel):
     languages: Optional[List[str]] = []
     subtitle_languages: Optional[List[str]] = []
     upgrade_allowed: Optional[bool] = True
-    uploaders: Optional[List[str]] = []
     release_groups: Optional[List[str]] = []
+    release_group_mode: Optional[ReleaseGroupMode] = "prefer"
     regex_filters: Optional[List[str]] = []
+    regex_mode: Optional[RegexMode] = "exclude"
     seeder_weight: Optional[int] = 34
     size_weight: Optional[int] = 33
     recency_weight: Optional[int] = 33
@@ -116,9 +124,8 @@ class MediaProfileCreate(BaseModel):
     anime_naming_format: Optional[str] = None
     anime_folder_format: Optional[str] = None
     # Anime options
-    anime_subtitle_preference: Optional[str] = "softsub"
     anime_allow_hardsub: Optional[bool] = False
-    anime_prefer_dual_audio: Optional[bool] = False
+    anime_audio_preference: Optional[AnimeAudioPreference] = "any"
     anime_audio_language: Optional[str] = "ja"
     anime_subtitle_language: Optional[str] = "en"
     # Indexers per media type
@@ -142,7 +149,6 @@ class MediaProfileCreate(BaseModel):
         "mp3_320",
         "mp3_256",
     ]
-    music_quality_cutoff: Optional[str] = "lossless_16_44"
     music_embed_lyrics: Optional[bool] = True
     music_embed_artwork: Optional[bool] = True
     # File output settings
@@ -258,9 +264,10 @@ class MediaProfileUpdate(BaseModel):
     languages: Optional[List[str]] = None
     subtitle_languages: Optional[List[str]] = None
     upgrade_allowed: Optional[bool] = None
-    uploaders: Optional[List[str]] = None
     release_groups: Optional[List[str]] = None
+    release_group_mode: Optional[ReleaseGroupMode] = None
     regex_filters: Optional[List[str]] = None
+    regex_mode: Optional[RegexMode] = None
     seeder_weight: Optional[int] = None
     size_weight: Optional[int] = None
     recency_weight: Optional[int] = None
@@ -279,9 +286,8 @@ class MediaProfileUpdate(BaseModel):
     anime_naming_format: Optional[str] = None
     anime_folder_format: Optional[str] = None
     # Anime options
-    anime_subtitle_preference: Optional[str] = None
     anime_allow_hardsub: Optional[bool] = None
-    anime_prefer_dual_audio: Optional[bool] = None
+    anime_audio_preference: Optional[AnimeAudioPreference] = None
     anime_audio_language: Optional[str] = None
     anime_subtitle_language: Optional[str] = None
     # Indexers per media type
@@ -295,7 +301,6 @@ class MediaProfileUpdate(BaseModel):
     music_track_naming_format: Optional[str] = None
     music_multi_disc_format: Optional[str] = None
     music_quality_tiers: Optional[List[str]] = None
-    music_quality_cutoff: Optional[str] = None
     music_embed_lyrics: Optional[bool] = None
     music_embed_artwork: Optional[bool] = None
     # File output settings
@@ -378,9 +383,10 @@ class MediaProfileResponse(BaseModel):
     languages: Optional[List[str]]
     subtitle_languages: Optional[List[str]]
     upgrade_allowed: bool
-    uploaders: Optional[List[str]]
     release_groups: Optional[List[str]]
+    release_group_mode: Optional[str]
     regex_filters: Optional[List[str]]
+    regex_mode: Optional[str]
     seeder_weight: Optional[int]
     size_weight: Optional[int]
     recency_weight: Optional[int]
@@ -399,9 +405,8 @@ class MediaProfileResponse(BaseModel):
     anime_naming_format: Optional[str]
     anime_folder_format: Optional[str]
     # Anime options
-    anime_subtitle_preference: Optional[str]
     anime_allow_hardsub: Optional[bool]
-    anime_prefer_dual_audio: Optional[bool]
+    anime_audio_preference: Optional[str]
     anime_audio_language: Optional[str]
     anime_subtitle_language: Optional[str]
     # Indexers per media type
@@ -415,7 +420,6 @@ class MediaProfileResponse(BaseModel):
     music_track_naming_format: Optional[str]
     music_multi_disc_format: Optional[str]
     music_quality_tiers: Optional[List[str]]
-    music_quality_cutoff: Optional[str]
     music_embed_lyrics: Optional[bool]
     music_embed_artwork: Optional[bool]
     # File output settings

@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
 	AlertTriangle,
+	Regex,
 	ShieldCheck,
 	ShieldHalf,
 	ShieldOff,
+	Tags,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { MediaProfileFormData, SafetyTemplate } from "../types";
@@ -65,13 +67,59 @@ const TEMPLATES: {
 	},
 ];
 
+const RELEASE_GROUP_MODES: {
+	value: MediaProfileFormData["release_group_mode"];
+	label: string;
+	description: string;
+}[] = [
+	{
+		value: "prefer",
+		label: "Prefer",
+		description:
+			"Releases from these groups rank higher, earlier groups first. Other groups are still allowed.",
+	},
+	{
+		value: "require",
+		label: "Require",
+		description:
+			"Only releases from these groups are downloaded. A release whose group cannot be read is skipped.",
+	},
+];
+
+const REGEX_MODES: {
+	value: MediaProfileFormData["regex_mode"];
+	label: string;
+	description: string;
+}[] = [
+	{
+		value: "exclude",
+		label: "Must not match",
+		description: "Releases whose title matches the pattern are skipped.",
+	},
+	{
+		value: "include",
+		label: "Must match",
+		description: "Only releases whose title matches the pattern are kept.",
+	},
+];
+
+// Segmented button styling shared by the mode pickers.
+const modeButtonClass = (selected: boolean) =>
+	`px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer ${
+		selected
+			? "bg-primary text-primary-foreground"
+			: "bg-muted text-muted-foreground hover:bg-muted/80"
+	}`;
+
 interface SafetyTemplateTabProps {
 	formData: MediaProfileFormData;
 	setFormData: (data: MediaProfileFormData) => void;
 }
 
-// Profile editor tab for the safety template, with read-only tables showing what the
-// chosen template allows. Validation and the quality rules apply under every template.
+// Profile editor tab for trust. The safety template decides which uploaders and sites
+// are accepted, with read-only tables showing what it allows. Release group and regex
+// rules then check the release itself. Validation and the quality rules apply under
+// every template.
 export default function SafetyTemplateTab({
 	formData,
 	setFormData,
@@ -242,12 +290,122 @@ export default function SafetyTemplateTab({
 						</p>
 					)}
 					<Link
-						href="/settings"
+						href="/settings?section=trusted-uploaders"
 						className="inline-block text-xs text-primary hover:underline mt-2"
 					>
 						Edit the trusted list in Settings, Trusted Uploaders
 					</Link>
 				</div>
+			</div>
+
+			<div className="bg-blue-500/20 border border-blue-500/30 rounded-lg p-4">
+				<h4 className="font-semibold text-sm mb-2">Release Rules</h4>
+				<p className="text-xs text-muted-foreground">
+					Checks on the release itself, applied after the safety
+					template. The release group is the team that made the
+					encode, written at the end of the title, such as SPARKS in
+					Movie.2024.1080p.BluRay.x264-SPARKS. It is not the account
+					that posted the torrent.
+				</p>
+			</div>
+
+			<div className="p-4 rounded-lg border border-border">
+				<h3 className="font-semibold text-sm mb-1 flex items-center gap-2">
+					<Tags className="w-4 h-4 text-primary" />
+					Release Groups
+				</h3>
+				<p className="text-xs text-muted-foreground mb-3">
+					Exact group names, comma separated, ignoring case. Leave
+					empty to treat every group the same.
+				</p>
+				<input
+					type="text"
+					value={formData.release_group_filter}
+					onChange={(e) =>
+						setFormData({
+							...formData,
+							release_group_filter: e.target.value,
+						})
+					}
+					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary"
+					placeholder="e.g., SPARKS, EVO"
+				/>
+				<div className="flex gap-2 mt-3">
+					{RELEASE_GROUP_MODES.map((mode) => (
+						<button
+							key={mode.value}
+							type="button"
+							onClick={() =>
+								setFormData({
+									...formData,
+									release_group_mode: mode.value,
+								})
+							}
+							className={modeButtonClass(
+								formData.release_group_mode === mode.value,
+							)}
+						>
+							{mode.label}
+						</button>
+					))}
+				</div>
+				<p className="text-xs text-muted-foreground mt-2">
+					{
+						RELEASE_GROUP_MODES.find(
+							(mode) =>
+								mode.value === formData.release_group_mode,
+						)?.description
+					}
+				</p>
+			</div>
+
+			<div className="p-4 rounded-lg border border-border">
+				<h3 className="font-semibold text-sm mb-1 flex items-center gap-2">
+					<Regex className="w-4 h-4 text-primary" />
+					Custom Regex
+				</h3>
+				<p className="text-xs text-muted-foreground mb-3">
+					A regular expression tested against the release title,
+					ignoring case. Leave empty to skip.
+				</p>
+				<input
+					type="text"
+					value={formData.custom_regex}
+					onChange={(e) =>
+						setFormData({
+							...formData,
+							custom_regex: e.target.value,
+						})
+					}
+					className="w-full px-4 py-2.5 border-input bg-background text-foreground border rounded-lg focus:ring-2 focus:ring-primary font-mono text-sm"
+					placeholder="e.g., \b(CAM|TS|TELESYNC)\b"
+				/>
+				<div className="flex gap-2 mt-3">
+					{REGEX_MODES.map((mode) => (
+						<button
+							key={mode.value}
+							type="button"
+							onClick={() =>
+								setFormData({
+									...formData,
+									regex_mode: mode.value,
+								})
+							}
+							className={modeButtonClass(
+								formData.regex_mode === mode.value,
+							)}
+						>
+							{mode.label}
+						</button>
+					))}
+				</div>
+				<p className="text-xs text-muted-foreground mt-2">
+					{
+						REGEX_MODES.find(
+							(mode) => mode.value === formData.regex_mode,
+						)?.description
+					}
+				</p>
 			</div>
 		</div>
 	);

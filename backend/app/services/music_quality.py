@@ -107,6 +107,12 @@ def label(tier: Optional[str]) -> str:
     return TIER_LABELS.get(tier or "", "Unknown")
 
 
+def top_tier(tiers: Optional[List[str]]) -> Optional[str]:
+    """Return the highest ranked tier in tiers, the target upgrades stop at."""
+    known = [tier for tier in (tiers or []) if tier in TIER_RANK]
+    return max(known, key=rank) if known else None
+
+
 def is_lossless(tier: Optional[str]) -> bool:
     return tier in LOSSLESS_TIERS
 
@@ -252,8 +258,8 @@ def needs_music_upgrade(
     Whether candidate_tier is a worthwhile upgrade over current_tier for a profile.
 
     upgrade_allowed is the effective per-item decision (item override, else the
-    profile default). The candidate must be an allowed tier, must outrank the
-    current tier, and the current tier must sit below the profile cutoff.
+    profile default). The candidate must be an allowed tier and must outrank the
+    current tier, so upgrades stop once an album reaches the highest allowed tier.
     """
     effective_allowed = getattr(profile, "upgrade_allowed", None) if upgrade_allowed is None else upgrade_allowed
     if not effective_allowed:
@@ -261,10 +267,6 @@ def needs_music_upgrade(
 
     allowed = getattr(profile, "music_quality_tiers", None) or []
     if allowed and candidate_tier not in allowed:
-        return False
-
-    cutoff = getattr(profile, "music_quality_cutoff", None)
-    if cutoff and rank(current_tier) >= rank(cutoff):
         return False
 
     return rank(candidate_tier) > rank(current_tier)

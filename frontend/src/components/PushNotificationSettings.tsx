@@ -68,20 +68,25 @@ function describeTestResult(result: PushTestResult): string {
 	return parts.join(", ");
 }
 
+// Pass insideLabel when an enclosing <label> already forwards clicks to the
+// checkbox, so the wrapper renders as a span and labels are never nested.
 function Toggle({
 	checked,
 	disabled,
 	onChange,
 	label,
+	insideLabel = false,
 }: {
 	checked: boolean;
 	disabled?: boolean;
 	onChange: (checked: boolean) => void;
 	label: string;
+	insideLabel?: boolean;
 }) {
+	const Wrapper = insideLabel ? "span" : "label";
 	return (
 		// The knob is positioned against this wrapper, so nothing else belongs inside it.
-		<label className="relative inline-flex items-center cursor-pointer shrink-0">
+		<Wrapper className="relative inline-flex items-center cursor-pointer shrink-0">
 			<input
 				type="checkbox"
 				aria-label={label}
@@ -91,7 +96,7 @@ function Toggle({
 				className="sr-only peer"
 			/>
 			<div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/40 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
-		</label>
+		</Wrapper>
 	);
 }
 
@@ -499,9 +504,9 @@ export default function PushNotificationSettings() {
 				) : (
 					<div className="space-y-2">
 						{preferences?.categories.map((category) => (
-							<div
+							<label
 								key={category.key}
-								className="flex items-center justify-between gap-4 p-3 bg-muted/50 rounded-lg"
+								className="flex items-center justify-between gap-4 p-3 bg-muted/50 rounded-lg cursor-pointer"
 							>
 								<div className="min-w-0">
 									<div className="font-semibold">
@@ -512,6 +517,7 @@ export default function PushNotificationSettings() {
 									</div>
 								</div>
 								<Toggle
+									insideLabel
 									label={category.label}
 									checked={category.enabled}
 									disabled={preferencesMutation.isPending}
@@ -521,7 +527,7 @@ export default function PushNotificationSettings() {
 										})
 									}
 								/>
-							</div>
+							</label>
 						))}
 					</div>
 				)}

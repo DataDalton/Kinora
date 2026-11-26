@@ -1615,7 +1615,7 @@ export default function MediaDetailModal({
 								</p>
 							</div>
 
-							<div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+							<label className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg cursor-pointer">
 								<input
 									type="checkbox"
 									id="autoSearch"
@@ -1625,10 +1625,7 @@ export default function MediaDetailModal({
 									}
 									className="w-4 h-4 cursor-pointer"
 								/>
-								<label
-									htmlFor="autoSearch"
-									className="flex-1 cursor-pointer"
-								>
+								<div className="flex-1">
 									<div className="font-semibold">
 										Start search automatically
 									</div>
@@ -1636,14 +1633,14 @@ export default function MediaDetailModal({
 										Search for torrents and send to download
 										client immediately
 									</div>
-								</label>
-							</div>
+								</div>
+							</label>
 
 							{mediaDetails.collection_id &&
 								(mediaDetails.media_type === "movie" ||
 									mediaType === "movie") && (
 									<div className="space-y-3">
-										<div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+										<label className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg cursor-pointer">
 											<input
 												type="checkbox"
 												id="addCollection"
@@ -1655,10 +1652,7 @@ export default function MediaDetailModal({
 												}
 												className="w-4 h-4 cursor-pointer"
 											/>
-											<label
-												htmlFor="addCollection"
-												className="flex-1 cursor-pointer"
-											>
+											<div className="flex-1">
 												<div className="font-semibold">
 													Add entire collection
 												</div>
@@ -1667,8 +1661,8 @@ export default function MediaDetailModal({
 														? `Add all movies from "${mediaDetails.collection_name}"`
 														: "Add all movies from this collection"}
 												</div>
-											</label>
-										</div>
+											</div>
+										</label>
 
 										{addCollection && collectionDetails && (
 											<div className="p-4 bg-muted/30 rounded-lg border border-border">

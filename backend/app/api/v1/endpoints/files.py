@@ -81,7 +81,7 @@ def _list_media_paths(file_path: str, media_type: str) -> list[str]:
 async def _compute_quality_cutoff(conn, media_type: str, media_id: int) -> Optional[QualityCutoff]:
     """
     Cutoff status for the detail-page badge. Music compares the album tier against the
-    profile's music_quality_cutoff; video compares the file resolution against the
+    highest tier the profile allows, and video compares the file resolution against the
     highest resolution the profile allows. Returns None when no profile or no cutoff
     applies (so the badge is hidden rather than misleading).
     """
@@ -97,7 +97,7 @@ async def _compute_quality_cutoff(conn, media_type: str, media_id: int) -> Optio
         return None
 
     profile = await conn.fetchrow(
-        "SELECT upgrade_allowed, music_quality_cutoff, movie_resolutions, "
+        "SELECT upgrade_allowed, music_quality_tiers, movie_resolutions, "
         "show_resolutions, anime_resolutions FROM media_profiles WHERE id = $1",
         item["media_profile_id"],
     )
@@ -108,7 +108,7 @@ async def _compute_quality_cutoff(conn, media_type: str, media_id: int) -> Optio
     current = item["quality_detected"]
 
     if media_type == "album":
-        cutoff = profile["music_quality_cutoff"]
+        cutoff = music_quality.top_tier(profile["music_quality_tiers"])
         if not cutoff:
             return None
         meets = music_quality.rank(current) >= music_quality.rank(cutoff) if current else False

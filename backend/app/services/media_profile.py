@@ -68,18 +68,22 @@ class MediaProfile:
     show_indexers: Optional[List[str]] = None
     anime_indexers: Optional[List[str]] = None
     music_indexers: Optional[List[str]] = None
-    # Music quality ladder. music_quality_tiers is the allowed set, ordered highest
-    # priority first (see app.services.music_quality for the tier keys). Once an album
-    # reaches music_quality_cutoff, upgrade searches stop.
+    # Music quality ladder. music_quality_tiers is the allowed set (see
+    # app.services.music_quality for the tier keys). Upgrades stop at the highest one.
     music_quality_tiers: Optional[List[str]] = None
-    music_quality_cutoff: Optional[str] = None
     # Common settings
     languages: Optional[List[str]] = None
     subtitle_languages: Optional[List[str]] = None
     upgrade_allowed: bool = True
-    uploaders: Optional[List[str]] = None
     release_groups: Optional[List[str]] = None
+    release_group_mode: str = "prefer"
     regex_filters: Optional[List[str]] = None
+    regex_mode: str = "exclude"
+    # Anime release rules. Subtitle and audio types are read from Nyaa titles.
+    anime_allow_hardsub: bool = False
+    anime_audio_preference: str = "any"
+    anime_audio_language: str = "ja"
+    anime_subtitle_language: str = "en"
     seeder_weight: int = 34
     size_weight: int = 33
     recency_weight: int = 33
@@ -383,7 +387,7 @@ class MediaProfileService:
                 score += seeders_score * (profile.seeder_weight / 100.0)
 
             # Size weighted (configurable weight)
-            size_penalty = self._score_size(release.size, profile, media_type)
+            size_penalty = self._score_size(self._size_per_episode(release), profile, media_type)
             score += size_penalty * (profile.size_weight / 100.0)
 
             # Recency weighted (configurable weight)
@@ -395,7 +399,7 @@ class MediaProfileService:
                 score += min(100, math.log10(release.seeders + 1) * 30)
         elif profile.search_sort_preference == "size":
             # Prefer releases closer to expected size
-            size_score = self._score_size(release.size, profile, media_type)
+            size_score = self._score_size(self._size_per_episode(release), profile, media_type)
             score += size_score * 2
         elif profile.search_sort_preference == "date":
             # Pure recency sorting
@@ -405,7 +409,7 @@ class MediaProfileService:
         if preferred_uploaders and release.uploader in preferred_uploaders:
             score += 50
 
-        # Release group bonus (30 points) - if in profile.release_groups
+        # Release group bonus, larger for groups earlier in profile.release_groups
         if profile.release_groups and release.release_group:
             if any(group.lower() in release.release_group.lower() for group in profile.release_groups):
                 # Position in list determines bonus (earlier = better)
@@ -419,6 +423,11 @@ class MediaProfileService:
                     score += position_bonus
                 except StopIteration:
                     pass
+
+        # Dual audio bonus for anime profiles that prefer it. Nyaa titles carry the type.
+        if media_type == "anime" and profile.anime_audio_preference == "prefer_dual":
+            if (release.raw_data or {}).get("subtitle_type") == "dual_audio":
+                score += 50
 
         # PROPER/REPACK bonus (20 points)
         if release.is_proper or release.is_repack:
@@ -502,10 +511,12 @@ class MediaProfileService:
                 return False
 
         # Size constraints
-        if min_size and release.size and release.size < min_size:
+        # Show and anime packs are measured per episode, matching how the limits are set.
+        size = self._size_per_episode(release)
+        if min_size and size and size < min_size:
             return False
 
-        if max_size and release.size and release.size > max_size:
+        if max_size and size and size > max_size:
             return False
 
         # Minimum seeders threshold from profile
@@ -513,24 +524,21 @@ class MediaProfileService:
         if release.seeders < minSeeds:
             return False
 
-        # Uploader must be in the list (if specified), compared as whole names ignoring case,
-        # so "QxR" never matches lookalikes such as "QxR-fake". A release with no uploader
-        # (Nyaa lists none) does not pass an uploader filter.
-        if profile.uploaders:
-            allowed_uploaders = {u.strip().lower() for u in profile.uploaders if u and u.strip()}
-            if (release.uploader or "").strip().lower() not in allowed_uploaders:
-                return False
-
-        # Release group must be in the list (if specified), compared the same way. A release
-        # whose group cannot be read does not pass a group filter.
-        if profile.release_groups:
+        # In require mode the release group must be in the list, compared as whole names
+        # ignoring case, so "SPARKS" never matches lookalikes such as "SPARKS-fake". A release
+        # whose group cannot be read does not pass. Prefer mode only affects the score.
+        if profile.release_groups and profile.release_group_mode == "require":
             allowed_groups = {g.strip().lower() for g in profile.release_groups if g and g.strip()}
             if (release.release_group or "").strip().lower() not in allowed_groups:
                 return False
 
-        # Regex filters (must match all patterns)
-        if profile.regex_filters:
-            if not all(re.search(pattern, release.title, re.IGNORECASE) for pattern in profile.regex_filters):
+        # Include mode keeps titles matching every pattern. Exclude mode drops titles matching any.
+        patterns = [p for p in (profile.regex_filters or []) if p and p.strip()]
+        if patterns:
+            matches = [re.search(pattern, release.title, re.IGNORECASE) for pattern in patterns]
+            if profile.regex_mode == "include" and not all(matches):
+                return False
+            if profile.regex_mode != "include" and any(matches):
                 return False
 
         return True
@@ -709,6 +717,13 @@ class MediaProfileService:
 
         age_days = max(0.0, (datetime.now(timezone.utc) - upload).total_seconds() / 86400.0)
         return 50.0 * math.exp(-age_days / 30.0)
+
+    @staticmethod
+    def _size_per_episode(release: TorrentRelease) -> Optional[int]:
+        """Release size divided by the episodes it holds, or the whole size when that count is unknown."""
+        if release.size and release.episode_count and release.episode_count > 1:
+            return release.size // release.episode_count
+        return release.size
 
     def _score_size(self, size: Optional[int], profile: MediaProfile, media_type: Optional[str] = None) -> float:
         """Penalty for size outside optimal range"""

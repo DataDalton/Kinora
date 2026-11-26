@@ -120,8 +120,19 @@ export default function Seeding({ formData, setFormData }: SeedingProps) {
 				unit="minutes"
 			/>
 
-			<div className="p-4 bg-muted/50 rounded-lg border border-border">
-				<label className="flex items-center justify-between cursor-pointer">
+			<button
+				type="button"
+				role="switch"
+				aria-checked={formData.seed_then_cleanup}
+				onClick={() =>
+					setFormData({
+						...formData,
+						seed_then_cleanup: !formData.seed_then_cleanup,
+					})
+				}
+				className="w-full text-left p-4 bg-muted/50 rounded-lg border border-border hover:bg-muted/80 transition cursor-pointer"
+			>
+				<div className="flex items-center justify-between gap-4">
 					<div>
 						<span className="text-sm font-semibold">
 							Seed then clean up
@@ -132,27 +143,31 @@ export default function Seeding({ formData, setFormData }: SeedingProps) {
 							is retained.
 						</p>
 					</div>
-					<input
-						type="checkbox"
-						checked={formData.seed_then_cleanup}
-						onChange={(e) =>
-							setFormData({
-								...formData,
-								seed_then_cleanup: e.target.checked,
-							})
-						}
-						className="w-5 h-5"
-					/>
-				</label>
-			</div>
+					<span
+						className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+							formData.seed_then_cleanup
+								? "bg-primary"
+								: "bg-muted"
+						}`}
+					>
+						<span
+							className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+								formData.seed_then_cleanup
+									? "translate-x-6"
+									: "translate-x-1"
+							}`}
+						/>
+					</span>
+				</div>
+			</button>
 
 			<div className="p-4 bg-muted/50 rounded-lg border border-border">
 				<label className="block text-sm font-semibold mb-1">
 					Stalled auto-recovery
 				</label>
 				<p className="text-xs text-muted-foreground mb-3">
-					When a grab stalls or fails, blocklist it and search for the
-					next best release matching this profile.
+					When a download stalls or fails, blocklist it and search for
+					the next best release matching this profile.
 				</p>
 				<div className="flex gap-2">
 					<button

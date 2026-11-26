@@ -441,9 +441,12 @@ mediaProfiles = Table(
     Column("languages", ARRAY(Text), server_default="{}"),
     Column("subtitle_languages", ARRAY(Text), server_default="{}"),
     Column("upgrade_allowed", Boolean, default=True),
-    Column("uploaders", ARRAY(Text), server_default="{}"),
     Column("release_groups", ARRAY(Text), server_default="{}"),
+    # prefer ranks listed groups higher, require rejects every other group
+    Column("release_group_mode", String(10), server_default="prefer", nullable=False),
     Column("regex_filters", ARRAY(Text), server_default="{}"),
+    # include keeps only titles matching every pattern, exclude drops titles matching any
+    Column("regex_mode", String(10), server_default="exclude", nullable=False),
     Column("seeder_weight", Integer, default=34),
     Column("size_weight", Integer, default=33),
     Column("recency_weight", Integer, default=33),
@@ -464,9 +467,9 @@ mediaProfiles = Table(
     Column("anime_naming_format", Text),
     Column("anime_folder_format", Text),
     # Anime options
-    Column("anime_subtitle_preference", String(20), default="softsub"),
     Column("anime_allow_hardsub", Boolean, default=False),
-    Column("anime_prefer_dual_audio", Boolean, default=False),
+    # any, prefer_dual (dual audio ranks higher) or dual_only
+    Column("anime_audio_preference", String(20), server_default="any", nullable=False),
     Column("anime_audio_language", String(10), default="ja"),
     Column("anime_subtitle_language", String(10), default="en"),
     # Indexers per media type
@@ -484,7 +487,6 @@ mediaProfiles = Table(
         ARRAY(Text),
         server_default="{'lossless_24_192','lossless_24_96','lossless_24_48','lossless_24_unknown','lossless_16_48','lossless_16_44','lossless_unknown','mp3_320','mp3_256'}",
     ),
-    Column("music_quality_cutoff", String(50), server_default="lossless_16_44"),
     Column("music_embed_lyrics", Boolean, default=True),
     Column("music_embed_artwork", Boolean, default=True),
     # File output settings

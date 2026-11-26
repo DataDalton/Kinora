@@ -58,6 +58,7 @@ const navigationStructure: NavigationItem[] = [
 		tabs: [
 			{ id: "indexers", label: "Indexers" },
 			{ id: "quality", label: "Quality" },
+			{ id: "size", label: "Size" },
 			{ id: "naming", label: "Naming" },
 		],
 	},
@@ -68,6 +69,7 @@ const navigationStructure: NavigationItem[] = [
 		tabs: [
 			{ id: "indexers", label: "Indexers" },
 			{ id: "quality", label: "Quality" },
+			{ id: "size", label: "Size" },
 			{ id: "naming", label: "Naming" },
 			{ id: "options", label: "Options" },
 		],
@@ -79,6 +81,7 @@ const navigationStructure: NavigationItem[] = [
 		tabs: [
 			{ id: "indexers", label: "Indexers" },
 			{ id: "quality", label: "Quality" },
+			{ id: "size", label: "Size" },
 			{ id: "naming", label: "Naming" },
 			{ id: "options", label: "Options" },
 		],
@@ -95,11 +98,10 @@ const navigationStructure: NavigationItem[] = [
 	},
 	{
 		id: "search",
-		label: "Search & Filters",
+		label: "Search & Trust",
 		icon: Search,
 		tabs: [
 			{ id: "sorting", label: "Sorting" },
-			{ id: "filters", label: "Filters" },
 			{ id: "trust", label: "Trust" },
 			{ id: "timing", label: "Timing" },
 		],

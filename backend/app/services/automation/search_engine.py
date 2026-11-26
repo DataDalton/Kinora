@@ -3,7 +3,7 @@ Cascading Search Engine
 
 Search strategy:
 1. Resolution-first: Search highest quality first, cascade down
-2. Uploader-aware: Try all allowed uploaders at each quality level
+2. Group-aware: Try each required release group at each quality level
 3. Stop as soon as acceptable release is found
 """
 
@@ -218,10 +218,12 @@ async def _load_match_target(conn, media_type, media_id, query, episode_target=N
     try:
         if conn is not None:
             row = await conn.fetchrow(sql, media_id)
+            episodes = await download_episodes.seriesEpisodes(conn, media_type, media_id)
         else:
             pool = await get_pool()
             async with pool.acquire() as poolConn:
                 row = await poolConn.fetchrow(sql, media_id)
+                episodes = await download_episodes.seriesEpisodes(poolConn, media_type, media_id)
     except Exception as e:
         print(f"Could not load match target for {media_type} {media_id}: {e}")
         return None
@@ -254,6 +256,7 @@ async def _load_match_target(conn, media_type, media_id, query, episode_target=N
         episode=episode if media_type in ("show", "anime") else None,
         absoluteEpisode=absoluteEpisode,
         singleEpisode=singleEpisode,
+        episodes=episodes,
         artist=row["artist"] if media_type == "album" else None,
     )
 
@@ -338,9 +341,9 @@ class SearchEngine:
     Search Strategy:
     1. Start with highest quality from profile
     2. Search with quality suffix (e.g., "Movie 2160p")
-    3. Filter by allowed uploaders/groups
-    4. If no results, try next uploader at same quality
-    5. If exhausted all uploaders, cascade to next lower quality
+    3. Filter by trust and release rules
+    4. If no results, try next required release group at same quality
+    5. If exhausted all groups, cascade to next lower quality
     6. Stop as soon as acceptable release is found
     """
 
@@ -592,6 +595,9 @@ class SearchEngine:
                     continue
                 needsSiteCheck = True
 
+            # Size limits apply per episode, so a pack is measured by its share per episode.
+            release.episode_count = release_matching.episodeCount(release.title, match_target)
+
             if not media_profile_service._meets_minimum_requirements(release, profile, media_type):
                 continue
 
@@ -713,7 +719,11 @@ class SearchEngine:
         which previously dropped any release whose title used a different spelling.
         """
         resolution_order = self._get_quality_cascade(profile, media_type)
-        uploader_order = profile.uploaders or [None]
+        # A required group list narrows the gap sweeps to one query per group.
+        if profile.release_groups and profile.release_group_mode == "require":
+            group_order = [g for g in profile.release_groups if g and g.strip()] or [None]
+        else:
+            group_order = [None]
 
         # Get per-media-type indexers
         selected_indexers = profile.get_indexers_for_type(media_type) if media_type else None
@@ -724,7 +734,7 @@ class SearchEngine:
 
         print(f"Cascading search: {base_query}")
         print(f"Resolution order: {resolution_order}")
-        print(f"Uploader order: {uploader_order}")
+        print(f"Release group order: {group_order}")
         if selected_indexers:
             print(f"Selected indexers: {selected_indexers}")
 
@@ -784,13 +794,13 @@ class SearchEngine:
             )
             return best_release
 
-        # Stage 3: targeted gap sweeps per resolution synonym and uploader.
+        # Stage 3: targeted gap sweeps per resolution synonym and required group.
         for resolution in resolution_order:
             for variant in RESOLUTION_QUERY_SYNONYMS.get(resolution, [resolution]):
-                for uploader in uploader_order:
+                for group in group_order:
                     query = f"{base_query} {variant}"
-                    if uploader:
-                        query += f" {uploader}"
+                    if group:
+                        query += f" {group}"
 
                     print(f"\nQuery: {query}")
 
@@ -1066,12 +1076,9 @@ class SearchEngine:
 
         raw_data = release.raw_data
 
-        # Get anime preferences from profile
-        anime_subtitle_pref = getattr(profile, "anime_subtitle_preference", "softsub")
-        anime_allow_hardsub = getattr(profile, "anime_allow_hardsub", False)
-        anime_prefer_dual_audio = getattr(profile, "anime_prefer_dual_audio", False)
-        anime_audio_lang = getattr(profile, "anime_audio_language", "ja")
-        anime_subtitle_lang = getattr(profile, "anime_subtitle_language", "en")
+        anime_allow_hardsub = bool(profile.anime_allow_hardsub)
+        anime_audio_lang = profile.anime_audio_language or "ja"
+        anime_subtitle_lang = profile.anime_subtitle_language or "en"
 
         subtitle_type = raw_data.get("subtitle_type")
         audio_language = raw_data.get("audio_language")
@@ -1087,15 +1094,12 @@ class SearchEngine:
         if subtitle_language and subtitle_language != anime_subtitle_lang:
             return False
 
-        # Filter by dual audio preference
-        if anime_prefer_dual_audio and subtitle_type != "dual_audio":
+        # dual_only requires dual audio. prefer_dual only raises the score.
+        if profile.anime_audio_preference == "dual_only" and subtitle_type != "dual_audio":
             return False
 
-        # Filter by hardsub/softsub
+        # Burned-in subtitles need the profile to allow them
         if subtitle_type == "hardsub" and not anime_allow_hardsub:
-            return False
-
-        if anime_subtitle_pref == "softsub" and subtitle_type == "hardsub" and not anime_allow_hardsub:
             return False
 
         # Block raw releases (no subtitles)

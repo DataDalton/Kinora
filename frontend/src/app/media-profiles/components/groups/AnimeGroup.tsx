@@ -3,7 +3,7 @@ import NamingPreview from "../shared/NamingPreview";
 
 import { useState } from "react";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import ISO6391 from "iso-639-1";
 import { MediaProfileFormData, AnimeTab } from "../types";
 import { QualityCheckboxList } from "../shared";
@@ -23,6 +23,106 @@ const LANGUAGES = ISO6391.getAllCodes().map((code) => ({
 	name: ISO6391.getName(code),
 	nativeName: ISO6391.getNativeName(code),
 }));
+
+const SUBTITLE_OPTIONS: {
+	allowHardsub: boolean;
+	label: string;
+	description: string;
+	example: string;
+}[] = [
+	{
+		allowHardsub: false,
+		label: "Soft subs only",
+		description:
+			"Subtitles are a separate track that can be turned off, restyled or swapped. Usually .mkv files.",
+		example: "[Group] Frieren - 01 (1080p).mkv",
+	},
+	{
+		allowHardsub: true,
+		label: "Allow hard subs",
+		description:
+			"Also accept subtitles burned into the picture. They cannot be turned off. Common in .mp4 web rips.",
+		example: "[Group] Frieren - 01 [Hardsub] (1080p).mp4",
+	},
+];
+
+const AUDIO_OPTIONS: {
+	value: MediaProfileFormData["anime_audio_preference"];
+	label: string;
+	description: string;
+	example: string;
+}[] = [
+	{
+		value: "any",
+		label: "No preference",
+		description: "Single and dual audio releases rank the same.",
+		example: "Japanese audio, or Japanese and English",
+	},
+	{
+		value: "prefer_dual",
+		label: "Prefer dual audio",
+		description:
+			"Dual audio releases rank higher. Single audio is still downloaded when nothing else matches.",
+		example: "Picks [Dual Audio] over Japanese only",
+	},
+	{
+		value: "dual_only",
+		label: "Dual audio only",
+		description:
+			"Only dual audio releases are downloaded. Fewer releases match.",
+		example: "Skips Japanese only releases",
+	},
+];
+
+// A selectable option with a check badge, a description and an example release.
+function OptionCard({
+	label,
+	description,
+	example,
+	selected,
+	onSelect,
+}: {
+	label: string;
+	description: string;
+	example: string;
+	selected: boolean;
+	onSelect: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			role="radio"
+			aria-checked={selected}
+			onClick={onSelect}
+			className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all text-left ${
+				selected
+					? "bg-primary/10 border-primary"
+					: "bg-muted/30 border-border hover:border-muted-foreground/30"
+			}`}
+		>
+			<span
+				className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+					selected
+						? "bg-primary border-primary"
+						: "border-muted-foreground/30"
+				}`}
+			>
+				{selected && (
+					<Check className="w-3 h-3 text-primary-foreground" />
+				)}
+			</span>
+			<span className="min-w-0">
+				<span className="block font-semibold text-sm">{label}</span>
+				<span className="block text-xs text-muted-foreground mt-1">
+					{description}
+				</span>
+				<span className="block text-xs font-mono text-muted-foreground mt-2 break-all">
+					{example}
+				</span>
+			</span>
+		</button>
+	);
+}
 
 const ANIME_TOKENS = [
 	{
@@ -363,6 +463,22 @@ export default function AnimeGroup({
 							description="Select HDR formats for anime content"
 						/>
 					</div>
+				</div>
+			)}
+
+			{activeTab === "size" && (
+				<div className="space-y-6">
+					<div className="bg-purple-500/20 border border-purple-500/30 rounded-lg p-4">
+						<h4 className="font-semibold text-sm mb-2">
+							Anime Size Limits
+						</h4>
+						<p className="text-xs text-muted-foreground">
+							Releases outside these limits are skipped. Limits
+							are per episode, so a season pack or batch is
+							measured by its size divided by the episodes it
+							holds. A limit left at zero is not applied.
+						</p>
+					</div>
 
 					{/* Size Limits */}
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -412,7 +528,7 @@ export default function AnimeGroup({
 								placeholder="e.g., 500 MB or 2 GB"
 							/>
 							<p className="text-xs text-muted-foreground mt-1">
-								Minimum file size for anime
+								Minimum size per anime episode
 							</p>
 						</div>
 
@@ -462,7 +578,7 @@ export default function AnimeGroup({
 								placeholder="e.g., 5 GB or 5000 MB"
 							/>
 							<p className="text-xs text-muted-foreground mt-1">
-								Maximum file size for anime
+								Maximum size per anime episode
 							</p>
 						</div>
 					</div>
@@ -682,8 +798,8 @@ export default function AnimeGroup({
 							Anime-Specific Options
 						</h4>
 						<p className="text-xs text-muted-foreground">
-							Configure anime torrent preferences including
-							subtitle types, dub vs sub, and language settings.
+							Configure anime release preferences including
+							languages, subtitle types and dual audio.
 						</p>
 					</div>
 
@@ -953,176 +1069,73 @@ export default function AnimeGroup({
 						</p>
 					</div>
 
-					{/* Subtitle Type Preference */}
-					<div>
-						<label className="block text-sm font-semibold mb-2">
-							Subtitle Type Preference
-						</label>
-						<p className="text-xs text-muted-foreground mb-2">
-							Choose your preferred subtitle format for anime
+					{/* Subtitle type */}
+					<div className="p-4 rounded-lg border border-border">
+						<h3 className="font-semibold text-sm mb-1">
+							Subtitles
+						</h3>
+						<p className="text-xs text-muted-foreground mb-3">
+							How the subtitles are stored in the release.
 						</p>
-						<div className="grid grid-cols-3 gap-2">
-							<button
-								type="button"
-								onClick={() =>
-									setFormData({
-										...formData,
-										anime_subtitle_preference: "softsub",
-									})
-								}
-								className={`px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-									formData.anime_subtitle_preference ===
-									"softsub"
-										? "bg-primary text-primary-foreground shadow-md"
-										: "bg-muted text-muted-foreground hover:bg-muted/80"
-								}`}
-							>
-								Softsub
-							</button>
-							<button
-								type="button"
-								onClick={() =>
-									setFormData({
-										...formData,
-										anime_subtitle_preference: "hardsub",
-									})
-								}
-								className={`px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-									formData.anime_subtitle_preference ===
-									"hardsub"
-										? "bg-primary text-primary-foreground shadow-md"
-										: "bg-muted text-muted-foreground hover:bg-muted/80"
-								}`}
-							>
-								Hardsub
-							</button>
-							<button
-								type="button"
-								onClick={() =>
-									setFormData({
-										...formData,
-										anime_subtitle_preference: "dual_audio",
-									})
-								}
-								className={`px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-									formData.anime_subtitle_preference ===
-									"dual_audio"
-										? "bg-primary text-primary-foreground shadow-md"
-										: "bg-muted text-muted-foreground hover:bg-muted/80"
-								}`}
-							>
-								Dual Audio
-							</button>
+						<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+							{SUBTITLE_OPTIONS.map((option) => (
+								<OptionCard
+									key={option.label}
+									label={option.label}
+									description={option.description}
+									example={option.example}
+									selected={
+										formData.anime_allow_hardsub ===
+										option.allowHardsub
+									}
+									onSelect={() =>
+										setFormData({
+											...formData,
+											anime_allow_hardsub:
+												option.allowHardsub,
+										})
+									}
+								/>
+							))}
 						</div>
-						<p className="text-xs text-muted-foreground mt-2">
-							{formData.anime_subtitle_preference === "softsub" &&
-								"Prefer embedded subtitle tracks (can be toggled on/off)"}
-							{formData.anime_subtitle_preference === "hardsub" &&
-								"Prefer burned-in subtitles (cannot be disabled)"}
-							{formData.anime_subtitle_preference ===
-								"dual_audio" &&
-								"Prefer releases with both Japanese and English audio tracks"}
+					</div>
+
+					{/* Audio tracks */}
+					<div className="p-4 rounded-lg border border-border">
+						<h3 className="font-semibold text-sm mb-1">Audio</h3>
+						<p className="text-xs text-muted-foreground mb-3">
+							Dual audio releases carry the preferred audio
+							language above and an English dub in one file.
 						</p>
+						<div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+							{AUDIO_OPTIONS.map((option) => (
+								<OptionCard
+									key={option.value}
+									label={option.label}
+									description={option.description}
+									example={option.example}
+									selected={
+										formData.anime_audio_preference ===
+										option.value
+									}
+									onSelect={() =>
+										setFormData({
+											...formData,
+											anime_audio_preference:
+												option.value,
+										})
+									}
+								/>
+							))}
+						</div>
 					</div>
 
-					{/* Additional Preferences */}
-					<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<button
-							type="button"
-							onClick={() =>
-								setFormData({
-									...formData,
-									anime_allow_hardsub:
-										!formData.anime_allow_hardsub,
-								})
-							}
-							className={`flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-								formData.anime_allow_hardsub
-									? "bg-primary/10 border-primary"
-									: "bg-muted/30 border-border hover:border-muted-foreground/30"
-							}`}
-						>
-							<div
-								className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-									formData.anime_allow_hardsub
-										? "bg-primary border-primary"
-										: "border-muted-foreground/30"
-								}`}
-							>
-								{formData.anime_allow_hardsub && (
-									<svg
-										className="w-4 h-4 text-primary-foreground"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											strokeWidth={3}
-											d="M5 13l4 4L19 7"
-										/>
-									</svg>
-								)}
-							</div>
-							<div className="text-left">
-								<div className="font-semibold text-sm">
-									Allow Hardsubs
-								</div>
-								<div className="text-xs text-muted-foreground">
-									Allow torrents with burned-in subtitles
-								</div>
-							</div>
-						</button>
-
-						<button
-							type="button"
-							onClick={() =>
-								setFormData({
-									...formData,
-									anime_prefer_dual_audio:
-										!formData.anime_prefer_dual_audio,
-								})
-							}
-							className={`flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-								formData.anime_prefer_dual_audio
-									? "bg-primary/10 border-primary"
-									: "bg-muted/30 border-border hover:border-muted-foreground/30"
-							}`}
-						>
-							<div
-								className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-									formData.anime_prefer_dual_audio
-										? "bg-primary border-primary"
-										: "border-muted-foreground/30"
-								}`}
-							>
-								{formData.anime_prefer_dual_audio && (
-									<svg
-										className="w-4 h-4 text-primary-foreground"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											strokeWidth={3}
-											d="M5 13l4 4L19 7"
-										/>
-									</svg>
-								)}
-							</div>
-							<div className="text-left">
-								<div className="font-semibold text-sm">
-									Prefer Dual Audio
-								</div>
-								<div className="text-xs text-muted-foreground">
-									Prioritize Japanese + English audio tracks
-								</div>
-							</div>
-						</button>
-					</div>
+					<p className="text-xs text-muted-foreground">
+						Subtitle and audio types are read from Nyaa release
+						titles. Releases from other sites do not state them, so
+						these two rules do not apply to those releases. Raw
+						releases with no subtitles are always skipped.
+					</p>
 				</div>
 			)}
 		</div>

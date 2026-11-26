@@ -104,6 +104,12 @@ async def _apply_manual_grab_state(conn, data, profile):
             size=data.size,
             seeders=data.seeders or 0,
         )
+        if data.media_type in ("show", "anime"):
+            from app.services import download_episodes
+
+            # Size limits apply per episode, so a pack is measured by its share per episode.
+            covered = await download_episodes.coveredEpisodeIds(conn, data.media_type, data.media_id, release.title)
+            release.episode_count = len(covered) if covered else None
         meets = media_profile_service.score_release(release, profile, media_type=data.media_type) >= 0
         if monitoring is None:
             monitoring = not meets

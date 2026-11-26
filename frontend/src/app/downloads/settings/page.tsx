@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { isValidElement, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -96,32 +96,45 @@ function chipClass(active: boolean) {
 	}`;
 }
 
-function Switch({
-	checked,
-	onChange,
-}: {
+type SwitchProps = {
 	checked: boolean;
 	onChange: (v: boolean) => void;
-}) {
+};
+
+function switchTrackClass(checked: boolean) {
+	return `relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+		checked ? "bg-primary" : "bg-muted"
+	}`;
+}
+
+// The switch knob, positioned by the track that holds it.
+function SwitchKnob({ checked }: { checked: boolean }) {
+	return (
+		<span
+			className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+				checked ? "translate-x-6" : "translate-x-1"
+			}`}
+		/>
+	);
+}
+
+function Switch({ checked, onChange }: SwitchProps) {
 	return (
 		<button
 			type="button"
+			role="switch"
+			aria-checked={checked}
 			onClick={() => onChange(!checked)}
-			className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-				checked ? "bg-primary" : "bg-muted"
-			}`}
-			aria-pressed={checked}
+			className={`${switchTrackClass(checked)} cursor-pointer`}
 		>
-			<span
-				className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-					checked ? "translate-x-6" : "translate-x-1"
-				}`}
-			/>
+			<SwitchKnob checked={checked} />
 		</button>
 	);
 }
 
 // A settings row: label and helper text on the left, control on the right.
+// When the only control is a Switch, the whole row becomes the switch so a
+// click anywhere on it toggles the setting.
 function Row({
 	label,
 	hint,
@@ -131,16 +144,36 @@ function Row({
 	hint?: string;
 	children: React.ReactNode;
 }) {
+	const labelBlock = (
+		<div className="min-w-0">
+			<div className="text-sm font-medium">{label}</div>
+			{hint && (
+				<p className="text-xs text-muted-foreground mt-0.5">{hint}</p>
+			)}
+		</div>
+	);
+
+	if (isValidElement<SwitchProps>(children) && children.type === Switch) {
+		const { checked, onChange } = children.props;
+		return (
+			<button
+				type="button"
+				role="switch"
+				aria-checked={checked}
+				onClick={() => onChange(!checked)}
+				className="w-full text-left flex items-center justify-between gap-6 py-4 cursor-pointer"
+			>
+				{labelBlock}
+				<span className={switchTrackClass(checked)}>
+					<SwitchKnob checked={checked} />
+				</span>
+			</button>
+		);
+	}
+
 	return (
 		<div className="flex items-center justify-between gap-6 py-4">
-			<div className="min-w-0">
-				<div className="text-sm font-medium">{label}</div>
-				{hint && (
-					<p className="text-xs text-muted-foreground mt-0.5">
-						{hint}
-					</p>
-				)}
-			</div>
+			{labelBlock}
 			<div className="shrink-0 flex flex-wrap items-center justify-end gap-2">
 				{children}
 			</div>

@@ -95,54 +95,56 @@ export default function ProfileGroup({
 									: "bg-muted text-muted-foreground hover:bg-muted/80"
 							}`}
 						>
-							One-Time Grab
+							One-Time Download
 						</button>
 					</div>
 					<p className="text-xs text-muted-foreground mt-1">
 						{formData.upgrade_allowed
 							? "Automatically upgrade to higher quality over time"
-							: "Grab highest quality once and stop"}
+							: "Download the highest quality once and stop"}
 					</p>
-				</div>
 
-				{formData.upgrade_allowed && (
-					<div className="p-4 rounded-lg border-2 border-transparent">
-						<label className="block text-sm font-semibold mb-2">
-							When Upgrading
-						</label>
-						<div className="flex gap-2">
-							{(
-								[
-									["keep_old", "Keep Old"],
-									["delete_old", "Delete Old"],
-									["keep_versions", "Keep Versions"],
-								] as const
-							).map(([value, label]) => (
-								<button
-									key={value}
-									type="button"
-									onClick={() =>
-										setFormData({
-											...formData,
-											upgrade_replace_policy: value,
-										})
-									}
-									className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${formData.upgrade_replace_policy === value ? "bg-primary text-primary-foreground shadow-md" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
-								>
-									{label}
-								</button>
-							))}
+					{/* Auto Upgrade options, indented under the choice they belong to */}
+					{formData.upgrade_allowed && (
+						<div className="mt-4 pl-4 border-l-2 border-primary">
+							<label className="block text-sm font-semibold mb-2">
+								When Upgrading
+							</label>
+							<div className="flex gap-2">
+								{(
+									[
+										["keep_old", "Keep Old"],
+										["delete_old", "Delete Old"],
+										["keep_versions", "Keep Versions"],
+									] as const
+								).map(([value, label]) => (
+									<button
+										key={value}
+										type="button"
+										onClick={() =>
+											setFormData({
+												...formData,
+												upgrade_replace_policy: value,
+											})
+										}
+										className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${formData.upgrade_replace_policy === value ? "bg-primary text-primary-foreground shadow-md" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
+									>
+										{label}
+									</button>
+								))}
+							</div>
+							<p className="text-xs text-muted-foreground mt-1">
+								{formData.upgrade_replace_policy ===
+								"delete_old"
+									? "Delete the previous file and its subtitles after importing the upgrade. Only files inside the item's own library folder are deleted, never anything in the download folder"
+									: formData.upgrade_replace_policy ===
+										  "keep_versions"
+										? "Keep every quality version in the media folder (Jellyfin-style)"
+										: "Keep the old file in place (no automatic deletion)"}
+							</p>
 						</div>
-						<p className="text-xs text-muted-foreground mt-1">
-							{formData.upgrade_replace_policy === "delete_old"
-								? "Delete the previous file and its subtitles after importing the upgrade. Only files inside the item's own library folder are deleted, never anything in the download folder"
-								: formData.upgrade_replace_policy ===
-									  "keep_versions"
-									? "Keep every quality version in the media folder (Jellyfin-style)"
-									: "Keep the old file in place (no automatic deletion)"}
-						</p>
-					</div>
-				)}
+					)}
+				</div>
 			</div>
 		);
 	}

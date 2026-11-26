@@ -4,7 +4,7 @@ import NamingPreview from "../shared/NamingPreview";
 import { useState } from "react";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { X } from "lucide-react";
-import { MediaProfileFormData } from "../types";
+import { MediaProfileFormData, TVShowsTab } from "../types";
 import { QualityCheckboxList } from "../shared";
 import {
 	RESOLUTIONS,
@@ -120,7 +120,7 @@ const parseSizeInput = (value: string): number => {
 interface TVShowsGroupProps {
 	formData: MediaProfileFormData;
 	setFormData: (data: MediaProfileFormData) => void;
-	activeTab: "indexers" | "quality" | "naming" | "options";
+	activeTab: TVShowsTab;
 }
 
 export default function TVShowsGroup({
@@ -296,6 +296,22 @@ export default function TVShowsGroup({
 				label="TV Show HDR Formats"
 				description="Select HDR formats for TV shows."
 			/>
+		</div>
+	);
+
+	const renderSizeTab = () => (
+		<div className="space-y-6">
+			<div className="bg-blue-500/20 border border-blue-500/30 rounded-lg p-4">
+				<h4 className="font-semibold text-sm mb-2">
+					TV Show Size Limits
+				</h4>
+				<p className="text-xs text-muted-foreground">
+					Releases outside these limits are skipped. Limits are per
+					episode, so a season pack or batch is measured by its size
+					divided by the episodes it holds. A limit left at zero is
+					not applied.
+				</p>
+			</div>
 
 			<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 				<div>
@@ -677,6 +693,7 @@ export default function TVShowsGroup({
 		<div className="space-y-6">
 			{activeTab === "indexers" && renderIndexersTab()}
 			{activeTab === "quality" && renderQualityTab()}
+			{activeTab === "size" && renderSizeTab()}
 			{activeTab === "naming" && renderNamingTab()}
 			{activeTab === "options" && renderOptionsTab()}
 		</div>

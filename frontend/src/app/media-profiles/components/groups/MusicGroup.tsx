@@ -5,12 +5,7 @@ import { useState } from "react";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { X, Check } from "lucide-react";
 import { MediaProfileFormData, MusicTab } from "../types";
-import {
-	MUSIC_PRESETS,
-	MUSIC_QUALITY_GROUPS,
-	MUSIC_QUALITY_TIERS_HIGH_TO_LOW,
-	MUSIC_TIER_LABELS,
-} from "../constants";
+import { MUSIC_PRESETS, MUSIC_QUALITY_GROUPS } from "../constants";
 import { useIndexerOptions } from "../useIndexerOptions";
 
 const MUSIC_TOKENS = [
@@ -199,8 +194,10 @@ export default function MusicGroup({
 					Allowed Audio Quality
 				</label>
 				<p className="text-xs text-muted-foreground mb-3">
-					Select the quality tiers to download. FLAC bit depth and
-					sample rate are confirmed from the file after download.
+					Select the quality tiers to download. Upgrades stop once an
+					album reaches the highest selected tier, the same as video
+					resolutions. FLAC bit depth and sample rate are confirmed
+					from the file after download.
 				</p>
 				{MUSIC_QUALITY_GROUPS.map((group) => (
 					<div key={group.label} className="mb-4">
@@ -261,31 +258,6 @@ export default function MusicGroup({
 						</div>
 					</div>
 				))}
-			</div>
-
-			<div>
-				<label className="block text-sm font-semibold mb-2">
-					Quality Cutoff
-				</label>
-				<p className="text-xs text-muted-foreground mb-3">
-					Once an album reaches this quality, upgrade searches stop.
-				</p>
-				<select
-					value={formData.music_quality_cutoff}
-					onChange={(e) =>
-						setFormData({
-							...formData,
-							music_quality_cutoff: e.target.value,
-						})
-					}
-					className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-				>
-					{MUSIC_QUALITY_TIERS_HIGH_TO_LOW.map((tier) => (
-						<option key={tier} value={tier}>
-							{MUSIC_TIER_LABELS[tier]}
-						</option>
-					))}
-				</select>
 			</div>
 
 			<div className="space-y-4">

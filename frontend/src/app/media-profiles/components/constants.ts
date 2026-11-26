@@ -397,9 +397,10 @@ export const createDefaultFormData = (
 	max_retries: 3,
 	max_results: 100,
 	min_seeds: 1,
-	uploader_filter: "",
 	release_group_filter: "",
+	release_group_mode: "prefer",
 	custom_regex: "",
+	regex_mode: "exclude",
 	search_sort_preference: "weighted",
 	seeder_weight: 40,
 	size_weight: 40,
@@ -422,9 +423,8 @@ export const createDefaultFormData = (
 	anime_naming_format: DEFAULT_NAMING.anime.file,
 	anime_folder_format: DEFAULT_NAMING.anime.folder,
 	// Anime options
-	anime_subtitle_preference: "softsub",
 	anime_allow_hardsub: false,
-	anime_prefer_dual_audio: false,
+	anime_audio_preference: "any",
 	anime_audio_language: "ja",
 	anime_subtitle_language: "en",
 	// Music settings
@@ -433,7 +433,6 @@ export const createDefaultFormData = (
 	music_track_naming_format: DEFAULT_NAMING.music.track,
 	music_multi_disc_format: DEFAULT_NAMING.music.multiDisc,
 	music_quality_tiers: DEFAULT_MUSIC_QUALITY_TIERS,
-	music_quality_cutoff: "lossless_16_44",
 	music_embed_lyrics: true,
 	music_embed_artwork: true,
 	// Torrent validation settings

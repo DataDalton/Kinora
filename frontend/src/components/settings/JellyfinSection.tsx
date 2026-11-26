@@ -16,6 +16,7 @@ import { api } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useToast } from "@/components/toast/ToastProvider";
 import { usePermissions } from "@/contexts/PermissionContext";
+import JellyfinLoginCard, { JellyfinSetupStatus } from "./JellyfinLoginCard";
 
 interface JellyfinPathMapping {
 	kinora_path: string;
@@ -35,6 +36,9 @@ interface JellyfinConfig {
 	api_key_set: boolean;
 	path_mappings: JellyfinPathMapping[];
 	last_update: JellyfinLastUpdate | null;
+	bundled: boolean;
+	linked_to_bundled: boolean;
+	setup_status: JellyfinSetupStatus | null;
 }
 
 interface JellyfinTestResult {
@@ -87,6 +91,11 @@ export function JellyfinSection() {
 			return response.data as JellyfinConfig;
 		},
 		enabled: isAdmin,
+		// While Kinora links the bundled Jellyfin, check back until the key is saved.
+		refetchInterval: (query) => {
+			const data = query.state.data as JellyfinConfig | undefined;
+			return data?.bundled && !data.api_key_set ? 5000 : false;
+		},
 	});
 
 	const form = draft ?? draftFromConfig(config);
@@ -195,6 +204,13 @@ export function JellyfinSection() {
 						</div>
 					) : (
 						<>
+							{config?.bundled && (
+								<JellyfinLoginCard
+									status={config.setup_status}
+									linked={config.api_key_set}
+								/>
+							)}
+
 							<div className="bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm space-y-4">
 								<label className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer">
 									<div>
@@ -313,95 +329,99 @@ export function JellyfinSection() {
 								</div>
 							</div>
 
-							<div className="bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm space-y-3">
-								<div>
-									<h3 className="font-semibold">
-										Path mappings
-									</h3>
-									<p className="text-xs text-muted-foreground mt-1">
-										Needed when Jellyfin mounts the library
-										at a different path than Kinora, for
-										example in another container. Each
-										Kinora path prefix is replaced with the
-										Jellyfin path prefix before the change
-										is sent.
-									</p>
-								</div>
-
-								{form.pathMappings.length === 0 && (
-									<p className="text-sm text-muted-foreground">
-										No mappings. Paths are sent to Jellyfin
-										as Kinora sees them.
-									</p>
-								)}
-
-								{form.pathMappings.map((mapping, index) => (
-									<div
-										key={index}
-										className="flex items-center gap-2"
-									>
-										<input
-											type="text"
-											value={mapping.kinora_path}
-											onChange={(e) =>
-												updateMapping(index, {
-													kinora_path: e.target.value,
-												})
-											}
-											placeholder="Kinora path, e.g. /media/movies"
-											className={`flex-1 font-mono ${inputClass}`}
-										/>
-										<ArrowRight className="w-4 h-4 text-muted-foreground" />
-										<input
-											type="text"
-											value={mapping.jellyfin_path}
-											onChange={(e) =>
-												updateMapping(index, {
-													jellyfin_path:
-														e.target.value,
-												})
-											}
-											placeholder="Jellyfin path, e.g. /data/movies"
-											className={`flex-1 font-mono ${inputClass}`}
-										/>
-										<button
-											type="button"
-											onClick={() =>
-												updateForm({
-													pathMappings:
-														form.pathMappings.filter(
-															(_, i) =>
-																i !== index,
-														),
-												})
-											}
-											className="p-1.5 bg-muted rounded hover:bg-muted/80 transition cursor-pointer"
-											title="Remove mapping"
-										>
-											<Trash2 className="w-3.5 h-3.5" />
-										</button>
+							{/* The bundled Jellyfin sees the same paths as Kinora, so mappings could only break it. */}
+							{!config?.linked_to_bundled && (
+								<div className="bg-card text-card-foreground border-border border rounded-lg p-4 shadow-sm space-y-3">
+									<div>
+										<h3 className="font-semibold">
+											Path mappings
+										</h3>
+										<p className="text-xs text-muted-foreground mt-1">
+											Needed when Jellyfin mounts the
+											library at a different path than
+											Kinora, for example in another
+											container. Each Kinora path prefix
+											is replaced with the Jellyfin path
+											prefix before the change is sent.
+										</p>
 									</div>
-								))}
 
-								<button
-									type="button"
-									onClick={() =>
-										updateForm({
-											pathMappings: [
-												...form.pathMappings,
-												{
-													kinora_path: "",
-													jellyfin_path: "",
-												},
-											],
-										})
-									}
-									className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-muted hover:bg-muted/80 transition cursor-pointer"
-								>
-									<Plus className="w-3.5 h-3.5" />
-									Add mapping
-								</button>
-							</div>
+									{form.pathMappings.length === 0 && (
+										<p className="text-sm text-muted-foreground">
+											No mappings. Paths are sent to
+											Jellyfin as Kinora sees them.
+										</p>
+									)}
+
+									{form.pathMappings.map((mapping, index) => (
+										<div
+											key={index}
+											className="flex items-center gap-2"
+										>
+											<input
+												type="text"
+												value={mapping.kinora_path}
+												onChange={(e) =>
+													updateMapping(index, {
+														kinora_path:
+															e.target.value,
+													})
+												}
+												placeholder="Kinora path, e.g. /media/movies"
+												className={`flex-1 font-mono ${inputClass}`}
+											/>
+											<ArrowRight className="w-4 h-4 text-muted-foreground" />
+											<input
+												type="text"
+												value={mapping.jellyfin_path}
+												onChange={(e) =>
+													updateMapping(index, {
+														jellyfin_path:
+															e.target.value,
+													})
+												}
+												placeholder="Jellyfin path, e.g. /data/movies"
+												className={`flex-1 font-mono ${inputClass}`}
+											/>
+											<button
+												type="button"
+												onClick={() =>
+													updateForm({
+														pathMappings:
+															form.pathMappings.filter(
+																(_, i) =>
+																	i !== index,
+															),
+													})
+												}
+												className="p-1.5 bg-muted rounded hover:bg-muted/80 transition cursor-pointer"
+												title="Remove mapping"
+											>
+												<Trash2 className="w-3.5 h-3.5" />
+											</button>
+										</div>
+									))}
+
+									<button
+										type="button"
+										onClick={() =>
+											updateForm({
+												pathMappings: [
+													...form.pathMappings,
+													{
+														kinora_path: "",
+														jellyfin_path: "",
+													},
+												],
+											})
+										}
+										className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-muted hover:bg-muted/80 transition cursor-pointer"
+									>
+										<Plus className="w-3.5 h-3.5" />
+										Add mapping
+									</button>
+								</div>
+							)}
 
 							{lastUpdate && (
 								<div

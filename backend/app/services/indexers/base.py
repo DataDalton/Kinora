@@ -55,6 +55,9 @@ class TorrentRelease:
     edition: Optional[str] = None  # Parsed edition (IMAX, Director's Cut, etc.)
     language: Optional[str] = None  # Parsed language code
     release_group: Optional[str] = None
+    # Episodes a show or anime release holds, set during selection so size limits
+    # apply per episode. Not cached, since it depends on the series searched for.
+    episode_count: Optional[int] = None
     is_proper: bool = False
     is_repack: bool = False
     # Music-specific fields
@@ -84,6 +87,7 @@ class TorrentRelease:
 
         data = asdict(self)
         data.pop("raw_data", None)
+        data.pop("episode_count", None)
         if self.upload_date is not None:
             data["upload_date"] = self.upload_date.isoformat()
         return data
@@ -93,6 +97,7 @@ class TorrentRelease:
         """Rebuild a TorrentRelease from a cached dict."""
         data = dict(data)
         data.pop("raw_data", None)
+        data.pop("episode_count", None)
         upload_date = data.get("upload_date")
         if isinstance(upload_date, str):
             try:

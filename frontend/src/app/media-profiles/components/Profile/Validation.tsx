@@ -164,7 +164,18 @@ export default function Validation({ formData, setFormData }: SectionProps) {
 	return (
 		<div className="space-y-6">
 			{/* Enable/Disable Validation */}
-			<div className="p-4 bg-muted/50 rounded-lg border border-border">
+			<button
+				type="button"
+				role="switch"
+				aria-checked={formData.validation_enabled}
+				onClick={() =>
+					setFormData({
+						...formData,
+						validation_enabled: !formData.validation_enabled,
+					})
+				}
+				className="w-full text-left p-4 bg-muted/50 rounded-lg border border-border hover:bg-muted/80 transition cursor-pointer"
+			>
 				<div className="flex items-center justify-between">
 					<div className="flex items-center gap-3">
 						<Shield className="w-5 h-5 text-primary" />
@@ -178,16 +189,8 @@ export default function Validation({ formData, setFormData }: SectionProps) {
 							</p>
 						</div>
 					</div>
-					<button
-						type="button"
-						onClick={() =>
-							setFormData({
-								...formData,
-								validation_enabled:
-									!formData.validation_enabled,
-							})
-						}
-						className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+					<span
+						className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
 							formData.validation_enabled
 								? "bg-primary"
 								: "bg-muted"
@@ -200,9 +203,9 @@ export default function Validation({ formData, setFormData }: SectionProps) {
 									: "translate-x-1"
 							}`}
 						/>
-					</button>
+					</span>
 				</div>
-			</div>
+			</button>
 
 			{/* Checks that always run */}
 			<div className="p-4 rounded-lg border border-border">

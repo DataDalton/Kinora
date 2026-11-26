@@ -446,12 +446,28 @@ class JellyfinLastUpdate(BaseModel):
     timestamp: Optional[str] = None
 
 
+class JellyfinSetupStatus(BaseModel):
+    state: str
+    message: str
+
+
 class JellyfinConfigResponse(BaseModel):
     enabled: bool
     url: str
     api_key_set: bool
     path_mappings: List[JellyfinPathMapping]
     last_update: Optional[JellyfinLastUpdate] = None
+    # True when the install runs docker-compose.jellyfin.yml, which Kinora links itself.
+    bundled: bool = False
+    # True while Kinora is linked to the bundled Jellyfin, which needs no path mappings.
+    linked_to_bundled: bool = False
+    setup_status: Optional[JellyfinSetupStatus] = None
+
+
+class JellyfinLogin(BaseModel):
+    username: str
+    password: str
+    port: int
 
 
 class JellyfinConfigUpdate(BaseModel):
@@ -469,16 +485,20 @@ class JellyfinTestRequest(BaseModel):
 
 
 async def _jellyfinConfigResponse(conn: asyncpg.Connection) -> JellyfinConfigResponse:
-    from app.services import jellyfin
+    from app.services import jellyfin, jellyfin_setup
 
     config = await jellyfin.loadConfig(conn)
     lastUpdate = await jellyfin.readStatus()
+    setupStatus = jellyfin_setup.readStatus() if jellyfin_setup.isBundled() else None
     return JellyfinConfigResponse(
         enabled=config["enabled"],
         url=config["url"],
         api_key_set=bool(config["apiKey"]),
         path_mappings=[JellyfinPathMapping(**mapping) for mapping in config["pathMappings"]],
         last_update=JellyfinLastUpdate(**lastUpdate) if lastUpdate and lastUpdate.get("state") else None,
+        bundled=jellyfin_setup.isBundled(),
+        linked_to_bundled=jellyfin_setup.isLinkedToBundled(config),
+        setup_status=JellyfinSetupStatus(**setupStatus) if setupStatus else None,
     )
 
 
@@ -489,6 +509,19 @@ async def get_jellyfin_config(
 ):
     """Jellyfin connection and path mapping settings. The API key is reported only as set or not set."""
     return await _jellyfinConfigResponse(conn)
+
+
+@router.get("/jellyfin/login", response_model=JellyfinLogin)
+async def get_jellyfin_login(
+    current_user: UserWithPermissions = Depends(require_permission("system.admin")),
+):
+    """Login for the bundled Jellyfin, whose admin password the bootstrap generated."""
+    from app.services import jellyfin_setup
+
+    password = jellyfin_setup.adminPassword()
+    if not password:
+        raise HTTPException(status_code=404, detail="This install does not bundle Jellyfin")
+    return JellyfinLogin(username=jellyfin_setup.ADMIN_USERNAME, password=password, port=jellyfin_setup.BUNDLED_PORT)
 
 
 @router.put("/jellyfin/config", response_model=JellyfinConfigResponse)
